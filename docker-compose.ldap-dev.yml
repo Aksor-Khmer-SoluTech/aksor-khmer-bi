@@ -1,0 +1,26 @@
+# A throwaway OpenLDAP server for local development/testing of the
+# AD/LDAP login feature (api/app/auth_ldap.py) -- NOT part of the main
+# docker-compose.yml, since a real deployment points api at an actual
+# corporate AD/LDAP server (via /api/v1/ldap-configs), not a bundled one.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ldap-dev.yml up -d openldap
+#   ./scripts/seed-ldap-dev.sh   # loads api/tests/fixtures/ldap-seed.ldif + ldap-acl.ldif
+#
+# Then point an LdapConfig at server_uri=ldap://openldap:389 (from inside
+# the api container's network) or ldap://localhost:3389 (from the host,
+# e.g. running api without Docker) -- base_dn=dc=aksor,dc=test, two
+# seeded users (jdoe/JaneSecret123, bsmith/BobSecret123), two seeded
+# groups (report-admins, report-viewers). See
+# api/tests/test_auth_ldap.py's module docstring for the full test-data
+# reference and docs/deployment.md's LDAP section for what is/isn't
+# verifiable against plain OpenLDAP vs. real AD.
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    environment:
+      LDAP_ORGANISATION: Aksor Test
+      LDAP_DOMAIN: aksor.test
+      LDAP_ADMIN_PASSWORD: adminpass123
+    ports:
+      - "3389:389"

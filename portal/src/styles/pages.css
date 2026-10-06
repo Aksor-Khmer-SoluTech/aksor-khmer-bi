@@ -1,0 +1,4060 @@
+/* Feature-specific layout: login, the template gallery/detail views, the
+   admin domain pages (users/roles/monitor/api-explorer/plugins), and the
+   personal preferences page (mode/accent). */
+
+/* ---- login: split screen -------------------------------------------------
+   A colored brand panel + a plain form panel (the Linear/Vercel/Stripe
+   auth pattern) rather than a single card floating on the page — reads as
+   a considered "front door," not a generic centered login box. */
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+}
+
+.login-brand {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 48px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.login-brand::before,
+.login-brand::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-ink) 16%, transparent);
+  pointer-events: none;
+}
+
+.login-brand::before {
+  width: 620px;
+  height: 620px;
+  right: -220px;
+  bottom: -260px;
+}
+
+.login-brand::after {
+  width: 320px;
+  height: 320px;
+  left: -130px;
+  top: -110px;
+  border-color: color-mix(in srgb, var(--highlight) 55%, transparent);
+}
+
+.login-brand-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 420px;
+}
+
+.login-brand-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-ink) 70%, transparent);
+  margin: 0 0 14px;
+}
+
+.login-brand .wordmark {
+  font-size: 2.1rem;
+  gap: 14px;
+}
+
+.login-brand .wordmark .glyph {
+  width: 46px;
+  height: 46px;
+  background: var(--accent-ink);
+  color: var(--accent);
+  box-shadow: none;
+}
+
+.login-brand-desc {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.15rem;
+  font-weight: 500;
+  line-height: 1.5;
+  margin: 20px 0 0;
+  color: color-mix(in srgb, var(--accent-ink) 88%, transparent);
+}
+
+.login-form-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  animation: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.login-heading {
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  margin: 0 0 20px;
+}
+
+.login-card button[type="submit"] {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+
+/* ---- gallery -------------------------------------------------------------- */
+
+.gallery-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+/* The type filter, view toggle, sort control and "+ Register template"
+   move as one block, not as four independent flex items -- nowrap here
+   so they can never split from each other. At any width where the row
+   as a whole doesn't fit, it's this whole group that wraps below the
+   search field (.gallery-toolbar's own flex-wrap), together, rather than
+   just the trailing button alone landing on its own orphaned line while
+   its siblings stay put -- the failure at ~110% browser zoom (a real
+   width this toolbar has to keep working at, same as an ordinary narrow
+   window). Its own margin-left:auto pins the *group* to the row's right
+   edge when there's room, same effect the button's own auto-margin used
+   to have alone. */
+.gallery-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+  margin-left: auto;
+}
+
+/* Fixed size like the segmented controls beside it (their own flex: 0 0 auto,
+   above) -- without this the button is the row's only shrinkable child, so
+   once .gallery-toolbar-actions itself has no more room, the browser shrinks
+   it by wrapping "Register template" onto a second line instead of moving
+   the whole group down a row, leaving it visibly taller than its siblings.
+   The label itself drops out below a width where even its fixed size no
+   longer fits (see responsive.css); nowrap so it never wraps while shown. */
+.btn-register {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.search-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.gallery-toolbar .search {
+  flex: 1;
+  min-width: 0;
+}
+
+.gallery-toolbar input[type="text"] {
+  margin: 0;
+}
+
+/* Explicit search button beside the field -- search is already live
+   (filters on every keystroke), so this doesn't gate anything the typing
+   itself doesn't already do; it's a familiar, discoverable affordance
+   for the "press search" habit, and Enter in the field triggers it too
+   via the wrapping <form>. Sized/shaped like the segmented view-toggle
+   buttons next to it (42px, matching the field's own height) rather than
+   .btn's default padding, so the whole toolbar row still lines up. */
+.search-submit {
+  flex: 0 0 auto;
+  height: 42px;
+  width: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---- search: icon + clear button embedded in the field itself -------
+   Scoped to .search-icon-field (Gallery's own search box), not the bare
+   .search class -- that class alone is also used by UsersPage/JobsPage/
+   RolesPage for a plain, icon-less search input, and this padding/icon
+   treatment would misalign those if it applied there too. */
+
+.search-icon-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon-field .search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.search-icon-field input[type="text"] {
+  padding-left: 36px;
+  padding-right: 34px;
+}
+
+/* Scoped to .search-icon-field, not just .search-clear on its own --
+   this button now also carries `data-tip` for its tooltip, and
+   `[data-tip] { position: relative }` (below) has the same specificity
+   as a bare `.search-clear` would, so source order (that rule comes
+   later) would otherwise win and knock this out of its floating
+   position, right-aligned inside the field. */
+.search-icon-field .search-clear {
+  position: absolute;
+  right: 6px;
+  appearance: none;
+  border: none;
+  background: var(--bg-panel);
+  color: var(--text-faint);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.search-clear:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* ---- segmented control: shared by the ext filter and grid/list toggle */
+
+/* Height pinned to match the search input / .btn next to it in the
+   toolbar (both land at ~42px given this app's font metrics) -- with
+   align-items left at the flex default (stretch), a text pill and an
+   icon-only pill would otherwise size to their own content and the
+   icon-only ones (no line-height to size against, just a 16px glyph)
+   end up visibly shorter than everything else in the row. Buttons fill
+   that height via align-items: stretch below rather than repeating the
+   number on each .segmented-btn. */
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 42px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
+.segmented-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0 10px;
+  border-radius: calc(var(--radius-sm) - 3px);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.segmented-btn:hover {
+  color: var(--text);
+}
+
+.segmented-btn.active {
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
+
+.segmented-btn.icon-only {
+  padding: 0 9px;
+}
+
+.segmented-btn .count {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-faint);
+}
+
+.segmented-btn.active .count {
+  color: var(--text-dim);
+}
+
+.segmented-btn .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.segmented-btn .dot-docx {
+  background: var(--info);
+}
+
+.segmented-btn .dot-xlsx {
+  background: var(--success);
+}
+
+.segmented-btn .dot-html {
+  background: var(--highlight);
+}
+
+/* The type filter's own scroll, not the whole page's -- at 376px of
+   content (four pills, each with a count badge) this is the first thing
+   in the toolbar to run out of room on a narrow phone. A no-op on any
+   screen wide enough to show it in full (nothing to scroll, no visible
+   scrollbar); the real fallback for anything narrower than that is
+   dropping the count badges below, this is just the last resort under
+   that. */
+.ext-filter {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* ---- icon tooltip: instant, on-brand label for icon-only controls ----
+   Swaps in for the native `title` tooltip (slow ~1s delay, browser-chrome
+   styled) on buttons that carry only a glyph -- the view-toggle and sort
+   segmented buttons, the search submit/clear buttons. Background/text
+   invert --text/--bg rather than a dedicated token, so the pill reads
+   correctly in both themes for free. No arrow, matching the flat pill
+   language already used by badges/chips/segmented buttons elsewhere. */
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translate(-50%, 4px);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 6px 9px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition-delay: 0.05s;
+  z-index: 20;
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.empty-state .link-btn {
+  display: inline-block;
+  margin-top: 10px;
+}
+
+/* Not `.grid` -- that's also Tailwind's `display: grid` utility, so any
+   element using it (the top bar / About dialog logo squares) silently
+   picked up this column rule and pushed its centered icon out of the box. */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  cursor: pointer;
+  /* Resting shadow, not just on :hover -- --bg-raised equals the page's
+     own --bg now, so a card with no shadow at rest has nothing telling
+     it apart from the page except a 1px hairline. --shadow-pop on hover
+     (stronger than the resting --shadow-card) keeps the lift feeling
+     like its own distinct state instead of the same shadow just moving
+     up 2px. */
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  opacity: 0;
+  animation: rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+.card:hover {
+  border-color: var(--accent-border);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+}
+
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.card-top-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.card-name {
+  font-family: var(--font-khmer);
+  font-size: 1.02rem;
+  font-weight: 600;
+  margin: 0;
+  word-break: break-word;
+  /* Clamped to 2 lines, with that same 2-line height always reserved
+     (below) -- the same reasoning as .card-desc just below: a name short
+     enough for one line shouldn't leave its card shorter than a neighbor
+     whose name wrapped to two, and a name long enough to wrap to three or
+     more shouldn't stretch the card (and, in a CSS Grid row, every other
+     card beside it) to fit it. */
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-height: calc(1.55em * 2);
+}
+
+.card-desc {
+  font-size: 0.83rem;
+  color: var(--text-dim);
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  /* Reserved whether or not there's a description -- the element is now
+     always rendered (empty otherwise), specifically so a card with none
+     doesn't end up shorter than its neighbors. A CSS Grid row stretches
+     same-row cards to match already, but a row with only one card (the
+     last, trailing row) has nothing to stretch against, so the card's
+     own height has to already be right. `em`-relative to this rule's own
+     font-size, not the 1.55 line-height token's root size. */
+  min-height: calc(1.55em * 2);
+}
+
+.id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 5px 4px 10px;
+  /* Sits right above the meta row's dashed divider regardless of how
+     much (or little) description precedes it -- the free space in the
+     column collects above the chip, not between the chip and .card-meta
+     (which no longer needs its own auto margin once this one exists). */
+  margin-top: auto;
+  width: fit-content;
+}
+
+.id-chip button {
+  appearance: none;
+  border: none;
+  background: var(--bg-panel);
+  color: var(--text-faint);
+  border-radius: 999px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.id-chip button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* After a copy: the button turns into a green tick, the chip takes a green
+   edge, and a small "Copied" bubble rises above it -- all for ~1.5s (useCopy). */
+.id-chip {
+  position: relative;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.id-chip.copied {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+
+.id-chip.copied button {
+  background: var(--success);
+  color: #fff;
+  animation: id-chip-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.id-chip-toast {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg-raised);
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-pop);
+  animation: id-chip-toast 1.5s ease forwards;
+}
+
+@keyframes id-chip-pop {
+  from {
+    transform: scale(0.6);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes id-chip-toast {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  12%,
+  80% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .id-chip.copied button,
+  .id-chip-toast {
+    animation: none;
+  }
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+/* Gallery's cards carry an .id-chip right before this row -- that chip
+   claims the auto margin instead (see .id-chip above), so this one steps
+   aside rather than splitting the leftover space between the two. */
+.id-chip + .card-meta {
+  margin-top: 0;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 64px 20px;
+  color: var(--text-faint);
+}
+
+.empty-state .glyph-lg {
+  font-family: var(--font-khmer);
+  font-size: 2.4rem;
+  color: var(--border-strong);
+  margin-bottom: 12px;
+}
+
+/* The "no results" counterpart to .glyph-lg -- margins add up to the
+   glyph's own line box (~60px) + margin (12px) so the message below sits
+   at the same height in both empty states. */
+.empty-state .empty-state-icon {
+  display: block;
+  margin: 10px auto 22px;
+  color: var(--border-strong);
+}
+
+/* ---- gallery: list view ---------------------------------------------- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 20px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  opacity: 0;
+  animation: rise 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+
+.list-row:hover {
+  border-color: var(--accent-border);
+  transform: translateX(2px);
+  box-shadow: var(--shadow-pop);
+}
+
+/* The name with its description underneath, so the description reads as part of
+   the item instead of floating in a column of its own. */
+.list-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Templates screen rows: a file tile, the name and description, then a two-line side
+   block (version/date over the id chip) -- every row the same height. */
+.list-row.list-row-file {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.file-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.list-row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.list-row-side .id-chip {
+  margin-top: 0;
+}
+
+.list-row-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.list-row-title h3 {
+  font-family: var(--font-khmer);
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-row-desc {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+  margin: 0;
+  min-width: 0;
+  /* Two lines, always reserved -- a row with no description (it holds a blank) is exactly
+     as tall as one with a long one, at any width. The full text is the title tooltip. */
+  height: 2.8em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.list-row .id-chip {
+  flex: 0 0 auto;
+}
+
+.list-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+
+/* ---- end-user Reports page (ReportsPage.tsx) ------------------------- */
+
+/* The search here is the toolbar's only control, so it doesn't need to
+   stretch across a wide screen like Gallery's does. */
+.search-form-compact {
+  /* Grows now (flex-grow:1, not 0, and no cap) -- when the type filter/view/
+     sort/Register group (.gallery-toolbar-actions) doesn't fit beside it and
+     wraps to its own row below, this used to stay pinned at a fixed width,
+     leaving a lopsided gap on this row's right and another, mismatched one
+     on the group's row (right-aligned by its own margin-left:auto) to the
+     left. Once the group has moved to its own row, this row is search's
+     alone, so it fills all of it, however wide that is -- .shell (the page
+     area this sits in) has no max-width of its own either. Sharing a row
+     WITH the group (the common case) still bounds it naturally: the group
+     doesn't shrink, so search only ever grows into whatever it leaves. */
+  flex: 1 1 320px;
+}
+
+/* A view-only card isn't a click target: none of .card's pointer cursor
+   or hover lift (declared above; these come later so they win). Cards the
+   user can run keep .card's own pointer + lift, plus a focus ring since
+   they're keyboard-reachable. */
+.report-card:not(.report-card-runnable) {
+  cursor: default;
+}
+
+.report-card:not(.report-card-runnable):hover {
+  transform: none;
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-card);
+}
+
+.report-card-runnable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.report-card .card-meta {
+  align-items: center;
+}
+
+/* What the viewer may do with this report. Icon + word rather than a
+   color, so it can't be mistaken for the docx/xlsx/html type badges
+   (blue/green/terracotta) sitting on the same card. */
+.access-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The Manage chip is a button (it opens the template), so it has to *look*
+   pressable next to the static View/Run labels: pointer, and on hover/focus
+   it takes the accent. Same shape and size, so nothing shifts. */
+button.access-chip {
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.access-chip-action {
+  padding-right: 5px;
+}
+
+.access-chip-go {
+  margin-left: -1px;
+  opacity: 0.55;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.access-chip-action:hover .access-chip-go {
+  opacity: 1;
+  transform: translateX(1px);
+}
+
+.access-chip-action:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.access-chip-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.empty-state .empty-state-hint {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+}
+
+/* Loading state: shaped like the real card-grid/list rows (down to the
+   dashed .card-meta divider and the pill-shaped access chip) rather than
+   a spinner, so nothing reflows when the actual reports swap in --
+   `.card`/`.list-row`'s own entrance animation (the `--i` stagger) still
+   plays underneath the shimmer. */
+.card-skeleton,
+.list-row-skeleton {
+  cursor: default;
+}
+
+.card-skeleton:hover {
+  transform: none;
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-card);
+}
+
+.list-row-skeleton:hover {
+  transform: none;
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-card);
+}
+
+.skel-card-title {
+  height: 20px;
+  width: 65%;
+}
+
+.skel-card-badge {
+  flex: 0 0 auto;
+  height: 18px;
+  width: 42px;
+  border-radius: 5px;
+}
+
+/* The real .card-desc is one <p>, line-clamped to 2 lines -- its own two
+   visual lines sit at normal line-height, not `.card`'s 12px flex `gap`.
+   Grouping the two bars in their own wrapper (one flex child of `.card`,
+   so it only costs one 12px gap, same as the real paragraph) with a gap
+   sized to approximate that line-height keeps the skeleton from reading
+   noticeably shorter than a real two-line card. */
+.skel-card-desc-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skel-card-desc {
+  height: 14px;
+  width: 92%;
+}
+
+.skel-card-desc + .skel-card-desc {
+  width: 68%;
+}
+
+.skel-card-chip {
+  height: 22px;
+  width: 60px;
+  border-radius: 999px;
+}
+
+.skel-card-date {
+  height: 11px;
+  width: 54px;
+}
+
+.skel-row-badge {
+  flex: 0 0 auto;
+  height: 18px;
+  width: 42px;
+  border-radius: 5px;
+}
+
+.skel-row-title {
+  height: 14px;
+  width: 70%;
+}
+
+.skel-row-desc {
+  height: 12px;
+  width: 80%;
+}
+
+.skel-row-chip {
+  height: 20px;
+  width: 60px;
+  border-radius: 999px;
+}
+
+.skel-row-date {
+  height: 11px;
+  width: 54px;
+}
+
+/* ---- shared skeleton kit (components/Skeletons.tsx) ----------------------
+   A handful of shimmer shapes reused across every page's own loading
+   state: a data-table's rows, a stat-row's big numbers, a MetricMeter's
+   track, a generic list of text lines (dialogs, permission groups,
+   activity feeds), and the Resources tree. Each reuses the real layout
+   class (`.data-table`, `.stat-row`, `.meter`, ...) so the skeleton sits
+   exactly where the real content will, and only the leaf bars are new. */
+
+.data-table .skel-table-cell {
+  height: 13px;
+}
+
+.skel-stat-number {
+  height: 24px;
+  width: 46px;
+  margin-bottom: 6px;
+}
+
+.skel-stat-label {
+  height: 11px;
+  width: 74px;
+}
+
+.skel-meter-label {
+  height: 11px;
+  width: 58px;
+}
+
+.skel-meter-value {
+  height: 11px;
+  width: 86px;
+}
+
+.meter .skel-meter-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+}
+
+.skel-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skel-line {
+  height: 12px;
+  width: 100%;
+}
+
+.skel-tree-row {
+  height: 13px;
+  margin: 7px 6px;
+}
+
+.skel-pill {
+  height: 24px;
+  border-radius: 6px;
+}
+
+
+/* ---- run page (RunReportPage.tsx) ------------------------------------- */
+
+/* The header's leading "back to Reports" control (see .page-header-compact
+   in elements.css). Padded so the hover chip has room, then pulled back by
+   the same amount so the arrow still lines up with the content's left edge. */
+.run-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: -8px;
+  padding: 5px 10px 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 0.84rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.run-back:hover {
+  background: var(--bg-panel);
+  color: var(--accent-strong);
+}
+
+.run-back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The page's own loading state (getRunForm still in flight): the compact
+   header's title + description as bars, then the same `.run-layout` grid
+   with a `.run-sidebar` panel of filter fields beside the preview pane --
+   so the layout doesn't jump once the real content lands. Every bar's
+   height matches the control it stands in for. */
+.run-skel-head {
+  align-items: center;
+}
+
+.run-skel-title {
+  height: 20px;
+  width: 190px;
+  margin: 3px 0; /* 26px box, like .page-title in .page-header-compact */
+}
+
+.run-skel-subtitle {
+  height: 14px;
+  width: 300px;
+  max-width: 100%;
+  margin: 4px 0; /* 22px box: a real .page-subtitle line, when the header stacks on phones */
+}
+
+.run-skel-button {
+  height: 42px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+/* Same divider/spacing as .run-sidebar-label + .run-fields-vertical. */
+.run-skel-fields {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 10px;
+  padding-top: 16px;
+}
+
+.run-skel-heading {
+  height: 11px;
+  width: 64px;
+  margin: 3px 0 7px; /* 17px label row + the sidebar's 4px gap */
+}
+
+.run-skel-field {
+  display: flow-root; /* keep the label's margins inside the field */
+  margin-bottom: 14px;
+}
+
+.run-skel-label {
+  height: 12px;
+  width: 42%;
+  margin: 4px 0 10px; /* 20px label + 6px gap, like a real field */
+}
+
+.run-skel-input {
+  height: 39px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.run-skel-preview {
+  /* Same total as .run-result-empty / the loaded viewer. */
+  height: calc(var(--run-toolbar-h) + var(--run-stage-h) + 2px);
+  border-radius: var(--radius);
+}
+
+.run-form {
+  max-width: 720px;
+}
+
+/* A report with no filter parameters has nothing to label a section
+   for or collapse -- just a single slim row (see .run-bar below), so
+   the panel's own padding shrinks to match instead of carrying the
+   same generous card padding a multi-field form needs. */
+.run-form-compact {
+  padding: 14px 20px;
+}
+
+.run-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--text-faint);
+}
+
+.run-filter-head-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: inherit;
+}
+
+/* A report *with* filters gets a sticky left column instead of a form
+   sitting above the report -- the Run button pinned at its top (see
+   .run-sidebar-submit), fields stacked single-file below (JasperReports'
+   own input-controls panel shape), beside the rendered report rather
+   than stacked on top of it. */
+.run-layout {
+  /* The result column is one fixed box -- the not-yet-run placeholder, the
+     loading shell and the finished viewer are all this tall -- so pressing
+     Run only changes what's *inside* it; nothing below ever jumps.
+     --run-toolbar-h is the viewer's toolbar row (real and skeleton). */
+  --run-toolbar-h: 45px;
+  /* Everything above the result column at desktop widths: top bar, page
+     padding, the compact header row and its gap. The page viewport
+     (stage) takes whatever screen is left below that -- so on a short
+     monitor the report fits the fold instead of hanging off the bottom --
+     with a floor so it never collapses and a cap for very tall screens. */
+  --run-above-h: 130px;
+  --run-stage-h: clamp(360px, calc(100vh - var(--run-above-h) - var(--run-toolbar-h) - 22px), 960px);
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.run-sidebar {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.run-sidebar-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+.run-sidebar-note {
+  margin: 6px 0 0;
+}
+
+.run-sidebar-label {
+  color: var(--text-faint);
+  border-top: 1px solid var(--border-soft);
+  margin-top: 10px;
+  padding-top: 16px;
+}
+
+.run-fields-vertical {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The report hasn't been run yet -- same box chrome as .report-viewer
+   itself (border/radius/bg-panel) so the column doesn't visibly change
+   shape once a real result replaces this placeholder. */
+.run-result-empty {
+  /* toolbar + stage + the viewer's own 1px top/bottom border */
+  min-height: calc(var(--run-toolbar-h) + var(--run-stage-h) + 2px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text-faint);
+}
+
+.run-result-empty svg {
+  color: var(--border-strong);
+}
+.run-result {
+  margin-top: 0;
+}
+
+/* .report-viewer's own margin-top is tuned for sitting *below* a filter
+   form (its other call sites, TemplateDetail/EmbedPage); here it's a
+   grid cell that should start flush with the sidebar beside it. */
+.run-result .report-viewer {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  /* Same total as .run-result-empty. The *whole* viewer is fixed, not just
+     the stage, so a toolbar that wraps to a second row in a narrow column
+     takes its height out of the stage rather than growing the box. */
+  height: calc(var(--run-toolbar-h) + var(--run-stage-h) + 2px);
+}
+
+.run-result .report-viewer-toolbar {
+  flex: none;
+  min-height: var(--run-toolbar-h);
+}
+
+.run-result .report-viewer-export-error {
+  flex: none;
+}
+
+/* A fixed viewport for the page, like any PDF viewer: the skeleton, a short
+   receipt and a long invoice all sit in the same frame instead of the box
+   resizing to whatever it happens to hold. */
+.run-result .report-viewer-stage {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+}
+
+.run-field-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.run-field-note-warn {
+  color: var(--danger-strong);
+}
+
+.run-field-optional {
+  color: var(--text-faint);
+  font-weight: 400;
+  font-size: 0.82em;
+}
+
+/* ---- detail view / tabs --------------------------------------------------- */
+
+.breadcrumb {
+  margin-bottom: 8px;
+}
+
+/* Template detail: a vertical tab rail on the left, a pane that takes
+   everything else on the right. The page itself is at least as tall as the
+   viewport's content area and the pane's panel stretches to fill it, so
+   each tab reads as a full workspace rather than a card floating at the
+   top of a mostly empty page. Collapses to a horizontal strip at the
+   900px breakpoint (responsive.css). */
+
+.detail-page {
+  padding: 24px 28px 64px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: 28px;
+}
+
+.vtabs {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vtab {
+  position: relative;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 11px 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.vtab svg {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  transition: color 0.15s ease;
+}
+
+.vtab:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text);
+}
+
+.vtab:hover svg {
+  color: var(--text-dim);
+}
+
+.vtab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Same tint + left accent bar as .resource-row.active, so the two
+   "where am I" cues in this app read as one system. */
+.vtab.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.vtab.active svg {
+  color: var(--accent);
+}
+
+.vtab.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.detail-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  animation: detail-pane-in 0.2s ease-out;
+}
+
+.detail-pane > .panel,
+.detail-pane > .stack {
+  flex: 1;
+}
+
+@keyframes detail-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-pane {
+    animation: none;
+  }
+}
+
+/* A panel whose main control should soak up the leftover height
+   (Try it's JSON editor) instead of leaving a gap under it. */
+.panel-fill {
+  display: flex;
+  flex-direction: column;
+}
+
+.fill-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fill-field .json-editor {
+  flex: 1;
+  min-height: 260px;
+  resize: none;
+}
+
+/* Overview: metadata beside the file/danger controls, so the whole tab is
+   visible at once instead of a long single column that pushes "Delete"
+   below the fold. Stacks at ≤1240px (responsive.css). */
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 40px;
+}
+
+.overview-file {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-soft);
+  padding-left: 40px;
+}
+
+/* Pinned to the bottom of the (full-height) column; the margin above the
+   file input keeps them apart when the column has no spare height. */
+.overview-file .danger-zone {
+  margin-top: auto;
+}
+
+
+.danger-zone {
+  border: 1px dashed color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 24px;
+}
+
+.danger-zone .field-label {
+  color: var(--danger);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.row > * {
+  flex: 1;
+  min-width: 160px;
+}
+
+.field-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.field-pill {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 9px;
+  color: var(--text-dim);
+}
+
+
+/* ---- report viewer: JasperReports/Crystal/SSRS-style paginated preview
+   (see ReportViewer.tsx) -- a toolbar bar (page nav, zoom, refresh,
+   export, print) over a neutral "light table" stage with the rendered
+   PDF page as a drop-shadowed sheet, rather than a bare <iframe>/<img>. */
+
+.report-viewer {
+  margin-top: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
+.report-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+  position: relative;
+}
+
+/* Indeterminate progress hairline on the toolbar's bottom edge while a
+   render is in flight -- reads as "working" without covering the page. */
+.report-viewer-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.report-viewer-progress::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: report-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes report-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(263%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .report-viewer-progress::before {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
+}
+
+/* Shimmer stand-ins for the toolbar controls (ReportViewerShell). */
+.report-viewer-toolbar-skel {
+  flex: 0 0 auto;
+  height: 26px;
+  margin: 0 4px;
+  border-radius: 6px;
+}
+
+.report-viewer-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.report-viewer-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-soft);
+  margin: 0 8px;
+  flex: 0 0 auto;
+}
+
+.report-viewer-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.report-viewer-btn:hover:not(:disabled) {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.report-viewer-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.report-viewer-page-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.report-viewer-page-input input {
+  width: 42px;
+  text-align: center;
+  padding: 5px 4px;
+  font-size: 0.8rem;
+}
+
+.report-viewer-menu-anchor {
+  position: relative;
+}
+
+.report-viewer-zoom-btn {
+  min-width: 68px;
+  justify-content: space-between;
+}
+
+.report-viewer-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 130px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  z-index: 20;
+  padding: 4px;
+  animation: rise 0.12s ease;
+}
+
+.report-viewer-menu-right {
+  left: auto;
+  right: 0;
+}
+
+.report-viewer-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.report-viewer-menu-item:hover {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.report-viewer-menu-item.active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+/* A split report (its table is over the server's per-file row limit) is
+   several files: the preview shows one, this strip switches between them,
+   and says Export gets them all. Sits directly under the toolbar, tinted so
+   it reads as part of the viewer's chrome, not part of the page. */
+.report-viewer-parts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 6px 12px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent-border);
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.report-viewer-parts-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.report-viewer-parts-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.report-viewer-parts select {
+  width: auto;
+  padding: 3px 26px 3px 8px;
+  font-size: 0.8rem;
+  background-position: right 7px center;
+  background-size: 13px 13px;
+}
+
+.report-viewer-parts-hint {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+.report-viewer-menu-note {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+/* Batch render: what the run will cost, under the JSON box. */
+.batch-estimate {
+  margin: -6px 0 16px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.batch-estimate strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.batch-estimate-over {
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}
+
+.batch-estimate-over strong {
+  color: inherit;
+}
+
+.report-viewer-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+.report-viewer-export-error {
+  margin: 10px 10px 0;
+}
+
+.report-viewer-stage {
+  min-height: 360px;
+  max-height: 74vh;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 28px;
+  /* Anchors the skeleton while it dissolves over the page. */
+  position: relative;
+}
+
+/* No entrance animation of its own: the first page is revealed by the
+   skeleton dissolving off it (.report-viewer-skeleton.is-leaving), and a
+   re-run repaints this same canvas -- a fade-in here would only dip the
+   page to nothing in between. */
+.report-viewer-canvas {
+  display: block;
+  background: #fff;
+  box-shadow: var(--shadow-pop);
+  border-radius: 2px;
+  transition: opacity 0.22s ease;
+}
+
+/* The previous run's page while the next one renders. */
+.report-viewer-canvas.is-stale {
+  opacity: 0.45;
+}
+
+/* ---- report viewer: loading skeleton (ReportSkeleton.tsx) -------------
+   Shown both by ReportViewer itself (first PDF still rendering, inside
+   its own .report-viewer-stage) and, wrapped in that same class, by
+   RunReportPage's Suspense fallback (the ReportViewer chunk still
+   loading) -- shaped like the generic document it's standing in for
+   (title, a few lines, a table, a total) instead of a bare spinner. */
+
+.report-viewer-skeleton {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+/* The page has arrived: lift the skeleton out of the flow (so the real
+   page takes its place under it) and dissolve it away. The short delay
+   gives pdf.js a moment to paint the first frame beneath. */
+.report-viewer-skeleton.is-leaving {
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  right: 28px;
+  width: auto;
+  pointer-events: none;
+  animation: skel-dissolve 0.3s ease-out 0.08s both;
+}
+
+@keyframes skel-dissolve {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .report-viewer-skeleton.is-leaving {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.skel-page {
+  width: min(620px, 100%);
+  aspect-ratio: 0.72;
+  background: #fff;
+  box-shadow: var(--shadow-pop);
+  border-radius: 2px;
+  padding: 15% 11%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* This page is deliberately always-white paper (matching
+   .report-viewer-canvas's own fixed #fff), regardless of the app's
+   light/dark mode -- so its placeholder bars are fixed light-gray too,
+   not the theme-mapped --bg-panel .skel normally uses (which turns
+   near-black on dark mode and would read as broken text on white paper). */
+.skel-page .skel {
+  background: #e4e7ee;
+  background-image: linear-gradient(100deg, transparent 34%, #eef1f6 50%, transparent 66%);
+}
+
+.skel-doc-title {
+  height: 16px;
+  width: 46%;
+  margin: 0 auto 8px;
+}
+
+.skel-doc-line {
+  height: 9px;
+}
+
+.skel-doc-gap {
+  height: 8px;
+}
+
+.skel-doc-table {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.skel-doc-row {
+  height: 15px;
+}
+
+.skel-doc-row-head {
+  opacity: 0.65;
+}
+
+.skel-doc-total {
+  height: 10px;
+  width: 32%;
+  margin-left: auto;
+}
+
+/* ---- report viewer drawer: the Preview tab's "Render preview" opens the
+   viewer in a dialog rather than inline in the page -- see
+   TemplateDetail.tsx. Whether it slides in from the right/left edge
+   (full viewport height) or pops up as a centered modal is a Preferences
+   tab choice (see PREVIEW_LAYOUTS in preferences.ts); each variant gets
+   its own entrance animation to match how it actually opens. */
+
+.report-viewer-drawer-right {
+  animation: drawer-in-right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes drawer-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.report-viewer-drawer-left {
+  animation: drawer-in-left 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes drawer-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.report-viewer-drawer-center {
+  animation: drawer-in-center 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes drawer-in-center {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The header's maximize toggle grows/shrinks the dialog between its
+   layout size and the whole viewport -- animate size and corners rather
+   than snapping. Nothing else differs between the two states (anchor,
+   entrance animation), so these three are all that needs to move. */
+.report-viewer-drawer {
+  transition:
+    width 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    border-radius 0.24s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .report-viewer-drawer {
+    transition: none;
+  }
+}
+
+.report-viewer-drawer .report-viewer {
+  height: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-viewer-drawer .report-viewer-stage {
+  flex: 1;
+  max-height: none;
+}
+
+/* ---- embed page: fills whatever <iframe> it's dropped into, no card
+   chrome/margins around it (see EmbedPage.tsx) -- App.tsx mounts this in
+   place of the entire normal app shell (no TopBar/AppSidebar/bg-texture)
+   when the route is #/embed/<id>. */
+
+.embed-page,
+.embed-page-status {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.embed-page-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--text-faint);
+  font-size: 0.85rem;
+  background: var(--bg);
+}
+
+.embed-page .report-viewer {
+  height: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.embed-page .report-viewer-stage {
+  flex: 1;
+  max-height: none;
+}
+
+
+/* ---- data table ---------------------------------------------------------- */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.data-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.data-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle;
+}
+
+.data-table tbody tr:not(.detail-row) {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+/* --bg-raised is the page's own white, so it can't tell a hovered row from
+   any other -- a light gray wash does. */
+.data-table tbody tr:not(.detail-row):hover {
+  background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+}
+
+/* An expanded row and the panel under it are one connected block, so it
+   doesn't read as two more rows of the list: the row takes the accent tint
+   with an accent bar down its left edge; the panel below repeats that bar
+   over a fainter tint (the row is the panel's header), and the block is
+   closed off by an accent-toned rule. Form fields inside are white, so they
+   stand out from the tinted panel instead of dissolving into it. */
+.data-table tr.active-row,
+.data-table tbody tr.active-row:hover {
+  background: var(--accent-soft);
+}
+
+.data-table tr.active-row td {
+  border-bottom-color: transparent;
+  box-shadow: inset 0 1px 0 var(--accent-border);
+}
+
+.data-table tr.active-row td:first-child {
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 0 1px 0 var(--accent-border);
+  font-weight: 600;
+}
+
+.data-table tr.detail-row {
+  cursor: default;
+}
+
+.data-table tr.detail-row td {
+  padding: 0;
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+  border-bottom: 1px solid var(--accent-border);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 0 8px 7px -8px color-mix(in srgb, var(--text) 16%, transparent);
+}
+
+.data-table tr.detail-row .tabs {
+  border-bottom-color: var(--border);
+}
+
+.admin-detail {
+  padding: 18px 20px 20px;
+}
+
+
+.grant-block {
+  padding-top: 4px;
+}
+
+.grant-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border-soft);
+}
+
+.grant-row > span:first-child {
+  min-width: 160px;
+}
+
+.grant-row {
+  flex-wrap: wrap;
+}
+
+/* A grant's parameter limits sit on their own line under the row. */
+.grant-row-limits {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.limit-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.grant-limits {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+
+.grant-limits-hint {
+  margin: 0 0 10px;
+}
+
+.grant-limit {
+  margin: 0 0 10px;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+/* Base `label` carries a 14px bottom margin meant for stacked form fields. */
+.grant-limit .checkbox-label {
+  margin-bottom: 0;
+}
+
+.grant-limit legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.grant-limit-options {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 6px 0 0 4px;
+}
+
+/* ---- Parameters / Data source tabs (ParametersTab.tsx, DataSourceTab.tsx) ----
+   The rules below are the shared base; the layout that is specific to a
+   parameter card, a request editor and the date field is in data-config.css. */
+
+.data-config-section {
+  margin-bottom: 26px;
+}
+
+.data-config-heading {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.data-config-hint {
+  margin: 0 0 12px;
+}
+
+.data-config-card {
+  margin-bottom: 12px;
+  padding: 14px 16px 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+
+.data-config-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0 14px;
+  align-items: end;
+}
+
+/* Rows inside a card top-align (a label above a control, a control with a
+   hint under it); each kind of row sets its own columns in data-config.css. */
+.data-config-card .data-config-row {
+  align-items: start;
+}
+
+.data-config-row-group {
+  display: flex;
+  gap: 14px;
+  align-items: end;
+}
+
+/* Sits level with the inputs, below the 22px label line above them. */
+.data-config-remove {
+  grid-column: -1;
+  margin-top: 22px;
+}
+
+.data-config-required {
+  margin-bottom: 10px;
+}
+
+/* forms.css only gives textarea.mono-input the mono face and a 180px floor;
+   these are short single-purpose fields, so size them by their rows. */
+.data-config input.mono-input {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.data-config textarea.mono-input {
+  min-height: 0;
+}
+
+.data-config-url-row {
+  grid-template-columns: 110px 1fr;
+}
+
+.data-config-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.data-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.data-config-saved {
+  margin: 0;
+  padding: 6px 10px;
+}
+
+/* ---- protected terms (ProtectedTermsTab.tsx, admin/protected-terms/) -----
+   The report tab reuses .data-config-section/-heading/-hint/-actions/-saved
+   above for its layout; everything below is specific to term lists. Terms
+   are Khmer as often as not, so anything that shows one uses --font-khmer
+   with a line-height tall enough for stacked subscripts. */
+
+.terms-field {
+  margin-bottom: 14px;
+}
+
+.terms-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+/* The editor: a bordered box that behaves like a text field (click anywhere
+   to type; the same focus ring) but holds the terms as pills, with the
+   input flowing inline after the last one. Tall enough to look like a place
+   to put things when empty, scrolling rather than growing without bound. */
+.terms-box {
+  min-height: 150px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  cursor: text;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.terms-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.terms-box-readonly {
+  background: var(--bg-panel);
+  cursor: default;
+}
+
+.terms-chips-editing {
+  align-items: center;
+  max-height: none;
+  overflow: visible;
+}
+
+.terms-chip-editable {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 3px 0 3px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.terms-chip-editable:hover {
+  border-color: var(--border-strong);
+}
+
+.terms-chip-text {
+  padding: 1px 6px 1px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: text;
+}
+
+.terms-chip-x {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.terms-chip-x:hover,
+.terms-chip-x:focus-visible {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}
+
+.terms-chip-text:focus-visible,
+.terms-chip-x:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* First Backspace on an empty box marks the last pill; the next one removes it. */
+.terms-chip.is-armed {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* A pill being corrected in place. */
+.terms-chip-editing {
+  padding: 0;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* The two inputs live inside the box, so they drop the global field chrome
+   (border, padding, focus ring) -- the box itself carries the focus ring. */
+.terms-add input,
+.terms-chip-input {
+  display: block;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-khmer);
+  outline: none;
+  box-shadow: none;
+}
+
+.terms-add input:focus,
+.terms-chip-input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.terms-add {
+  flex: 1 1 150px;
+  min-width: 150px;
+}
+
+.terms-add input {
+  width: 100%;
+  padding: 3px 4px;
+  font-size: 0.92rem;
+  line-height: 1.75;
+}
+
+.terms-chip-input {
+  min-width: 4ch;
+  padding: 1px 10px;
+  font-size: 0.86rem;
+  line-height: 1.75;
+}
+
+/* Feedback on the pill that was just added (accent wash) or that a repeated
+   entry collided with (a small nudge). */
+@keyframes terms-pulse-new {
+  from {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+}
+
+@keyframes terms-pulse-dupe {
+  0%,
+  100% {
+    transform: none;
+  }
+  30% {
+    transform: scale(1.08);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  60% {
+    transform: scale(0.98);
+  }
+}
+
+.terms-pulse-new {
+  animation: terms-pulse-new 1s ease-out;
+}
+
+.terms-pulse-dupe {
+  animation: terms-pulse-dupe 0.7s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terms-pulse-dupe {
+    animation-name: terms-pulse-new;
+  }
+}
+
+/* "Never protect" pills read as quieter and dashed, like the same terms do
+   in the read-only lists. */
+.terms-field-exclude .terms-chip {
+  border-style: dashed;
+  color: var(--text-dim);
+}
+
+.terms-field-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 5px;
+}
+
+.terms-field-foot .field-hint {
+  margin: 0;
+}
+
+.terms-notice {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.terms-count {
+  flex: none;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+kbd {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+/* "Protect" and "Never protect" side by side, stacking when the pane is narrow. */
+.terms-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0 18px;
+}
+
+.terms-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-faint);
+}
+
+.terms-empty a {
+  color: var(--accent-strong);
+}
+
+.terms-floor-note {
+  margin: -6px 0 20px;
+}
+
+.terms-stale {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+}
+
+/* -- the report tab's list of shared sets to select from -- */
+
+.terms-set-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.terms-set {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.terms-set.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.terms-set-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px 9px 12px;
+}
+
+.terms-set-check {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.terms-set-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.terms-set-desc {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terms-set-counts {
+  display: flex;
+  gap: 12px;
+  flex: none;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.terms-set-chevron {
+  transition: transform 0.15s ease;
+}
+
+.terms-set-chevron.open {
+  transform: rotate(90deg);
+}
+
+.terms-set-body {
+  padding: 2px 14px 14px 36px;
+}
+
+/* -- terms shown read-only, as tags -- */
+
+.terms-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.terms-chip {
+  padding: 1px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-khmer);
+  font-size: 0.86rem;
+  line-height: 1.75;
+}
+
+/* Terms handed *back* to the normal word-breaker: same shape, dashed and
+   quieter, so "protected" and "excluded" never read as the same thing. */
+.terms-chips-muted .terms-chip {
+  border-style: dashed;
+  color: var(--text-dim);
+}
+
+.terms-chip-label {
+  margin: 12px 0 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.terms-chip-label:first-child {
+  margin-top: 0;
+}
+
+/* -- Admin page -- */
+
+.terms-floor {
+  margin-bottom: 22px;
+}
+
+.terms-floor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.terms-floor-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.terms-floor-sub {
+  margin: 0;
+  max-width: 72ch;
+}
+
+.terms-floor-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 14px 0 0;
+  font-size: 0.85rem;
+}
+
+.terms-floor-body {
+  margin-top: 14px;
+}
+
+.terms-floor-sources {
+  display: grid;
+  gap: 4px;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.78rem;
+}
+
+.terms-floor-sources > div {
+  display: flex;
+  gap: 12px;
+}
+
+.terms-floor-sources dt {
+  flex: 0 0 170px;
+  color: var(--text-faint);
+}
+
+.terms-floor-sources dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.terms-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.terms-name-desc {
+  font-size: 0.78rem;
+}
+
+.terms-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* The create/edit dialog: two term lists need more room than the default
+   480px modal. Height/scroll on overflow is every dialog's own
+   (dialog.modal, styles/elements.css) -- this only needs the extra width. */
+dialog.modal.modal-wide {
+  max-width: 680px;
+}
+
+/* The New API client dialog's own, wider tier -- .modal-wide's 680px was
+   fitting its two columns (.client-dialog-grid) at barely 305px each,
+   forcing every report description onto 3-4 cramped lines. A dedicated
+   class rather than just widening .modal-wide itself, so Secrets/Protected
+   Terms (fine at 680px) aren't affected by a change only this dialog needed. */
+dialog.modal.client-dialog {
+  max-width: 880px;
+}
+
+/* The connection dialog's own wider tier, once Authentication moved into its
+   own column (.conn-dialog-grid) -- .modal-wide's 680px left too little room
+   per side for the credential picker's own two fields. */
+dialog.modal.conn-dialog-wide {
+  max-width: 920px;
+}
+
+/* A field shown but not editable (a fixed name, a fixed organization, a
+   term set opened by someone who may only look): quieter, so it doesn't
+   read as an editable field that just happens to reject input. Not scoped
+   to .modal-wide -- every dialog with a readOnly field wants this. */
+input[readonly],
+textarea[readonly] {
+  background: var(--bg-panel);
+  cursor: default;
+}
+
+.terms-dialog-head {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 14px;
+}
+
+@media (max-width: 640px) {
+  .terms-set-row {
+    flex-wrap: wrap;
+  }
+  .terms-set-counts {
+    order: 3;
+    flex-basis: 100%;
+    padding-left: 26px;
+  }
+  .terms-floor-head {
+    flex-direction: column;
+  }
+  .terms-floor-sources > div {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+.grant-form {
+  margin-top: 10px;
+  align-items: center;
+}
+
+.grant-form select,
+.grant-form input {
+  margin: 0;
+}
+
+
+/* ---- permission matrix ---------------------------------------------------- */
+
+.permission-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.permission-group-title {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+
+.permission-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.permission-row input {
+  margin-top: 3px;
+  width: auto;
+}
+
+.permission-desc {
+  display: block;
+  font-size: 0.75rem;
+}
+
+/* ---- API clients ----------------------------------------------------------- */
+
+/* The whole report-grant widget (ReportPicker.tsx): a search/select-all toolbar
+   above the scrollable checklist, a running count below -- so the fixed-height
+   list below stays usable as the number of report templates grows, instead of
+   turning into a long, unsearchable scroll. */
+.report-picker {
+  margin-bottom: 14px;
+}
+
+.report-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.report-picker-toolbar .search {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.report-picker-toolbar .search input {
+  margin: 0;
+}
+
+.report-picker-toolbar .link-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.report-picker-toolbar .link-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.report-picker-count {
+  margin: 6px 0 0;
+}
+
+.report-pick {
+  /* A fixed height, not a cap -- filtering the search box above (ReportPicker.tsx)
+     can take the visible list from 6 rows down to 1 or 0 in a keystroke; with
+     only a max-height the box (and, in a modal, the whole dialog around it)
+     would shrink to fit right along with it, an unsettling jump every time a
+     letter is typed rather than the row count just quietly changing inside a
+     steady box. Taller in the two-column client dialog
+     (.client-dialog-reports below sets its own, larger height) -- this is the
+     plain fallback for wherever the picker sits in a single, narrower column,
+     e.g. the existing-client Reports tab. */
+  height: 240px;
+  overflow-y: auto;
+  padding: 6px 10px;
+  margin-bottom: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.report-pick-empty {
+  padding: 10px 2px;
+  font-size: 0.82rem;
+}
+
+/* Inside a form, the generic `label` and `label > span` margins would space these rows out. */
+.report-pick .permission-row,
+.report-pick .permission-row > span {
+  margin-bottom: 0;
+}
+
+/* The format badge sits between the checkbox and the (two-line) name/code --
+   nudged down to sit level with the name's first line, the same way the
+   checkbox itself is (see .permission-row input's own margin-top below). */
+.report-pick .permission-row .badge {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.report-pick-name {
+  min-width: 0;
+}
+
+/* The report's own description, shown in full (no line-clamp, unlike the
+   gallery/reports cards' .card-desc) -- this is what decides whether to
+   grant a client access to it, so it isn't worth hiding behind a hover or a
+   second click. Between the name and the mono id/code line. */
+.report-pick-summary {
+  display: block;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+/* ---- New API client: two columns -- the fields on the left, the report
+   grant on the right, so a long report list has real vertical room instead
+   of being squeezed below four stacked fields. Single column below 720px,
+   where there's no longer room to do that comfortably. */
+.client-dialog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 24px;
+  align-items: start;
+}
+
+.client-dialog-fields .row:last-of-type,
+.client-dialog-fields > label:last-of-type {
+  margin-bottom: 0;
+}
+
+.client-dialog-reports {
+  display: flex;
+  flex-direction: column;
+  /* .field-block's default bottom margin would misalign this column's
+     bottom edge against the left column's -- the grid's own row gap (none,
+     single row) and the shared .dialog-actions margin-top handle the space
+     below both columns instead. */
+  margin-bottom: 0;
+}
+
+.client-dialog-reports .report-pick {
+  /* The extra room this column has over the plain single-column picker
+     (.report-pick's own default) -- roughly matches the left column's
+     natural height (name/id row + a 3-line description + organization). */
+  height: 368px;
+}
+
+@media (max-width: 720px) {
+  .client-dialog-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .client-dialog-reports {
+    margin-top: 4px;
+  }
+}
+
+/* New/Edit connection: fields on the left, Authentication on the right --
+   the same split as the API client dialog above (.client-dialog-grid),
+   so the credential picker isn't squeezed under five stacked fields.
+   Single column below 720px. */
+.conn-dialog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 24px;
+  align-items: start;
+}
+
+.conn-dialog-fields > label:last-of-type {
+  margin-bottom: 0;
+}
+
+.conn-dialog-auth {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 720px) {
+  .conn-dialog-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .conn-dialog-auth {
+    margin-top: 4px;
+  }
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.client-credential {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr auto;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 10px;
+}
+
+/* CopyButton floats top-right of a code block by default; here it sits beside its value. */
+.client-credential .copy-btn {
+  position: static;
+}
+
+/* Users > detail > Profile: the "Password  [change required]  Reset password…" line.
+   Not a `.row` -- that stretches every child to fill the line, which turns the
+   status badge into a wide bar. */
+.password-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.password-status .field-label {
+  margin: 0;
+}
+
+/* A password input with its Generate / Show / copy controls on the same line. */
+.password-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.password-field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.password-field .copy-btn {
+  position: static;
+}
+
+.client-credential-label {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+.client-credential-value {
+  font-size: 0.82rem;
+  padding: 7px 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* ---- monitor: meters ------------------------------------------------------ */
+
+.meter-row + .meter-row {
+  margin-top: 14px;
+}
+
+.meter-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+}
+
+.meter-label {
+  color: var(--text-dim);
+  text-transform: capitalize;
+}
+
+.meter-value {
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meter-state {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.meter-state-good {
+  color: var(--meter-good);
+  background: color-mix(in srgb, var(--meter-good) 16%, transparent);
+}
+
+.meter-state-warning {
+  color: var(--meter-warning);
+  background: color-mix(in srgb, var(--meter-warning) 18%, transparent);
+}
+
+.meter-state-serious {
+  color: var(--meter-serious);
+  background: color-mix(in srgb, var(--meter-serious) 18%, transparent);
+}
+
+.meter-state-critical {
+  color: var(--meter-critical);
+  background: color-mix(in srgb, var(--meter-critical) 18%, transparent);
+}
+
+.meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.meter-fill-good {
+  background: var(--meter-good);
+}
+
+.meter-fill-warning {
+  background: var(--meter-warning);
+}
+
+.meter-fill-serious {
+  background: var(--meter-serious);
+}
+
+.meter-fill-critical {
+  background: var(--meter-critical);
+}
+
+.core-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 40px;
+  margin-top: 14px;
+}
+
+.core-bar-track {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  background: var(--bg-input);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 4px;
+}
+
+.core-bar-fill {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  transition: height 0.4s ease;
+}
+
+.core-bar-fill-good {
+  background: var(--meter-good);
+}
+
+.core-bar-fill-warning {
+  background: var(--meter-warning);
+}
+
+.core-bar-fill-serious {
+  background: var(--meter-serious);
+}
+
+.core-bar-fill-critical {
+  background: var(--meter-critical);
+}
+
+.stat-row {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.stat-number {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---- api explorer ---------------------------------------------------------- */
+
+.api-explorer-frame {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  height: calc(100vh - 220px);
+  min-height: 480px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-card);
+}
+
+.api-explorer-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+/* ---- plugins placeholder ---------------------------------------------------- */
+
+.plugins-empty {
+  padding: 72px 20px;
+}
+
+.plugins-empty-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  margin-bottom: 14px;
+}
+
+/* ---- preferences: mode + accent ------------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.segmented-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 7px 18px;
+  border-radius: calc(var(--radius-sm) - 3px);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.segmented-btn:hover {
+  color: var(--text);
+}
+
+.segmented-btn.active {
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
+
+.accent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+}
+
+.accent-card {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: var(--radius);
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.accent-card:hover {
+  border-color: var(--border-strong);
+}
+
+.accent-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.accent-card-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.accent-card-radio {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.accent-card.selected .accent-card-radio {
+  border-color: var(--accent);
+}
+
+.accent-card.selected .accent-card-radio::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* A real miniature of the app chrome, scoped to its own data-theme/
+   data-accent (see SettingsPreferencesPanel.tsx) so it always previews true
+   regardless of the page's own current theme. */
+.accent-preview {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 84px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.accent-preview-topbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 16px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.accent-preview-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.accent-preview-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.accent-preview-body {
+  display: flex;
+  flex: 1;
+}
+
+.accent-preview-sidebar {
+  width: 18px;
+  flex: 0 0 auto;
+  background: var(--bg-chrome);
+  border-right: 1px solid var(--border-soft);
+}
+
+.accent-preview-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+}
+
+.accent-preview-line {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.accent-preview-btn {
+  margin-top: auto;
+  width: 30px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+/* Report preview layout picker (see PreviewLayoutPreview in
+   SettingsPreferencesPanel.tsx) -- a mini "browser window" whose shaded
+   panel slides/scales into place on hover from whichever edge that
+   option opens the real drawer from, so the choice previews as motion
+   rather than a static label. */
+.layout-preview {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 84px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.layout-preview-page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.layout-preview-line {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  opacity: 0.7;
+}
+
+.layout-preview-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  box-shadow: var(--shadow-pop);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+}
+
+.layout-preview-panel-bar {
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, white 70%, transparent);
+}
+
+/* Rounded on the inner edge only, mirroring the real drawers, which sit
+   flush against the screen edge with square corners on that side. */
+.layout-preview-right .layout-preview-panel {
+  right: 0;
+  border-radius: 9px 0 0 9px;
+  transform: translateX(80%);
+}
+
+.layout-preview-left .layout-preview-panel {
+  left: 0;
+  border-radius: 0 9px 9px 0;
+  transform: translateX(-80%);
+}
+
+/* A near-full modal: a slim, even margin of page left showing on every
+   side, like the real one. */
+.layout-preview-center .layout-preview-panel {
+  inset: 6px;
+  width: auto;
+  border-radius: 9px;
+  opacity: 0;
+  transform: translateY(6px) scale(0.92);
+}
+
+.accent-card:hover .layout-preview-right .layout-preview-panel,
+.accent-card:hover .layout-preview-left .layout-preview-panel {
+  transform: translateX(0);
+}
+
+.accent-card:hover .layout-preview-center .layout-preview-panel {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- resources: folder tree + contents ------------------------------------
+   Deliberately not a traditional file-explorer look (no dotted guide
+   lines, no plus/minus boxes) — indentation is padding only, row actions
+   stay hidden until hovered, the active/drag-over state reads via a tint
+   + left accent bar rather than a heavy border, and expand/collapse
+   reuses the same chevron-flip the sidebar's own collapse toggle uses. */
+
+.resources-page {
+  padding: 24px 28px 64px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.resources-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 20px;
+}
+
+.resource-tree {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  /* Sits directly on .resources-page's own background (--bg, same white
+     as --bg-raised now) with no wrapping .panel around it -- needs its
+     own resting shadow for the same reason .panel/.card do. */
+  box-shadow: var(--shadow-card);
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.resource-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 4px;
+}
+
+.resource-tree-children {
+  display: flex;
+  flex-direction: column;
+}
+
+.resource-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  user-select: none;
+}
+
+/* Hover is a quiet "you're pointing here" cue, meant to read as
+   unambiguously weaker than active (see the tree's row list, where both
+   are often on screen together) — but --bg-panel turned out too close
+   to this panel's own --bg-raised backdrop to have any visible edge at
+   all: with almost no contrast, the rounded rect just blends into the
+   background and reads as a vague, oversized smear rather than a
+   crisply-bounded row the same size as everything else. A neutral wash
+   mixed from --text instead of another near-white token keeps reliable
+   contrast against --bg-raised regardless of the exact cream tones. */
+.resource-row:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
+.resource-row.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.resource-row.active:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.resource-row.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.resource-row.drop-target {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.resource-row svg {
+  flex: 0 0 auto;
+}
+
+/* Drag-initiation lives on this handle alone, not the whole row — a
+   PointerSensor with listeners on the entire row swallows clicks meant
+   for the chevron/menu/rename input before they fire (a well-known
+   dnd-kit gotcha), which is exactly what made a freshly-non-empty
+   folder's expand chevron unclickable after a drop. Reveals via opacity
+   (not display) so it doesn't shift the chevron/name over when it
+   appears on hover. */
+.resource-row-grip {
+  appearance: none;
+  background: none;
+  border: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  cursor: grab;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  touch-action: none;
+}
+
+.resource-row:hover .resource-row-grip,
+.resource-row-grip:focus-visible {
+  opacity: 1;
+}
+
+.resource-row-grip:active {
+  cursor: grabbing;
+}
+
+.tree-chevron {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px;
+  display: inline-flex;
+  color: var(--text-faint);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.resource-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+}
+
+.resource-row-rename {
+  flex: 1;
+  font: inherit;
+  font-family: var(--font-display);
+  background: var(--bg-input);
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  color: var(--text);
+}
+
+.resource-row-new {
+  color: var(--text-faint);
+}
+
+.resource-row-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/* Revealed via opacity, not display -- the same reasoning as the grip
+   handle above: toggling `display: none` -> `inline-flex` on hover adds
+   a new box into the row's flex layout that wasn't there a moment ago,
+   and if its intrinsic height (icon + padding) is taller than whatever
+   was previously tallest in the row, the *row itself* grows on hover
+   since nothing here has a fixed height. Keeping it always in the
+   layout at a constant size, just invisible at rest, keeps every row
+   exactly the same height whether hovered, active, or neither. */
+.resource-row-menu-trigger {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.resource-row:hover .resource-row-menu-trigger,
+.resource-row-menu-trigger:focus-visible,
+.resource-row-menu-trigger[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.resource-row-menu-trigger:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+
+.resource-row-panel {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  width: 190px;
+}
+
+/* ---- resources: content pane ---------------------------------------------- */
+
+.resource-content {
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.resource-content-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.resource-content-title {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  margin: 0;
+}
+
+.resource-card {
+  cursor: grab;
+  touch-action: none;
+}
+
+.resource-card:active {
+  cursor: grabbing;
+}
+
+.resource-thumb {
+  display: grid;
+  place-items: center;
+  height: 120px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.resource-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.folder-grants-modal {
+  max-width: 460px;
+}
+
+/* The floating copy DragOverlay renders, following the pointer — this is
+   what actually makes a drag look smooth: it's portal-rendered outside
+   any scroll container (the tree pane clips with overflow-y: auto, so a
+   plain CSS-transform-in-place drag would get visually cut off at the
+   pane's edge), and unlike leaving the original row/card to transform
+   itself, this one copy is unaffected by whatever layout the drop target
+   underneath it is doing. */
+.resource-drag-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  color: var(--text);
+  cursor: grabbing;
+}
+
+
+/* Change log / audit trail (HistoryTab.tsx, admin/audit/AuditLogPage.tsx):
+   entries settle onto the spine one after another, each --i step 30ms behind
+   the last (capped in the component at 12, so a long log finishes in well
+   under half a second). `both` holds the hidden state through the delay. */
+.hist-enter {
+  animation: hist-in 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+
+@keyframes hist-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hist-enter {
+    animation: none;
+  }
+}
+
+/* ---- a report that failed to render (RenderErrorPanel.tsx) ------------------------------ */
+
+.render-error {
+  width: min(100%, 880px);
+  margin: 20px auto;
+  padding: 16px 20px 14px;
+  border: 1px solid var(--danger-soft);
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-card);
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  text-align: left;
+}
+
+.render-error-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--danger-strong);
+}
+
+.render-error-head > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.render-error-head > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.render-error-head strong {
+  display: block;
+  font-size: 1rem;
+  color: var(--danger-strong);
+}
+
+.render-error-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.render-error-copy {
+  flex: 0 0 auto;
+}
+
+.render-error-message {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.render-error-type {
+  font-weight: 700;
+}
+
+.render-error-line {
+  opacity: 0.8;
+}
+
+.render-error-plain {
+  margin: 10px 0 0;
+  color: var(--text);
+}
+
+.render-error-hint {
+  margin: 12px 0 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.render-error-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.render-error-context {
+  margin-top: 14px;
+}
+
+.render-error-context ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.render-error-context li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 12px;
+  background: var(--bg-input);
+}
+
+.render-error-context li + li {
+  border-top: 1px solid var(--border-soft);
+}
+
+.render-error-context li.hit {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.render-error-ln {
+  flex: 0 0 2.2em;
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.render-error-context code {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: none;
+  color: inherit;
+}
+
+.render-error-here {
+  flex: 0 0 auto;
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.render-error-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 14px 0 0;
+}
+
+.render-error-counts .render-error-label {
+  margin: 0;
+}
+
+.render-error-count {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.render-error-count.off {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+  font-weight: 600;
+}
+
+.render-error-trace {
+  margin-top: 14px;
+}
+
+.render-error-trace summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.render-error-trace pre {
+  max-height: 260px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.render-error-ref {
+  margin: 12px 0 0;
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.render-error-guide {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+}
+
+/* ---- "always visible" scrollbars (Settings > Preferences > Report scrollbars) ------------------ */
+
+/* Giving a scroll container a styled ::-webkit-scrollbar switches it from the system's overlay bar (which
+   macOS fades out) to a classic one that stays put. Chrome, Edge and Safari honour it; the standard
+   properties below cover browsers without ::-webkit-scrollbar (Firefox follows the OS on macOS regardless). */
+.scrollbars-always {
+  scrollbar-gutter: stable;
+}
+
+.scrollbars-always::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.scrollbars-always::-webkit-scrollbar-track,
+.scrollbars-always::-webkit-scrollbar-corner {
+  background: var(--bg-input);
+}
+
+.scrollbars-always::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  min-width: 44px;
+  border: 3px solid var(--bg-input);
+  border-radius: 999px;
+  background: var(--text-faint);
+}
+
+.scrollbars-always::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .scrollbars-always {
+    scrollbar-width: auto;
+    scrollbar-color: var(--text-faint) var(--bg-input);
+  }
+}
+
+.scrollbar-pref {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 20px;
+  align-items: start;
+}
+
+.scrollbar-sample {
+  height: 128px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.scrollbar-sample-page {
+  padding: 12px 14px;
+  background: #fff;
+  box-shadow: var(--shadow-card);
+  border-radius: 2px;
+}
+
+.scrollbar-sample-page p {
+  height: 7px;
+  margin: 0 0 10px;
+  border-radius: 4px;
+  background: #d8dbe3;
+}
+
+@media (max-width: 640px) {
+  .scrollbar-pref {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The hint under the driver-file dropzone: .field-hint's -8px pull assumes a label's margin above it. */
+.jdbc-file-hint {
+  margin: 8px 0 14px;
+}
+
+.badge-jar {
+  background: var(--highlight-soft);
+  color: var(--highlight-strong);
+}
+
+/* ---- starred reports ---------------------------------------------------- */
+
+.star-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.star-btn:hover {
+  background: var(--bg-chrome-hover, rgba(0, 0, 0, 0.05));
+  color: var(--text);
+}
+
+.star-btn.starred {
+  color: #d99a1c;
+}

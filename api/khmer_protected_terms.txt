@@ -1,0 +1,37 @@
+# Project-scoped Khmer protected-terms file for this API.
+#
+# One term per line, blank lines and '#' comments ignored (a .json file
+# with the same content -- an array of strings, or {"terms": [...]} -- is
+# also supported; see aksor_khmer_ocr_segmenter.protected_terms.loader).
+#
+# Purpose: taxpayer_name, address, tax_branch, banks, and tax_items[].label
+# in NoticeRequest all go through aksor_khmer_ocr_segmenter.process_text() (see
+# doc_engine/segmentation.py) before rendering. That already benefits from
+# aksor_khmer_ocr_segmenter's built-in protected-terms list (countries, Cambodian
+# districts, common banks/brands, legal vocabulary -- see
+# ../../docs/protected-terms-guide.md for the full catalog), but two of
+# this API's fields are open-ended user input that a fixed built-in list
+# can never fully cover:
+#   - taxpayer_name: arbitrary Khmer given names are combinatorially
+#     unbounded -- no shared list will ever be complete.
+#   - banks: this API accepts a free-text list of bank names, so any bank
+#     not already in the shared package's brands_orgs.py needs handling
+#     somewhere.
+#
+# This file is where THIS deployment's team adds terms specific to real
+# production data it has actually seen mis-split -- without editing the
+# shared, open-source aksor_khmer_ocr_segmenter package. Follow the same
+# procedure as the shared package (see protected-terms-guide.md): confirm
+# the mis-split against raw ICU first, then add it here with a comment.
+#
+# Wire it in before starting the API:
+#   export AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE=api/khmer_protected_terms.txt
+#   uvicorn app.main:app --reload --port 8000
+#
+# To instead SUPPRESS a term (e.g. a shared built-in term is wrong for
+# this deployment's data), use AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE the same way
+# -- see khmer_protected_terms.exclude.txt for the format.
+#
+# Empty by default -- populate as real mis-splits are observed in
+# production. Do not add speculative/unverified entries; see
+# protected-terms-guide.md's classification rubric.

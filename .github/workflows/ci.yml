@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Only used by the "verify Alembic migration" step below — the
+      # pytest suite itself runs against a throwaway SQLite file per test
+      # (api/tests/conftest.py), no live database needed for that.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aksor
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: aksor_khmer_bi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aksor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # Only used by api/tests/test_auth_ldap.py and test_ldap_configs.py
+      # (both skip themselves if nothing answers on LDAP_TEST_URI) --
+      # real bind/search calls, not mocked, same standard as the Postgres
+      # service above. Seeded by the step below from the same LDIF files
+      # a local `docker run` + `ldapadd`/`ldapmodify` would use.
+      openldap:
+        image: osixia/openldap:1.5.0
+        env:
+          LDAP_ORGANISATION: Aksor Test
+          LDAP_DOMAIN: aksor.test
+          LDAP_ADMIN_PASSWORD: adminpass123
+        ports:
+          - 3389:389
+      # Only used by api/tests/test_scheduler_integration.py (skips
+      # itself if nothing answers on REDIS_TEST_URL) -- real subprocesses
+      # for both app/scheduler.py and a Celery worker, against a real
+      # broker, same standard as the two services above.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            tesseract-ocr tesseract-ocr-khm \
+            libicu-dev pkg-config \
+            libreoffice poppler-utils \
+            ldap-utils
+
+      - name: Seed the openldap service (users, groups, group-read ACL)
+        run: |
+          for i in $(seq 1 30); do
+            docker exec "$(docker ps -qf ancestor=osixia/openldap:1.5.0)" \
+              ldapsearch -x -H ldap://localhost -b "dc=aksor,dc=test" \
+              -D "cn=admin,dc=aksor,dc=test" -w adminpass123 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          ldapadd -x -H ldap://localhost:3389 -D "cn=admin,dc=aksor,dc=test" \
+            -w adminpass123 -f api/tests/fixtures/ldap-seed.ldif
+          CONTAINER="$(docker ps -qf ancestor=osixia/openldap:1.5.0)"
+          docker cp api/tests/fixtures/ldap-acl.ldif "$CONTAINER:/tmp/acl.ldif"
+          docker exec "$CONTAINER" ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/acl.ldif
+
+      - name: Install aksor_khmer_ocr_segmenter
+        run: pip install -e packages/aksor_khmer_ocr_segmenter
+
+      - name: Test aksor_khmer_ocr_segmenter
+        run: |
+          cd packages/aksor_khmer_ocr_segmenter
+          pip install pytest
+          python -m pytest tests/ -v
+
+      - name: Install doc_engine
+        run: pip install -e packages/doc_engine
+
+      - name: Test doc_engine
+        run: |
+          cd packages/doc_engine
+          python -m pytest tests/ -v
+
+      - name: Install api
+        run: pip install -r api/requirements.txt
+
+      - name: Test api
+        run: |
+          cd api
+          python -m pytest tests/ -v
+
+      - name: Verify Alembic migration applies to Postgres
+        working-directory: api
+        env:
+          DATABASE_URL: postgresql+psycopg://aksor:test@localhost:5432/aksor_khmer_bi
+        run: alembic upgrade head

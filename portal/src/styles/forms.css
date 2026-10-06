@@ -1,0 +1,504 @@
+/* Buttons and form controls — anything you click or type into. */
+
+/* ---- buttons ------------------------------------------------------------ */
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.87rem;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--text-faint);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+  padding: 6px 10px;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.btn.active {
+  color: var(--accent-strong);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: var(--danger-soft);
+}
+
+.btn-sm {
+  padding: 5px 11px;
+  font-size: 0.78rem;
+}
+
+.btn.icon-only {
+  padding: 7px;
+}
+
+/* TopBar's Admin shortcut — a fuller pill than the standard button
+   radius, so it reads as its own distinct entry point next to the
+   ghost icon buttons either side of it, not just another one of them. */
+.admin-entry {
+  padding-left: 14px;
+  padding-right: 16px;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- forms -------------------------------------------------------------- */
+
+label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+
+label > span,
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+/* A field grouping that isn't itself a <label> (the dropzone below nests
+   its own inner label, and a <label> can't validly wrap another one) --
+   same 14px rhythm as the `label` rule above, so it lines up with the
+   other fields in the same form. */
+.field-block {
+  margin-bottom: 14px;
+}
+
+/* Field label with a trailing "N/max" counter (Name/Description in
+   RegisterDialog) -- a single class beats the two-type-selector
+   `label > span` above on specificity, so display:flex wins without
+   needing to repeat its margin/weight/color here. */
+.field-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.required-mark {
+  color: var(--danger);
+  margin-left: 2px;
+}
+
+.char-counter {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.char-counter-limit {
+  color: var(--danger);
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+input[type="file"],
+select,
+textarea {
+  display: block;
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+/* A native <select> arrow and a native date/time input's calendar/clock
+   icon are two independent bits of browser chrome with their own
+   internal insets -- never guaranteed to land in the same place even
+   sitting in the same column (ParameterField in RunReportPage.tsx mixes
+   both). Stripped and replaced with one icon we control, positioned
+   with the exact same 12px/16px inset the search-icon-field input
+   already uses (pages.css), so every right-aligned glyph in the app
+   sits at the same distance from the box edge. */
+select {
+  appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px 16px;
+  padding-right: 34px;
+}
+
+/* date/datetime-local/time ship their own fixed line-height in every
+   engine, taller than this 0.9rem/9px-padding box computes for text
+   inputs -- pinned to match so a date field sits at the exact same
+   height as the select/text input next to it (ParameterField in
+   RunReportPage.tsx mixes all of these in one column). */
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"] {
+  line-height: 1.3;
+}
+
+/* The native calendar/clock trigger -- Chromium only (Firefox/Safari
+   have no equivalent hook), so this is a progressive-enhancement touch,
+   not the fix itself. color-scheme on :root (tokens.css) already keys
+   the picker's own popup and this glyph to light/dark; this just gives
+   it the same pointer/hover feedback every other icon-affordance in the
+   app has, instead of sitting there inert. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+input[type="date"]:hover::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]:hover::-webkit-calendar-picker-indicator,
+input[type="time"]:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+textarea.mono-input,
+.json-editor {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  min-height: 180px;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.field-hint {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  margin-top: -8px;
+  margin-bottom: 14px;
+}
+
+/* The -8px pull above assumes the *label's* bottom margin sits between the control and its hint.
+   Inside the label, directly under the control, nothing does -- so the pull would drag the hint up
+   over the control itself. Here it just needs a little air; the label supplies the space below. */
+label > .field-hint {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
+/* ---- drag-and-drop file field (RegisterDialog's template upload) ----
+   The actual <input type="file"> stays in the DOM and focusable (never
+   display:none -- a hidden-and-required file input can leave a form
+   permanently unsubmittable in some browsers), just visually hidden via
+   the classic clip-rect technique; the visible surface is its parent
+   <label>, enlarged well past a native file input's single-line control
+   so both "click to browse" (the label's own default behavior) and
+   "drag a file in" (handlers on that same label, in RegisterDialog.tsx)
+   land on one generous target. */
+.sr-only-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  cursor: pointer;
+  padding: 20px;
+  text-align: center;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.dropzone:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dropzone-active {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--accent-soft);
+}
+
+/* Keyboard focus: the real <input> is visually hidden, so the zone draws the
+   ring. :has(:focus-visible) rather than :focus-within, which would also light
+   up after every mouse click on the zone. */
+.dropzone:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Where the zone shares a narrow column with other controls (the template
+   page's Replace file). */
+.dropzone-compact {
+  min-height: 104px;
+  padding: 16px;
+}
+
+.dropzone-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.dropzone-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-faint);
+}
+
+.dropzone-empty svg {
+  color: var(--text-faint);
+  margin-bottom: 5px;
+}
+
+.dropzone-title {
+  margin: 0;
+  font-size: 0.87rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.dropzone-sub {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+.dropzone-exts {
+  display: flex;
+  gap: 6px;
+}
+
+.dropzone-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  color: var(--text);
+}
+
+.dropzone-file > svg {
+  color: var(--accent-strong);
+  flex: 0 0 auto;
+}
+
+.dropzone-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.dropzone-file-name {
+  font-weight: 500;
+  font-size: 0.87rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropzone-file-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.dropzone-remove {
+  appearance: none;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.dropzone-remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+  border-color: var(--danger);
+}
+
+/* ---- html template validation (RegisterDialog) -----------------------
+   Pre-flight parse feedback (POST /reports/parse-template) shown right
+   under the dropzone: a syntax-error list that blocks registration, or a
+   "map these resource() references" step when the template parses clean
+   but points at images/stylesheets the caller needs to bind. */
+
+.template-parse-status {
+  margin: -6px 0 14px;
+}
+
+.template-errors {
+  margin-bottom: 14px;
+}
+
+.template-errors-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.template-errors ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.template-error-loc {
+  color: inherit;
+  opacity: 0.75;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+}
+
+.template-fields-hint {
+  margin: -4px 0 14px;
+}
+
+.resource-map {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  padding: 14px 16px;
+}
+
+.resource-map-row {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.resource-map-name {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-map-row select {
+  margin: 0;
+}
+
+.resource-map-upload {
+  white-space: nowrap;
+}
+
+.resource-map-error {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  font-size: 0.78rem;
+  color: var(--danger-strong);
+}
+

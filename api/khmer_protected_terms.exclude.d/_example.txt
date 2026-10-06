@@ -1,0 +1,11 @@
+# Example/template file for this directory -- every line here is a
+# comment, so this file excludes zero terms on its own.
+#
+# Copy this pattern into a new file in this same directory to suppress
+# real built-in terms -- one per line, no comment prefix:
+#
+# ឥណ្ឌូនេស៊ី
+#
+# See ../khmer_protected_terms.exclude.txt and
+# ../../docs/protected-terms-guide.md for the full procedure before
+# excluding anything real here.

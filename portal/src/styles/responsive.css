@@ -1,0 +1,257 @@
+/* Breakpoints — kept together so the full responsive picture for any
+   width is visible in one place, rather than scattered per-component. */
+
+@media (max-width: 900px) {
+  .app-shell {
+    flex-direction: column;
+  }
+  .app-sidebar,
+  .app-sidebar.collapsed {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    width: 100%;
+    padding: 10px 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+    overflow-y: visible;
+  }
+  .app-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .sidebar-label {
+    width: 100%;
+    padding: 4px 8px 2px;
+  }
+  /* Icon-only collapse only pays for itself as a fixed-height vertical
+     rail; on a wrapped horizontal nav there's no space it reclaims, so
+     it's hidden rather than adapted. */
+  .sidebar-footer {
+    display: none;
+  }
+  .admin-content {
+    padding: 20px 16px 64px;
+  }
+  .detail-page {
+    padding: 20px 16px 64px;
+  }
+  /* Template detail's vertical tab rail becomes a horizontal, scrollable
+     strip: a 208px column is too much of a phone/tablet's width to give
+     up, and the pane is what someone came for. */
+  .detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    gap: 16px;
+  }
+  .vtabs {
+    position: static;
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border-soft);
+    padding-bottom: 6px;
+  }
+  /* The filter sidebar's form fields don't work as a horizontal strip
+     the way .vtabs's icon buttons do -- stack it full-width above the
+     report instead, and drop the sticky pin (nothing to pin against
+     once it's no longer a side column). */
+  .run-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    /* The filters sit above the report here, so it isn't at the top of the
+       screen any more: no "fill what's left" -- a fixed share of the height. */
+    --run-stage-h: 74vh;
+  }
+  .run-sidebar {
+    position: static;
+  }
+  .vtab {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+  }
+  .vtab.active::before {
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: -6px;
+    width: auto;
+    height: 2px;
+  }
+  .resources-page {
+    padding: 20px 16px 64px;
+  }
+  .resources-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .resource-tree {
+    max-height: 260px;
+  }
+  .topbar {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  .topbar .wordmark {
+    font-size: 1.02rem;
+    gap: 8px;
+  }
+  .topbar .wordmark .glyph {
+    width: 28px;
+    height: 28px;
+  }
+  .wordmark-product,
+  .wordmark-divider,
+  .wordmark-tagline {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 8px;
+  }
+  .topbar-actions .btn-label {
+    display: none;
+  }
+  .account-menu {
+    padding-left: 8px;
+  }
+  .account-trigger {
+    gap: 6px;
+  }
+  .account-trigger .who-name {
+    display: none;
+  }
+  .login-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .login-brand {
+    padding: 32px 24px;
+  }
+  .login-brand::before,
+  .login-brand::after {
+    display: none;
+  }
+  .login-brand .wordmark {
+    font-size: 1.6rem;
+  }
+  .login-brand-desc {
+    font-size: 1rem;
+  }
+}
+
+/* The Overview tab's two columns need roughly 760px of pane; below that
+   (pane = viewport minus the app sidebar and tab rail) they stack. */
+@media (max-width: 1240px) {
+  .overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
+  .overview-file {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--border-soft);
+    padding-top: 22px;
+    margin-top: 22px;
+  }
+}
+
+/* Templates toolbar's "Register template" button: below this, the type
+   filter + view toggle + sort control (all fixed-size, see .segmented and
+   .btn-register in pages.css) already crowd the row it shares -- the label
+   drops out and it becomes an icon button, same treatment its view-toggle
+   and sort siblings already have, rather than the row running out of room
+   and the button's own text wrapping onto a second line. 1250px, not a
+   tighter number closer to where the row actually runs out of room --
+   150% browser zoom on an ordinary ~1728px-wide screen only leaves ~1152px
+   of effective layout width, and that's a real, common way to hit this
+   page narrow, not just an actual small display. */
+@media (max-width: 1250px) {
+  .btn-register-label {
+    display: none;
+  }
+  /* Square, height-matched to the segmented controls and search button
+     beside it (both 42px -- see .segmented and .search-submit in
+     pages.css), the same way .search-submit sizes itself rather than
+     relying on text padding for its height. */
+  .btn-register {
+    height: 42px;
+    width: 42px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+/* True small-screen safety net. Below this, the type filter's count
+   badges drop (the number's redundant the moment you're looking at that
+   filter's own results) and its pills tighten up -- shrinking its four
+   pills from ~376px to ~226px, comfortably inside even a 320px phone. And
+   .gallery-toolbar-actions (nowrap everywhere wider, so its controls move
+   as one block -- see pages.css) is allowed to wrap internally, one
+   control per row, as a second line of defense in case a longer
+   translated label ever outgrows this width anyway. */
+@media (max-width: 480px) {
+  .gallery-toolbar-actions {
+    flex-wrap: wrap;
+  }
+  .ext-filter .count {
+    display: none;
+  }
+  .ext-filter .segmented-btn {
+    padding: 0 8px;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    padding: 20px 16px 80px;
+  }
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+  .list-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  /* The tile stays beside the name; the side block drops below, spread across the row. */
+  .list-row.list-row-file {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 12px;
+  }
+  .list-row-side {
+    grid-column: 1 / -1;
+    flex-direction: row-reverse;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .list-row-meta {
+    justify-content: space-between;
+  }
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .data-table {
+    display: block;
+    overflow-x: auto;
+  }
+  .permission-matrix {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The footer's "name · © year · license · contribute" line stops fitting on
+   one row below ~400px and wraps, which strands a "·" at the end of the
+   first line. Below 440px (a margin over that, for a longer license name)
+   the spacing alone separates the items -- the name is bold, the links
+   underlined -- so the dots are hidden rather than left dangling. */
+@media (max-width: 440px) {
+  .app-footer-sep {
+    display: none;
+  }
+  .app-footer-legal {
+    column-gap: 14px;
+  }
+}

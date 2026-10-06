@@ -1,0 +1,260 @@
+# The application stack: api, scheduler, worker, portal. It expects Postgres and
+# Redis (docker-compose.db.yml, docker-compose.redis.yml) to be up already -- ./deployment.sh brings the three
+# stacks up in order. `api` retries on failure (restart policy) if the database is
+# still starting, and its healthcheck gates `scheduler`/`worker` as before.
+services:
+  api:
+    # One image for api, scheduler and worker (same code, different command). Built here by
+    # `up --build`, or pulled from a registry with `./deployment.sh up --from-registry`:
+    # AKSOR_IMAGE_PREFIX is e.g. `yourname/aksor-khmer-bi` (Docker Hub), AKSOR_VERSION a tag.
+    # `./deployment.sh publish <version>` pushes exactly these names.
+    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: ${BUILD_NETWORK:-default}
+      args:
+        APT_MIRROR: ${APT_MIRROR:-deb.debian.org}
+        APT_SCHEME: ${APT_SCHEME:-http}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    restart: unless-stopped
+    ports:
+      # Host port: API_PORT in .env (default 8000). The container always listens on 8000.
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      # `scheduler`/`worker` depend on this being healthy specifically so
+      # they never query the schema before this service's entrypoint has
+      # finished running `alembic upgrade head` -- avoiding a startup
+      # race rather than having all three run migrations concurrently.
+      # No curl in this image; a plain stdlib request avoids adding one
+      # just for this.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    env_file:
+      # Every variable in .env reaches the container (docker-compose `environment:`
+      # below wins on a clash), so optional settings -- EMBED_TICKET_SECRET,
+      # REPORT_TIMEZONE, the render limits... -- need no edit here. See .env.example.
+      - path: .env
+        required: false
+    environment:
+      # api's own entrypoint (Dockerfile) runs `alembic upgrade head`
+      # against this before starting uvicorn, so the schema is always
+      # current on container start — no separate manual migration step.
+      # Change the password via POSTGRES_PASSWORD, not just here, so both
+      # services agree.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aksor:${POSTGRES_PASSWORD:-aksor}@postgres:5432/aksor_khmer_bi}
+      # app/celery_app.py -- used to *enqueue* a manually/API-triggered
+      # job run (POST /api/v1/jobs/{id}/run). `scheduler` and `worker`
+      # below are the ones that actually consume this broker.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Each _FILE variable takes os.pathsep-separated paths, so point
+      # either one at several mounted files if you need more than one
+      # inject/exclude source. The _DIR variables below are the scalable
+      # alternative: every *.txt file inside the directory is merged in,
+      # so a new exception file can be dropped in without editing this
+      # config (see docs/protected-terms-guide.md). Both mechanisms are
+      # active at once; their terms simply merge.
+      AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE: /app/api/khmer_protected_terms.txt
+      AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE: /app/api/khmer_protected_terms.exclude.txt
+      AKSOR_KHMER_OCR_PROTECTED_TERMS_DIR: /app/api/khmer_protected_terms.d
+      AKSOR_KHMER_OCR_EXCLUDED_TERMS_DIR: /app/api/khmer_protected_terms.exclude.d
+      # Gates the template management portal (/portal) and the mutating
+      # /api/v1/reports routes (see app/auth.py) — set via a .env file or
+      # the shell environment, never hardcoded here. If left unset, the
+      # portal fails closed (503 on every protected request) rather than
+      # silently running open.
+      PORTAL_USERNAME: ${PORTAL_USERNAME:-}
+      PORTAL_PASSWORD: ${PORTAL_PASSWORD:-}
+      # Optional. Credentials typed into the portal (Admin -> Connections) are
+      # encrypted with a key the API generates into ./data/secrets on first use
+      # (mounted below), so leaving this unset is fine. Set it (a Fernet key --
+      # see docs/deployment.md) if you'd rather manage that key yourself.
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
+      # Database connections that run on an uploaded JDBC driver (Admin -> JDBC drivers) are
+      # executed by the `jdbc-worker` service below, which needs `--profile jdbc`. Set a long
+      # random JDBC_WORKER_TOKEN in .env: the API sends it with every query and the worker
+      # refuses to start without it. PostgreSQL/MySQL/MariaDB connections don't need any of this.
+      JDBC_WORKER_URL: ${JDBC_WORKER_URL:-http://jdbc-worker:9000}
+      JDBC_WORKER_TOKEN: ${JDBC_WORKER_TOKEN:-}
+      # Optional: JDBC_ALLOWED_HOSTS (comma-separated hosts, *.suffix or CIDRs) restricts where a
+      # database connection may point. Link-local/metadata addresses are always refused.
+      JDBC_ALLOWED_HOSTS: ${JDBC_ALLOWED_HOSTS:-}
+      # The portal below is a separate origin (its own container/port),
+      # so its browser-side fetch() calls need CORS explicitly allowed —
+      # see app/main.py. Comma-separated if you're serving the portal
+      # from more than one origin.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:${PORTAL_PORT:-8080}}
+      # DEBUG/INFO/WARNING/ERROR — see app/logging_config.py.
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - default
+      - jdbc
+    volumes:
+      # Every bind mount here ends in `z`: on SELinux hosts (CentOS / RHEL / Rocky / Alma / Fedora) a mounted
+      # folder is unreadable to the container without it; elsewhere it does nothing.
+      # One bind mount per protected-terms mechanism, each mapped onto the
+      # path its env var above already points at, so editing either file on
+      # the host takes effect on container restart without an image rebuild.
+      - ./api/khmer_protected_terms.txt:/app/api/khmer_protected_terms.txt:ro,z
+      - ./api/khmer_protected_terms.exclude.txt:/app/api/khmer_protected_terms.exclude.txt:ro,z
+      - ./api/khmer_protected_terms.d:/app/api/khmer_protected_terms.d:ro,z
+      - ./api/khmer_protected_terms.exclude.d:/app/api/khmer_protected_terms.exclude.d:ro,z
+      # Reports registered via POST /api/v1/reports (see app/report_store.py)
+      # live here — deliberately outside api/ (runtime data, not code) —
+      # bind-mounted so they survive a container recreate/rebuild instead
+      # of being lost with the container's writable layer.
+      - ./data/report_templates:/app/data/report_templates:z
+      # The encryption key for credentials stored in the portal
+      # (app/secret_store.py). Back it up with the database: without it those
+      # credentials can't be decrypted and have to be entered again.
+      - ./data/secrets:/app/data/secrets:z
+      # Uploaded JDBC driver .jar files (app/jdbc_drivers.py); `jdbc-worker` mounts the same folder read-only.
+      - ./data/jdbc_drivers:/app/data/jdbc_drivers:z
+      # Uploaded images/stylesheets (Resources library; html templates and docx image
+      # fields render from these) and user avatars -- same reasoning as the templates:
+      # without a mount they vanish when the container is recreated.
+      - ./data/image_resources:/app/data/image_resources:z
+      - ./data/stylesheet_resources:/app/data/stylesheet_resources:z
+      - ./data/avatars:/app/data/avatars:z
+      # Dated, size-rotated log files (app/logging_config.py) — same host
+      # dir as `scheduler` below; each service's own filename prefix
+      # ("api-", "scheduler-") keeps the two from colliding.
+      - ./data/logs:/app/api/logs:z
+
+  # Runs queries through uploaded JDBC drivers (jdbc-worker/app.py) -- only with
+  # `docker compose --profile jdbc up`. A driver .jar is code, so this is the one place it
+  # executes, and it is locked down: its own network (it can't reach postgres/redis), no
+  # database or key access, read-only filesystem and drivers, no capabilities, and capped
+  # memory/CPU/processes. Nothing is published to the host.
+  jdbc-worker:
+    profiles: ["jdbc"]
+    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-jdbc-worker:${AKSOR_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: jdbc-worker/Dockerfile
+      network: ${BUILD_NETWORK:-default}
+      args:
+        APT_MIRROR: ${APT_MIRROR:-deb.debian.org}
+        APT_SCHEME: ${APT_SCHEME:-http}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    restart: unless-stopped
+    environment:
+      # The worker exits at start without it -- set JDBC_WORKER_TOKEN in .env before using the jdbc profile.
+      JDBC_WORKER_TOKEN: ${JDBC_WORKER_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - jdbc
+    volumes:
+      - ./data/jdbc_drivers:/drivers:ro,z
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 200
+
+  # The *when* half of job scheduling (app/scheduler.py) -- APScheduler +
+  # the same Postgres as its jobstore, deciding when a Job's trigger
+  # fires and enqueuing a Celery task, never executing job logic itself.
+  # Deliberately `replicas: 1` (the default, stated explicitly here) --
+  # more than one replica would make every cron trigger fire once per
+  # replica, not once total. Scale `worker` instead for more throughput.
+  scheduler:
+    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    entrypoint: ["./docker-entrypoint-no-migrate.sh"]
+    command: ["python", "-m", "app.scheduler"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      # Every variable in .env reaches the container (docker-compose `environment:`
+      # below wins on a clash), so optional settings -- EMBED_TICKET_SECRET,
+      # REPORT_TIMEZONE, the render limits... -- need no edit here. See .env.example.
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aksor:${POSTGRES_PASSWORD:-aksor}@postgres:5432/aksor_khmer_bi}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # .env also holds the break-glass login; this service has no use for it.
+      PORTAL_USERNAME: ""
+      PORTAL_PASSWORD: ""
+      SCHEDULER_RECONCILE_INTERVAL_SECONDS: ${SCHEDULER_RECONCILE_INTERVAL_SECONDS:-15}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data/logs:/app/api/logs:z
+
+  # The *how* half -- executes app/job_executors.py, with per-job
+  # retry/backoff (app/celery_app.py's run_job task). Horizontally
+  # scalable: `docker compose up --scale worker=3`.
+  worker:
+    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    entrypoint: ["./docker-entrypoint-no-migrate.sh"]
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      # Every variable in .env reaches the container (docker-compose `environment:`
+      # below wins on a clash), so optional settings -- EMBED_TICKET_SECRET,
+      # REPORT_TIMEZONE, the render limits... -- need no edit here. See .env.example.
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aksor:${POSTGRES_PASSWORD:-aksor}@postgres:5432/aksor_khmer_bi}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # .env also holds the break-glass login; this service has no use for it.
+      PORTAL_USERNAME: ""
+      PORTAL_PASSWORD: ""
+    volumes:
+      # A file_output/render_report job may need to reach the same
+      # registered report templates `api` itself uses (report_store.py's
+      # STORE_DIR) -- same mount, same path, so report_id lookups resolve
+      # identically regardless of which service handled the request.
+      - ./data/report_templates:/app/data/report_templates:z
+      - ./data/image_resources:/app/data/image_resources:z
+      - ./data/stylesheet_resources:/app/data/stylesheet_resources:z
+      # Jobs that call a data source decrypt Secrets (app/secret_store.py) with the same key `api` uses.
+      - ./data/secrets:/app/data/secrets:ro,z
+
+  # Independently deployable/scalable from api — pure static files, no
+  # LibreOffice/Python weight (see portal/Dockerfile). Its browser-side
+  # JS talks to the api service directly (portal/config.js), not through
+  # this container, so there's no network dependency between the two at
+  # the container level — only in the browser loading the page.
+  portal:
+    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-portal:${AKSOR_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: portal/Dockerfile
+      network: ${BUILD_NETWORK:-default}
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+    restart: unless-stopped
+    ports:
+      # Host port: PORTAL_PORT in .env (default 8080). If you change API_PORT, point the portal at it too:
+      # PORTAL_API_BASE_URL in the config file below, and CORS_ALLOWED_ORIGINS must use this port.
+      - "${PORTAL_PORT:-8080}:80"
+    volumes:
+      # Runtime config (the API's URL, branding). The image ships a localhost default, so any
+      # real deployment -- especially one pulled from a registry -- supplies its own copy.
+      - ${PORTAL_CONFIG_FILE:-./portal/public/config.js}:/usr/share/nginx/html/config.js:ro,z
+
+# Postgres and Redis live in docker-compose.db.yml and docker-compose.redis.yml; all three files share this
+# external network so `postgres` and `redis` resolve from here. Create it once
+# (./deployment.sh does) with `docker network create aksor-network`.
+networks:
+  default:
+    name: aksor-network
+    external: true
+  # Only `api` and `jdbc-worker` are on this one; see jdbc-worker above.
+  jdbc:
+    name: aksor-jdbc

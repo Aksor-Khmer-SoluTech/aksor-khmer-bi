@@ -1,0 +1,17 @@
+venv/
+output/
+examples/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.git/
+.github/
+.DS_Store
+
+# Local secrets never belong in an image (app/dev_env.py would also skip them inside one).
+**/.env
+**/node_modules
+portal/dist

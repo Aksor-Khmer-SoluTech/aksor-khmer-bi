@@ -1,0 +1,710 @@
+# Changelog
+
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+### Added
+- **A Home page for everyone** (`#/home`, the landing page): your own runs this week / in 30 days / failed,
+  your starred reports, the reports you run most, your recent runs (with how many filters you chose) and
+  shortcuts. Star a report on the Reports page to pin it there (kept in the browser). Backed by
+  `GET /api/v1/me/dashboard`, which only ever returns the caller's own activity.
+- **Bind filters by their type** (a database source's new option): a built-in driver receives a real date,
+  time or number instead of text, so a query needs no `CAST`. On for a new source, off for existing ones.
+  Uploaded JDBC drivers still receive text.
+- **Every report run is audited** (`report.run` / `report.run_failed`): who, when, format, how many
+  parameters were chosen (names only, never values) and how it ended.
+
+### Changed
+- **A proper SQL editor** for a report's database query: line numbers, colours matched to the connection's engine
+  (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle; Db2 uses standard SQL), JOIN words and `:filter` placeholders
+  highlighted, auto-closing brackets, undo, Tab to indent, and keyword / filter suggestions. Date, number and
+  time filters are inserted with the engine's conversion already written (`CAST(:d AS DATE)`, Oracle
+  `TO_DATE(:d, 'YYYY-MM-DD')`), since a filter's value always reaches the database as text.
+- **Resources moved into the Admin console** (Admin > Resources, for `folder:manage` / `report:manage`); it
+  no longer shows in the main menu for people who can only view reports. `#/resources` links still work.
+- Database connection failures now say why (timeout, refused, unknown host, login refused, TLS) without the
+  host or port; the server log names the database by an alias.
+- Batch render is hidden for now (`BATCH_RENDER_ENABLED` in `portal/src/features.ts`).
+- **Migrations squashed again: only `0001_initial_schema` remains.** The four that followed the first squash
+  (`0002_report_version_label`, `0003_report_label_unique`, `0004_jdbc_drivers`, `0005_auth_sessions`) are folded
+  into it — nothing had been released from them. A fresh database is unchanged in effect (same 33 tables, checked
+  against the models on both SQLite and PostgreSQL, downgrade included). **A database created by one of those
+  revisions can't be upgraded by the new file**, because its `alembic_version` names a revision that no longer
+  exists: see *Migrations were squashed* in docs/deployment.md for the two-command repair (`create_all`, then
+  `alembic stamp --purge 0001_initial_schema`) or recreate it.
+- **Standard sign-in: short-lived access token + rotating refresh token.** The portal no longer keeps the
+  username and password in the browser and sends them on every request. `POST /api/v1/auth/login` now opens a
+  server-side **session** and answers with a 15-minute **access token** (an HS256 JWT, held in the page's memory
+  only) while the long-lived **refresh token** travels as an `HttpOnly`, path-scoped cookie. `POST /auth/refresh`
+  swaps it for a new one on every use; replaying a used refresh token revokes the whole session (a 10-second grace
+  forgives two tabs racing), and only the token's SHA-256 is stored. `POST /auth/logout`, a password change, an
+  administrator disabling/locking/resetting the account, or **Settings → Active Sessions → Sign out** end sessions
+  at once -- the token names a session and every request re-checks it and re-reads the user's roles, so there is no
+  15-minute tail. Active Sessions is now a real list of live, revocable sessions (it used to be sign-in history).
+  "Keep me signed in" lasts 30 days, otherwise 12 hours. The portal renews the token shortly before expiry,
+  takes turns across tabs with a Web Lock, and signs every tab out together.
+  New `auth_sessions` table; new settings `JWT_SECRET` (else a key is generated into
+  `data/secrets/jwt.key`), `ACCESS_TOKEN_TTL_SECONDS`, `REFRESH_TOKEN_SESSION_HOURS`, `REFRESH_TOKEN_TTL_DAYS`,
+  `REFRESH_GRACE_SECONDS`, `LOGIN_ATTEMPTS_PER_MINUTE` (sign-in is now throttled: 429 after 10 tries a minute per address and user name), `AUTH_ALLOW_BASIC`, `AUTH_COOKIE_SECURE`, `AUTH_COOKIE_SAMESITE`. CORS now allows
+  credentials (explicit origins only). See the new guide `docs/authentication.md`, and the `/api/v1/auth/*` routes
+  (`login`, `refresh`, `logout`, `me`, `sessions`, `sessions/{id}`, `sessions/revoke-others`).
+  **Upgrade notes:** everyone signs in once more; `CORS_ALLOWED_ORIGINS` must be the portal's exact origin, and the
+  portal and API must be the same *site* (`localhost` + `localhost`, not `localhost` + `127.0.0.1`, or share a
+  registrable domain, or use `AUTH_COOKIE_SAMESITE=none` over HTTPS). **HTTP Basic still works for scripts**
+  (`curl -u user:password`), with one exception below; set `AUTH_ALLOW_BASIC=false` to require tokens.
+- **Two-factor authentication now guards the whole account.** An account with 2FA can no longer authenticate with a
+  password alone on any route (HTTP Basic is refused for it), so the code can't be skipped by calling the API
+  directly. Scripts that used such an account's password need their own service account (or an API client, for
+  running reports).
+- **Compose files split three ways, and `deployment.sh` follows.** Postgres is `docker-compose.db.yml`
+  (project `aksor-db`), Redis is `docker-compose.redis.yml` (`aksor-redis`), the app stays in `docker-compose.yml`
+  (`aksor-app`), all joined by the external network `aksor-network` (it was `aksor-net`). `deployment.sh`
+  starts redis, postgres, then the app; `infra …` became `redis …` / `db …`. New root `DEPLOYMENT.md` walks through
+  bringing them up one file at a time, with a check after each step.
+
+### Fixed
+- **Authenticator-app (2FA) secrets were stored as plain text.** They are now encrypted at rest with the same key as saved
+  credentials (`SECRETS_ENCRYPTION_KEY` / `data/secrets/master.key`), so a copy of the database no longer hands out
+  everyone's second factor. Existing secrets are encrypted in place the next time the API starts. If that key is ever
+  lost, affected users can't pass the code check until an administrator resets their 2FA.
+- **A locked account could still sign in.** `is_locked` was recorded and shown but never checked; it is now refused at
+  sign-in (after the password is verified, so a wrong guess learns nothing) and ends open sessions.
+- **Reports built on a template saved by WPS Office failed with "source file could not be loaded".** WPS writes
+  the document's core-properties relationship with a wrong type URL; python-docx then saved the rendered file with
+  two `docProps/core.xml` entries, which LibreOffice refuses to open -- on every run, whatever the data. Templates
+  are now normalised before rendering, and any duplicate entries in the rendered file are dropped.
+- **A `&`, `<` or `>` in report data silently cut the text off in `.docx` output** ("R&D Dept" printed as "R ").
+  Values are now escaped when rendered into a docx template (docxtpl's images, rich text and sub-documents are
+  unaffected). The `.html` engine already escaped; `.xlsx` was never affected.
+- A LibreOffice conversion failure is now shown on the same details screen as template errors (to whoever manages
+  the report, with a hint) instead of a raw `soffice` message, and is hidden from everyone else.
+
+### Added
+- **Report scrollbars preference.** Settings → Preferences → *Report scrollbars*: *Auto-hide* (the system default, where
+  macOS fades the bars away) or *Always visible*, which keeps a classic scrollbar on screen in the report viewer so
+  you can see how far a long or wide report goes. A live sample next to the choice shows the difference. Saved to the
+  account like the other preferences. Chrome, Edge and Safari honour it; Firefox on macOS follows the system setting.
+  The viewer also remembers its zoom level in the browser.
+- **A report that fails to render now says why.** A template error (an unclosed `{% for %}`, a field the data
+  doesn't have, a malformed tag) used to escape as a bare 500, which the browser couldn't even read, so the run
+  page and Preview just said "Couldn't render a preview". Now someone who manages the report -- the person
+  testing it before granting access -- sees the engine's own error, the template text around the failing line
+  with the line marked, the `for`/`endfor` and `if`/`endif` counts, a hint for the usual mistake, and the
+  technical traceback, with a "Copy details" button. Everyone else (end users, embedded viewers, anonymous
+  render calls) gets a plain message and a reference that matches the server log, which holds the full traceback.
+  Failures are now `422` (template) or `500` (anything else) with a readable `detail` and a `render_error` object.
+- **Database data sources, JDBC drivers and sample data.** A report's Data source tab now offers three kinds:
+  **Sample data** (fixed JSON, to design a template before real data exists), **REST API** (as before) and
+  **Database** — a read-only `SELECT` on Oracle, PostgreSQL, MySQL, SQL Server, MariaDB or Db2, with filters
+  bound as `:name` parameters and the rows exposed to the template. Switching a saved report between kinds
+  warns about what will be discarded. Admin → Connections gains *+ Database*: engine cards with logos,
+  host/port/database, a secure-connection mode (disable / require / verify-ca / verify-full), a JDBC URL that
+  is built from the fields and fills them when pasted, and **Test connection**. The password is a Secret
+  (Admin → Secrets): encrypted at rest, write-only, never on the form, with a note saying so. PostgreSQL,
+  MySQL and MariaDB run on built-in drivers; for any other engine an administrator uploads the vendor's
+  `.jar` (Admin → JDBC Drivers, new `driver:manage` permission, validated, SHA-256 recorded and audited),
+  executed only by the new isolated `jdbc-worker` service (`docker compose --profile jdbc`). Queries are
+  guarded (single SELECT only, read-only session, timeout, row cap, no driver error text shown), and
+  link-local/metadata hosts are always refused (`JDBC_ALLOWED_HOSTS` restricts the rest). Adds the
+  `jdbc_drivers` table and `PyMySQL`. See docs/building-a-report.md and
+  docs/deployment.md.
+- **In-app documentation, including the template authoring guide.** The book icon in the top bar now opens
+  `#/docs`: the guides in `/docs` rendered inside the portal (guide list, "On this page" outline, copyable
+  code, working cross-links) instead of a dialog of GitHub links. They're bundled at build time, so they match
+  the release. The Register-template dialog links straight to the authoring guide. **Build change:** the portal
+  image now builds from the repo root (`portal/Dockerfile`, `-f`) so it can see `/docs`; `docker-compose.yml`
+  and `deployment.sh publish` are updated.
+- **`deployment.sh` and separate infra/app compose files.** Postgres and Redis moved to
+  `docker-compose.infra.yml` (project `aksor-infra`); `docker-compose.yml` is now just
+  `api`/`scheduler`/`worker`/`portal` (project `aksor-app`), joined by an external `aksor-net`
+  network so the app can be rebuilt or rolled back without touching the database. `./deployment.sh`
+  has `init` (network, `.env` with generated passwords), `up` (infra, wait for health, then app),
+  `update` (backup → rebuild → recreate), `down`, `restart`, `status`, `logs`, `backup` (pg_dump +
+  `data/`, newest 14 kept) and `infra`/`app` pass-through. The Postgres volume keeps its name, so an
+  existing database carries over; Redis now persists (AOF); services restart `unless-stopped`.
+  **Behavior change:** plain `docker compose up` no longer starts a database — use the script (or the
+  three commands in docs/deployment.md).
+- **Publish to Docker Hub (or any registry): `./deployment.sh publish <version> [--latest]`** builds the api and
+  portal images (default `linux/amd64`, `PLATFORMS=` to change) and pushes them as
+  `${AKSOR_IMAGE_PREFIX}-engine` / `-portal`; `up --from-registry` and `update --from-registry` pull
+  `AKSOR_VERSION` instead of building. `scheduler`/`worker` now share `api`'s image rather than building
+  it three times, and the portal's `config.js` is bind-mounted (`PORTAL_CONFIG_FILE`) so a pulled image can
+  be pointed at the right API. See docs/deployment.md.
+- **`.env.example` for the Docker deployment**, copied to `.env` by `./deployment.sh init` (passwords
+  generated). `api`/`scheduler`/`worker` now load all of `.env` (`env_file`), so every documented setting
+  (`EMBED_TICKET_SECRET`, `REPORT_TIMEZONE`, render limits…) works without editing the compose file, and
+  `DATABASE_URL`/`REDIS_URL` in `.env` override the bundled Postgres/Redis. `worker` also gets the
+  secrets key read-only, so jobs can decrypt stored Secrets.
+- **Fix: uploaded images, stylesheets and avatars survive a container recreate.** `data/image_resources`,
+  `data/stylesheet_resources` and `data/avatars` were never bind-mounted, so they were lost with the
+  container; they are now (and included in `backup`).
+- **Create a template guide** (`docs/create-a-template.md`): choosing docx / xlsx / html, registering
+  (portal and API), versions, a Jinja syntax cheat sheet, per-format rules, eleven worked use cases and a
+  troubleshooting table — every snippet run against the real engines.
+- **Name your own template versions (1.0 → 1.0.1).** Replacing a template's file no longer forces
+  v2, v3, v4…: the upload form has a *Version* field, pre-filled with the next patch number, that is
+  shown everywhere in place of "vN" (Gallery, template header, download buttons, History). Clear it
+  to keep plain numbering. `PUT /reports/{id}/file` takes an optional `version_label` (letters, digits
+  and `. - _ +`, ≤ 32 chars, unique per report; `400`/`409` otherwise) and it is recorded in the audit
+  entry. The internal `version` sequence is unchanged and still keys the stored files and download
+  filenames. New nullable column `report_versions.version_label` (migration
+  `0002_report_version_label`; Docker deployments apply it at API start). The replace form's actions
+  row also no longer sits flush against the Danger zone. A label (and a version's note) can be edited
+  afterwards from **History → Edit version & note** (`PATCH /reports/{id}/versions/{n}`, audited as
+  `report.version_update` with before/after); downloads are named after the label
+  (`…-v1.0.1.docx`); the end-user Reports list carries it; and a unique `(report_id, version_label)`
+  constraint (migration `0003_report_label_unique`) closes the race between two simultaneous uploads.
+- **Avatar changes are audited** (`user.avatar_update`, `user.avatar_remove`).
+- **Force a password change at first sign-in, and a real "Reset password" for admins.**
+  Admin-created local users are now flagged `must_change_password` (on by default; untick it for an
+  account nobody signs in to interactively): until they choose their own password the API answers
+  `403 PASSWORD_CHANGE_REQUIRED` to everything except `/auth/verify` and `GET`/`PATCH /users/me`, and the
+  portal shows a "Choose a new password" screen instead of the console. That gate is enforced in
+  `get_current_user`, not in the portal, so it holds for direct API callers too. **Admin → Users** gets
+  a *Require a password change at next sign-in* checkbox, a "password change pending" badge, and a
+  *Reset password…* dialog (`POST /users/{id}/reset-password`: generate a temporary password — shown
+  once, never stored readable or written to the audit trail — or set one, and by default require a change
+  at next sign-in). Every path that sets a password now enforces 8+ printable-ASCII characters
+  (ASCII because HTTP Basic can't carry anything else — a Khmer password would have locked the account
+  out), and a change must differ from the current password. Existing users are not flagged, LDAP users
+  never are, and the break-glass login is unaffected. The new column
+  (`users.must_change_password`) is part of the initial migration. Design: `specs/forced_password_change_design.md`. **Behavior change:** a user created
+  through `POST /users` is now flagged by default; send `"must_change_password": false` to keep the old
+  behavior. The inline "Reset password" field in the user detail panel is replaced by the dialog.
+- **A "Data source" tab, connections, parameter defaults and REST-backed choice lists with JSONPath.**
+  A template's Parameters tab used to hold both the filters and the data source, with the data
+  source's full URL (host and all) typed into every report. Now:
+  - **Data source is its own tab**, beside Parameters (which keeps what a person is asked for). The
+    two edit one draft and save together — a URL's `{{ name }}` must name a real filter, so a rename
+    can't be saved apart from the URL using it — and each tab shows a dot while it has unsaved edits.
+    A data source now has a `type` (`rest`, the only kind so far) so other kinds can sit beside it.
+  - **Connections** (**Admin → Connections**, permission `connection:manage`, held by system
+    administrators and each organization's `ROLE_ORG_ADMIN`): a named, per-organization base URL with
+    the headers and authentication every call to it needs (credentials stay environment-variable
+    *names*). A data source or choice list picks one and adds only a path — `connection: "partner-api",
+    url: "/api/external/reports/x?from={{ fromDate }}"` — so moving an API, or test → production, is one
+    edit; give the connection the same name in each environment and no report changes. The path field
+    shows the base URL as a fixed prefix, filters insert as `{{ name }}` chips, and switching between a
+    connection and a full URL keeps what was typed. The list (no header values) is readable with
+    `report:manage`; writing needs `connection:manage`. A connection can't be renamed or deleted while a
+    report uses it; changes are audited (`connection.*`). Reports that spell out a full URL are untouched.
+    (The `data_connections` table is part of `0001_initial_schema`.)
+  - **Default values** for text, number, date, date & time and time parameters: a literal (`H.E`) or
+    `now()` — today, now, or the current date and time by type. The run form starts with it (`now()`
+    from the viewer's clock); a run that omits the filter (API, embed) uses it too, with `now()` read
+    in the new `REPORT_TIMEZONE` (default UTC). A filter sent as `""` stays empty. Not for choice lists.
+  - **Choice lists from a REST API are editable in the portal** (they were API-only), through a
+    connection or a full URL, and read with **JSONPath**: an *items path* (`$.data[*]`), then a *value*
+    and *label* per item — `code`, `name.en`, `tags[0]`, or text mixing several, `${code} - ${nameEn}`.
+    **Test choices** runs the real request with what is typed (saved or not) and shows the result
+    (`POST /reports/{id}/data-config/preview-options`; it makes a real outbound call, so unlike the other
+    data-config routes it insists the report is in the caller's own organization). Existing
+    `value_field` / `label_field` configs keep working as plain keys. Filters (`[?()]`), `..` and slices
+    are refused rather than half-supported.
+  - **Standard date/time display formats are a portal setting** — `PORTAL_DATE_FORMAT`,
+    `PORTAL_TIME_FORMAT`, `PORTAL_DATETIME_FORMAT` in `portal/public/config.js` (default `DD/MM/YYYY`,
+    `HH:mm`) — and the run page's date/time filters and the default-value editor now use them instead
+    of the browser locale's native pickers (a calendar/clock popover, forgiving typing, an ISO paste
+    works). What is sent to the API, and what a report receives, is still ISO.
+  A parameter's saved JSON gains `default_value`, and a data source `type` and `connection`, the next
+  time it is saved. A dev database created before `0001_initial_schema` has no `data_connections`
+  table (saving any report's data config would fail on it): recreate it, per the schema note under
+  *Changed*.
+- **API clients: a client ID + secret that may run specific reports, beside roles and granted users.**
+  An embedded report used to need a signed ticket from the embedder's backend, which meant a second
+  service holding a shared secret. An admin now creates a client in **Admin → API Clients** (permission `client:manage`, held by system
+  administrators and each organization's `ROLE_ORG_ADMIN`; not `report:manage`, so editing a template
+  can't also hand out access to its data), ticks the reports it may run, and copies the secret, which
+  is shown once and stored only as a SHA-256 hash. `embed-run` accepts `client_id` + `client_secret`
+  (the host posts `clientId` / `clientSecret` to the embed frame): unknown client, wrong secret and
+  disabled client all answer `401 Invalid client credentials`; a report the client wasn't granted is
+  `403` and recorded in the security feed. Granting, revoking, rotating (the old secret dies at once),
+  disabling and deleting take effect on the next request and are audited (`client.*`; the secret never
+  is). Runs are rate-limited per client (`CLIENT_RUN_LIMIT_PER_MINUTE`, default 120) and logged as
+  `embed-client`. Migration `b8e2f4a6c1d9`. Design: `specs/api_clients_design.md`. `embed-run` needs
+  one of the two -- a ticket or a client; a request with neither is `401`, for every report. (There is
+  deliberately no setting that lets a report run with no credential at all.)
+- **Tax Comparison report template** (`examples/report_templates/tax-comparison.docx`, code
+  `tax-comparison`), the second report partner-web embeds: tax revenue by tax type in a national and a
+  capital/provincial budget group, with a subtotal per group, the difference between two periods and
+  its percentage. Data comes from partner-api's `GET /api/external/reports/tax-comparison`; grant it to partner-web's
+  API client to let partner-web run it.
+- **Audit Result Summary report template** (`examples/report_templates/audit-result-summary.docx`, code
+  `audit-result-summary`), the third report partner-web embeds: audit results by audit type, each with a
+  count and a tax amount for the initial determination, the outcome after objection, and the period in
+  total, under the Revenue Comparison letterhead and footer. One date range (`fromDate`, `toDate`,
+  `signedBy`) rather than two periods. Data comes from partner-api's
+  `GET /api/external/reports/audit-result-summary`; grant it to partner-web's API client to let partner-web run it.
+
+### Changed
+- **Secrets: named credentials created, rotated and revoked in the portal (Admin → Secrets), instead of
+  one environment variable per token.** Naming an environment variable meant someone with server access
+  had to set it and restart the API for every issued or rotated credential, and a connection's own
+  earlier take on this (a value embedded on the connection itself) couldn't be shared, rotated from one
+  place, or listed anywhere as "every credential we hold." A secret now has a name
+  (`token_secret`/`password_secret`, alongside the existing `token_env`/`password_env`) that a
+  connection's authentication *or a report's own data source or choice list* can refer to — the
+  environment-variable-only report is what prompted this: `PARTNER_API_KEY` can now be a secret a report
+  names directly, with no connection involved. **Admin → Secrets** lists every one (who created it, when,
+  and what refers to it), and "Where the token/password is kept" (a saved credential, the default, or an
+  environment variable — still there for deployments that keep secrets out of the database) appears
+  identically on a connection's form and a report's own Data source/Parameters tabs, including creating a
+  new one inline without leaving the form. A secret's value is encrypted (Fernet) in its own table, never
+  in a report's or connection's own JSON config (which every report/connection manager can read), and is
+  write-only: no endpoint returns it, and the audit trail records only that it was created, rotated,
+  revoked or deleted — never the value. **Revoking** (`is_active=false`) is distinct from deleting:
+  whatever still names it keeps existing, but resolving it at run time then fails with a readable error
+  (`502`, "has been revoked") instead of silently using a stale value — the same posture a deleted
+  connection already had. Rotating applies to every reference on its next run, no restart. Deleting is
+  refused while anything refers to it. Requires `secret:manage` to create/rotate/revoke/delete (held by
+  system administrators and each org's `ROLE_ORG_ADMIN`); `connection:manage` or `report:manage` alone
+  still lists names to pick from, never values. The encryption key is `SECRETS_ENCRYPTION_KEY` if set,
+  otherwise generated into `data/secrets/master.key` on first use (gitignored; `docker-compose.yml` mounts
+  it into `api`) — back it up with the database. Adds the `secrets` table and `cryptography` (both folded
+  into `0001_initial_schema`/`requirements.txt` since nothing has shipped yet).
+- **The database schema is now a single migration.** The twenty-one incremental migrations that
+  grew with the code (report tables, RBAC, LDAP, jobs, audit, API clients, data connections, ...) are
+  replaced by `0001_initial_schema`, since nothing has been deployed yet and there was no installed base
+  to upgrade from. The result is the same 29 tables, verified column-for-column, constraint-for-constraint
+  and index-for-index against what the old chain produced on both SQLite and PostgreSQL, and `alembic
+  check` reports no drift from the models. Columns are now in one consistent order (primary key,
+  references, attributes, status flags, then `created_by` / `created_at` / `updated_at`), where the old
+  chain had left each table's later columns tacked on at the end. Permissions, the administrator role and
+  each organization's standard roles are not seeded by the migration; the API creates them on startup
+  (`seed_defaults()`), which is why the old permission back-fills are gone. **A database created by the old
+  chain can't be upgraded by this one** (its `alembic_version` names a revision that no longer exists):
+  recreate it, as `alembic upgrade head` on an empty database, before running the API. Migration ids named
+  in the entries below (`9e4b7a1c3d58`, `b8e2f4a6c1d9`, `d3f8a1b6c2e5`, ...) are folded into it.
+- **An embed driven by parameters no longer looks the report up first.** The embed page used to
+  `GET /reports/<ref>` on load (for the report's name and template type) before it could run
+  anything. `/run` and `/embed-run` responses now say what they rendered (`X-Report-Name`,
+  percent-encoded because names are often Khmer, and `X-Report-Ext`; both exposed to browsers via
+  CORS), so a host that posts `parameters` makes exactly one request: the run. The page waits a
+  moment (750 ms) for the host's parameters and only looks the report up if none arrive — the
+  bare-URL sample-data fallback, or a `context` / `?context=` embed, which still need it. The
+  viewer keeps the report's real name for its PDF download in a ref, since `reportName` is a
+  dependency of the render effect and changing it after mount would run the report twice.
+  Identical embed runs that are already in flight now share one request (`api.embedRunReport`):
+  React's StrictMode (`npm run dev`) mounts effects twice, and a host may answer `ready` twice, so
+  the same run used to be sent twice within milliseconds — two full server-side renders. A later
+  run (Refresh, another View) is still a new request.
+
+### Fixed
+- **Settings kept in `api/.env` were silently ignored outside Docker.** A bare `uvicorn app.main:app
+  --reload` never read the file, so `EMBED_TICKET_SECRET`, `PARTNER_API_KEY` and
+  friends stayed unset (a `--reload` worker inherits the launching shell's environment, so restarting
+  the worker didn't help either). Importing the `app` package now fills the environment from
+  `api/.env` first (`app/dev_env.py`) -- only variables that aren't already set, so the real
+  environment always wins; never inside a container or under pytest; `AKSOR_LOAD_DOTENV=0` turns it
+  off; only names are ever logged. `.env` files are also excluded from Docker builds now (`COPY api api`
+  used to bake a developer's file into the image).
+
+### Added
+- **An embedded report can be run from just its parameters, authorized by a signed ticket.**
+  `POST /api/v1/reports/{id}/embed-run` takes `{parameters, ticket}` and Aksor's *server* fetches
+  the report's data (with its stored credentials) — the host page never handles the data. Until
+  now the anonymous embed could only format data its caller supplied; making it fetch from a
+  data source with no check would have let anyone who can reach the API (and guess a report code)
+  read that source. So the embedder's backend signs an HS256 JWT ("this report, exactly these
+  parameters, this user, a few minutes") with a secret shared with Aksor (`EMBED_TICKET_SECRET`),
+  and Aksor verifies the signature, issuer, audience, expiry, that it is for *this* report and that
+  the parameters equal the signed ones — before it calls the data source. Only HS256; unset secret
+  = `503`; anonymous rejections are logged, a genuine ticket used for the wrong report/parameters
+  is `403` and lands in the security feed. The embed page accepts `parameters` + `ticket` in its
+  `postMessage` alongside the existing `context`, using a plain `fetch` so a rejected ticket can't
+  sign the portal's own login out. See `docs/building-a-report.md`; partner-web/partner-api use it
+  for Revenue Comparison.
+- **The `revenue-comparison` example can be backed by the real partner-api**, not just
+  Aksor's own local demo endpoint. partner-api (a sibling Spring Boot project) gained a
+  matching `GET /api/external/reports/revenue-comparison` — a faithful Java port of
+  the same placeholder dataset, so the rendered report is identical either way — plus
+  a full API-client subsystem to authenticate the call: a client (e.g. "aksor-khmer-bi") holds
+  a static, hashed, rotatable/revocable key sent as `X-Client-Id` +
+  `Authorization: Bearer <key>`, checked by a new `ApiKeyAuthFilter` that runs
+  alongside (not instead of) partner-api's existing human-JWT auth, scoped to that
+  client's own granted scopes — not the RBAC permission catalog humans use. Managed via
+  `POST/GET/PUT/DELETE /api/client` and `POST /api/client/{id}/rotate`
+  (partner-api, `client:read/write/delete`, SUPER_ADMIN by default). On Aksor's side,
+  nothing needed changing: `data_source.headers`/`auth.token_env` already send a
+  static header plus a bearer token from an env var, which is exactly this scheme —
+  point a report's data source at the endpoint with them (see `PARTNER_API_KEY` in
+  `api/.env.example` and `examples/README.md`).
+
+### Changed
+- **Template page tabs reordered and renamed.** The order now follows how
+  soon a manager needs a tab, then what it costs to open: Overview,
+  **Placeholders**, **Parameters**, Preview, **Access Privilege**, Integration,
+  **Protected Terms**, History (History was second while it was new; it's a
+  look-back tab, and it grows with every change). Renamed: *Data* →
+  **Parameters** (the filters a person picks when running the report, plus the
+  data source the server calls; it now uses the sliders icon the Run page
+  already uses for those same filters), *Access* → **Access Privilege** (who
+  holds view / render / manage on the template — and no longer shares a name
+  with Settings' sign-in security tab), and *Parameters* → **Placeholders** (it
+  lists the `{{ fields }}` the file expects, which the old name confused with
+  the run-time filters in Parameters). *Protected terms* is now capitalized
+  **Protected Terms**, matching the admin page of the same name. The History
+  filter chip and the docs follow the new names. Labels and order only: no
+  route, permission or audit-action name changed.
+
+- **The open tab on a template page is in the URL.** `#/reports/<id>` is still
+  the Overview; the others are `#/reports/<id>/placeholders`, `/parameters`,
+  `/preview`, `/access`, `/integration`, `/protected-terms` and `/history` — so a
+  tab can be linked to, bookmarked, and survives a reload, and opening another
+  template no longer inherits the previous one's tab. Switching tabs replaces the
+  history entry rather than adding one, so Back still means "return to the
+  template list" and arrow-key navigation doesn't flood it. A tab that doesn't
+  exist, or that the person isn't offered (`/access` for someone managing just
+  this one report), falls back to the Overview and the address is corrected.
+
+- **Replacing a template's file is now a drop zone with a confirm step**, in
+  place of the browser's bare "Choose File" input that uploaded the moment you
+  picked a file (which also forced you to type the *What changed?* note before
+  choosing the file). Drag a file in or click to browse and it is only *staged*:
+  you see its name, size and type, add the note, and press **Upload as vN**;
+  Cancel or × discards it. It rejects what the server would (anything but
+  `.docx`/`.xlsx`, with a pointer to register HTML templates as new ones; empty
+  files; more than one file), warns when the new file changes the template's type
+  and so which output formats it can produce (`.docx` → pdf/png/docx, `.xlsx` →
+  xlsx), keeps the file and note if the server refuses it so it can be retried,
+  and afterwards reports what happened — the new version, that the old one is
+  kept, which placeholders were added or removed (or that the file is identical
+  to the last) — with a link to History. Built on a new shared `FileDropzone`,
+  which also gives the Register dialog's zone a keyboard focus ring.
+
+### Added
+- **Report codes: address a report by code as well as by its random id.** A report's
+  `report_id` differs in every environment, so an `<iframe src="…/#/embed/<id>">`
+  or a host app's `revenue-comparison=<report_id>` map had to be re-configured for dev,
+  staging and production. A report can now carry an optional, unique **code**
+  (`revenue-comparison`) accepted everywhere an id is — every
+  `/api/v1/reports/{ref}/…` route (with the same permission checks), `#/embed/<code>`,
+  `#/reports/<code>`, and a scheduled job's `report_id` config. Set it with `code` on
+  `POST /reports` / `PATCH /reports/{ref}`, in the Register dialog, or on a template's
+  Overview tab (live rules, a one-click suggestion that is never applied on its own,
+  inline "taken" errors, and a warning before a change or removal breaks callers); the
+  Integration tab gets an *ID | Code* switch that fills every snippet and the embed
+  URL. Register a template with the same code in every environment and the same
+  address works everywhere. 3–64 lowercase letters,
+  digits and single hyphens; never id-shaped or a fixed route segment; unique across the
+  deployment (the render routes are public); and a code an organization has used stays
+  **reserved to it** after a rename or delete so another tenant can't pick up the freed code
+  and start receiving its integration traffic (`report_code_reservations`). Setting/
+  changing/clearing is audited. Resolved once, by a middleware (`app/report_ref.py`), so
+  auth, audit and logs still see the canonical id. Needs `alembic upgrade head`
+  (migrations `c41d9b7e2a06`, `f2b6a4e91c7d`). Design and threat notes:
+  `specs/report_codes_design.md`.
+- **Template file history and downloads.** A template's file is no longer
+  overwritten in place: every upload is kept (`data/report_templates/<id>/versions/`,
+  one `report_versions` row each) with who uploaded it, when, an optional
+  *What changed?* note, size, sha256, and the `{{ placeholders }}` it
+  contains — so the change log can say a version added `{{ branch }}` and
+  dropped `{{ region }}` even though a `.docx` can't be diffed as text.
+  `GET /api/v1/reports/{id}/file[?version=N]` downloads the current file or
+  any retained version (`version=1` is the original upload), and
+  `GET /api/v1/reports/{id}/changelog` returns the merged timeline. Portal:
+  *Download current* / *Download original* on the Overview tab, a new
+  **History** tab, and a note field when replacing a file. Templates that
+  predate this get their current version recorded on first view (uploader
+  unknown) and keep the file they're about to replace; anything already
+  overwritten is gone and reported as such. Manage access on the template
+  *and* membership of its organization are required. Needs
+  `alembic upgrade head` (migration `9e4b7a1c3d58`). **`versions/` grows with
+  every replace and is never pruned — include it in backups.**
+- **Change audit trail.** Every administrative mutation now writes an
+  `audit_events` row — who, from which IP, what, and before/after per
+  changed field: templates (register / replace file / edit / data source /
+  protected terms / access grants / delete / **template downloads**), users
+  (create, status, password and 2FA resets, role and permission grants),
+  roles and their permission sets, organizations, AD/LDAP config and
+  group→role mappings, protected term sets, edits to the deployment-wide term
+  files (detected at startup), jobs, folders, images and stylesheets.
+  Passwords, tokens, header values and free-text request bodies are recorded as
+  *changed* and never stored; env-var *names* stay visible. Append-only, no
+  foreign keys (rows outlive what they describe), best-effort like the login
+  and access-denied trails. `GET /api/v1/audit` (`audit:view`, org-scoped) with
+  filters and paging; portal **Admin → Audit Log**, a user's **Activity** tab,
+  and a Dashboard "Recent changes" panel. See
+  [`api/README.md`](api/README.md#change-audit-trail).
+- `examples/report_templates/revenue-comparison.docx`:
+  partner-web's Revenue Comparison report as an Aksor template — ported from
+  the partner's report engine's Carbone `.docx` with the layout kept intact
+  (render diff vs. the original is sub-pixel glyph positioning only), and
+  a worked example of a nested `{%tr for %}` loop. The request body is the
+  same JSON partner-web already builds, so it embeds via `#/embed/<report_id>`
+  with data posted in over `postMessage`, no reshaping.
+- `api`: `GET /api/v1/examples/revenue-comparison` — sample period-over-period
+  data (the partner-web placeholder dataset, period labels/printed date/signature
+  following the query) returning the whole render context; the demo
+  `data_source` target for the Revenue Comparison example report, alongside
+  `/examples/branches` (the `options_source` demo).
+- `api`: Quartz-style job scheduling (Phases 3+4 of the auth/RBAC/
+  scheduler build — see Phases 1-2's entries below), split into two new
+  services specifically so retrying a failed job doesn't depend on the
+  same process deciding when things fire: `scheduler` (`app/scheduler.py`,
+  single replica, APScheduler + `SQLAlchemyJobStore` against the same
+  Postgres — the direct Python analog to Quartz's JobStore + CronTrigger)
+  polls the new `jobs` table and, on fire, only enqueues a Celery task;
+  `worker` (`app/celery_app.py`'s `run_job` task, horizontally scalable)
+  actually executes it via `app/job_executors.py`, retrying — with the
+  *job's own* `max_retries`/`retry_backoff_seconds`, not a fixed
+  per-task policy — only transient failures (`RetryableJobError`:
+  network errors, 5xx), never a bad config, a 4xx, or a permission error
+  (`PermanentJobError`). Four `job_type`s: `render_report` (render a
+  registered template to a file — the common case), `rest_call`
+  (Jinja2-templated body/headers, env-var-referenced auth secrets),
+  `soap_call` (via `zeep` — the "thin adapter" this project's docs
+  always said SOAP would need), `file_output` (a static payload or a
+  freshly-rendered report, written to a configured path). New
+  `/api/v1/jobs` router: CRUD, `/run` (a person clicking "run now," or
+  any external system invoking it via the same route with a
+  `job:trigger` credential — no separate webhook to maintain), and
+  `/runs` history. New `redis` service (Celery's broker); `scheduler`/
+  `worker` use a new `docker-entrypoint-no-migrate.sh` and
+  `depends_on: api: condition: service_healthy` rather than each running
+  `alembic upgrade head` concurrently on startup.
+
+  Verified against real infrastructure (a real Postgres, a real Redis,
+  real `scheduler`/`worker` subprocesses), which caught two real bugs a
+  single in-process reconcile() call never would have: APScheduler's
+  `SQLAlchemyJobStore` refusing to pickle a scheduler instance passed as
+  a job argument, and a naive reconcile loop resetting an unchanged
+  job's next-fire time on *every* poll (a 10s-interval job polled every
+  5s never actually fired). `api/tests/test_scheduler_integration.py`
+  keeps both regressions covered permanently — real subprocesses, a real
+  Redis, asserting a job fires **on its own** and that an induced REST
+  failure actually retries with backoff before failing for good; skips
+  itself without a reachable Redis, and a `redis` CI service means it
+  isn't skipped there.
+- `api`: AD/LDAP login (Phase 2 of the auth/RBAC/scheduler build — see
+  Phase 1's entry below). New `app/auth_ldap.py`: three bind strategies
+  against a directory configured per-organization
+  (`/api/v1/ldap-configs`, `app/db.py`'s `LdapConfig`) — `direct_bind`
+  (fixed DN template), `search_bind` (service account finds the user's
+  DN, then re-binds as them — the standard method for real AD, since AD
+  usernames aren't DNs), `upn_bind` (`user@domain`, an AD-specific
+  shortcut with no OpenLDAP equivalent). A directory group can be mapped
+  to an internal role (`ldap_group_role_mappings`); on every successful
+  login, the user's real group membership is re-resolved and matching
+  role grants (tagged `granted_by="ldap-sync"`) are added or deactivated
+  to match, without ever touching a manually-granted role of the same
+  name. Verified against a real (not mocked) OpenLDAP server —
+  `docker-compose.ldap-dev.yml` + `scripts/seed-ldap-dev.sh` locally, an
+  `openldap` service in CI — since no real Active Directory is reachable
+  from this environment; a real, non-trivial finding surfaced by that
+  verification: OpenLDAP's default ACL blocks a regular user from
+  reading anything but their own entry, silently breaking group lookups
+  until a realistic group-read ACL is applied
+  (`api/tests/fixtures/ldap-acl.ldif`). `upn_bind`'s success path is
+  documented as verifiable only against real AD, not claimed to work
+  against the OpenLDAP dev server (verified there to fail closed
+  instead).
+- `api`: multi-tenant auth, roles, and permissions (Phase 1 of a larger
+  auth/RBAC/scheduler build — see `specs/` for the full multi-phase
+  plan). Benchmarked against JasperReports Server's model (Organizations,
+  Users, Roles, resource ACLs) and extended with expiring grants, which
+  Jasper doesn't have. New tables (`api/app/db.py`): `organizations`,
+  `users`, `roles`, `permissions`, `role_permissions`, and three
+  *expiring* grant tables — `user_role_assignments`,
+  `user_permission_grants`, `report_access_grants` (a role, a direct
+  permission, or access to one specific report, each with an optional
+  `expires_at`; expired/revoked grants just stop counting, no cleanup job
+  needed for correctness). `reports` gained an `org_id` column.
+  New routers: `organizations.py`, `users.py`, `roles.py`, `grants.py`
+  (all org-scoped — a non-superuser is 404'd, not 403'd, out of another
+  org's resources, to avoid confirming they exist). `app/auth.py`
+  reworked: `require_auth`/`require_permission`/`require_report_permission`
+  now check either the break-glass `PORTAL_USERNAME`/`PORTAL_PASSWORD`
+  (kept as a bootstrap fallback) or a database user's effective,
+  expiry-filtered permission set (`app/rbac.py`); `/api/v1/reports`'s
+  mutating routes moved from a blanket auth check to requiring
+  `report:manage` (via role or direct grant) or a report-specific
+  `manage` access grant. Passwords hashed with `bcrypt` directly (not
+  `passlib`, which is unmaintained and incompatible with `bcrypt>=4.1`).
+  Usernames are unique per-org, not globally — a `username|org_id` login
+  form (same convention JasperReports Server uses) disambiguates a
+  username that exists in more than one org.
+
+### Changed
+- `api`: report *metadata* (name, description, version, timestamps,
+  `sample_context`) moved from one `meta.json` file per report to a
+  `reports` table via SQLAlchemy + Alembic migrations (`api/app/db.py`,
+  `api/migrations/`) — the old file was read-modify-written with no
+  locking, so concurrent `PATCH`/replace-file calls against the same
+  `report_id` could race; a real database also lets `api` run as more
+  than one replica without a shared filesystem for metadata. The
+  template *files* themselves are unaffected — still plain `.docx`/`.xlsx`
+  files under `data/report_templates/<report_id>/`, this is scoped to
+  metadata only. `DATABASE_URL` selects the backend: unset falls back to
+  a local SQLite file (zero setup); `docker-compose.yml` gained a
+  `postgres` service (named volume, healthcheck-gated `depends_on` on
+  `api`) wired to `postgresql+psycopg://...` for real deployments.
+  `api`'s Docker image runs `alembic upgrade head` on every container
+  start via a new entrypoint (`api/docker-entrypoint.sh`) before starting
+  uvicorn. `api/tests/conftest.py`'s `isolated_report_store` fixture now
+  also points each test at its own throwaway SQLite file, so `pytest`
+  needs no live database. CI gained a step that applies the migration
+  against a real `postgres` service container, not just SQLite, since
+  the two dialects aren't guaranteed to behave identically. `report_id`s
+  and the JSON API's response shape are unchanged — this is a storage
+  migration, not an API change.
+
+### Added
+- `portal`: rewritten as a React + TypeScript app (Vite), replacing the
+  original plain HTML/CSS/JS single page (see the addendum in
+  `specs/template_portal_design.md`). A template gallery (search, an
+  id chip with copy-to-clipboard for `report_id`, format/version badges)
+  replaces the flat table; each template's detail view gained **Fields**
+  (calls the new `/reports/{id}/schema` route), **Try it** (render
+  inline, save a sample payload), and **Integrate** (auto-generated,
+  copy-buttoned curl/JavaScript/Python snippets — syntax highlighted via
+  `prism-react-renderer` — filled in with the real `report_id` and saved
+  sample context) tabs; a new **Batch render** view drives
+  `/reports/{id}/render/batch`. No router (a lightweight `hashchange`
+  listener gives `#/reports/<id>` linkability instead); the JSON context
+  editor stays a plain `<textarea>` + `JSON.parse` validation to keep the
+  dependency surface small. `portal/Dockerfile` is now a multi-stage
+  build (Node → `nginx:alpine`) — the deployed image is still just
+  static files. Dark, warm-black/terracotta visual identity
+  (Fraunces/Work Sans/JetBrains Mono, the project's own bundled
+  `KhmerOSSiemreap.ttf` for template names) distinct from a generic
+  admin-CRUD UI.
+- `aksor_khmer_ocr_segmenter`: directory-based protected-terms
+  loading — `AKSOR_KHMER_OCR_PROTECTED_TERMS_DIR` /
+  `AKSOR_KHMER_OCR_EXCLUDED_TERMS_DIR` (env vars, os.pathsep-separated),
+  or `extra_terms_dir=`/`exclude_terms_dir=` per call, or
+  `--protected-terms-dir`/`--exclude-terms-dir` on the CLI. Every `*.txt`
+  file directly inside the given directory is merged in (sorted by
+  filename), alongside the existing explicit-file mechanism — lets a
+  deployment with several exception-term sources (per customer, per
+  branch) drop a new `.txt` file into a folder instead of editing an env
+  var each time. `api/khmer_protected_terms.d/` and
+  `api/khmer_protected_terms.exclude.d/` are the worked example, wired
+  into `docker-compose.yml`.
+- `api`: `POST /api/v1/reports/{report_id}/render/batch?format=...` —
+  render one report against a JSON array of contexts in a single request,
+  returned as one ZIP. Synchronous (no job queue exists anywhere in this
+  project), capped at `MAX_BATCH_SIZE` (200) contexts per request, first
+  error fails the whole batch. `POST .../render` (single) now returns via
+  `StreamingResponse` instead of a fully-buffered `Response` — real
+  streamed HTTP delivery, though generation itself is still one
+  synchronous conversion, not incremental.
+- `api`: `GET /api/v1/reports/{report_id}/schema` — best-effort list of
+  the Jinja2 placeholder field names a registered template references
+  (docxtpl's AST walk for `.docx`, a regex scan of the workbook XML for
+  `.xlsx`, since xltpl has no equivalent). `ReportMeta`/`ReportUpdate`
+  gained `sample_context: dict | None`, settable via the existing
+  `PATCH /api/v1/reports/{id}` — a known-good example payload saved once
+  and reused (by the portal's Try-it/Integrate panels, or anyone else)
+  instead of guessing field names from scratch each time.
+- `doc_engine.charts`: bar/line/pie charts embeddable in docx templates
+  — a chart spec (`{"chart": "bar"|"line"|"pie", "labels": [...],
+  "series": [...], ...}`) as a field's value gets rendered via
+  matplotlib and dropped into a plain `{{ field }}` placeholder as a
+  real embedded image (docxtpl `InlineImage`). Registered with the
+  project's bundled Khmer font, with a `[Khmer OS Siemreap, DejaVu Sans]`
+  fallback list for mixed Khmer+Latin chart text — `KhmerOSSiemreap.ttf`
+  turns out to have no Latin glyphs at all (checked directly against its
+  cmap), which Word/LibreOffice paper over via OS font-substitution but
+  matplotlib does not do automatically; confirmed fixed by actually
+  rendering mixed-script text before relying on it, not assumed. Chart
+  specs are explicitly skipped by `segment_generic`/`segment_context`
+  (see `doc_engine.charts.is_chart_spec`) — they mix structural keys
+  with display text in one dict, and chart text is short/non-wrapping
+  so Khmer segmentation has nothing to do there anyway. Docx-only for
+  now; see `docs/building-a-report.md`'s Charts section. This stays
+  within "render a document from a template" — see the tightened
+  wording in `docs/why-aksor-khmer-bi.md`'s scope section, which
+  previously said "no charts" outright.
+- `api`: `/api/v1/reports` — register any `.docx` or `.xlsx` template
+  (Jinja2 placeholders — docx via docxtpl, xlsx via xltpl) and render it
+  against arbitrary JSON data, no fixed schema required. `doc_engine.render()`
+  gained an optional `template_path` parameter (docx/pdf/png via the
+  libreoffice backend for docx templates, xlsx for xlsx templates) and
+  `doc_engine.segmentation.segment_generic()` Khmer-segments every string
+  in an arbitrary JSON structure, for templates with no fixed field list
+  to allowlist from. `doc_engine.engines.excel_engine.render_xlsx_template`'s
+  docstring documents the row-loop authoring recipe (xltpl's own docs
+  don't cover it correctly — verified empirically), along with a known
+  LibreOffice Calc PDF-export limitation with Khmer text (Calc-specific —
+  doesn't affect the xlsx file itself or the render path, which never
+  goes through Calc/PDF).
+- `examples/report_templates/`: real `receipt.docx`, `invoice.docx`, and
+  `invoice.xlsx` templates (with `build_receipt.py` / `build_invoice.py`)
+  — worked examples of the generic-template mechanism, not just the
+  abstract capability.
+- `portal/`: a template management portal (plain HTML/CSS/JS, no build
+  step) for registering, previewing, editing, replacing/versioning, and
+  deleting report templates — a separate, independently deployable
+  service from `api` (its own `nginx:alpine` image, no Python/LibreOffice
+  weight; `portal/config.js` points it at wherever `api` runs). Backed
+  by HTTP Basic auth on `api` (`api/app/auth.py`,
+  `PORTAL_USERNAME`/`PORTAL_PASSWORD` — fails closed if unconfigured) on
+  the administrative `/api/v1/reports` routes only; listing, getting,
+  and rendering stay unauthenticated, matching the open-by-default
+  design the rest of the API was built around. New
+  `PATCH /api/v1/reports/{id}` (metadata) and
+  `PUT /api/v1/reports/{id}/file` (replace + version-bump) routes;
+  `ReportMeta` gained `template_ext`, `version`, `updated_at`. `api`
+  gained `CORSMiddleware` (`CORS_ALLOWED_ORIGINS` env var) so the
+  portal's cross-origin requests are allowed. Design doc:
+  `specs/template_portal_design.md`.
+- `docs/getting-started.md`, `docs/building-a-report.md`,
+  `docs/deployment.md`, `docs/why-aksor-khmer-bi.md`: getting-started
+  walkthrough, the docx/xlsx template-authoring recipe (including the
+  repeating-row structure both engines actually need — verified, not
+  copied from either library's docs), what's in the Docker image and
+  why, and an honest positioning writeup (what this is and, explicitly,
+  isn't). `README.md` rewritten to link all of the above and document
+  `/api/v1/reports` and `/portal`, which it previously didn't mention at
+  all; `README.km.md` added as a Khmer translation.
+
+### Changed
+- Renamed `khmer_ocr_segmenter` to `aksor_khmer_ocr_segmenter` — the
+  distribution name, CLI entry point (`khmer-ocr-segment` →
+  `aksor-khmer-ocr-segment`), and the `KHMER_OCR_PROTECTED_TERMS_FILE` /
+  `KHMER_OCR_EXCLUDED_TERMS_FILE` environment variables (now
+  `AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE` / `AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE`)
+  all moved together for consistency.
+- Moved `packages/api` to `api` at the repo root — it's the deployable
+  service, not an installable library, so it doesn't belong alongside
+  `packages/aksor_khmer_ocr_segmenter` and `packages/doc_engine`
+  (which stay pure libraries, no HTTP/framework dependency). No code
+  changes needed for the move itself — `report_store.py`'s storage path
+  and `main.py`'s (now-removed) static mount were both computed relative
+  to their own file location.
+- Moved registered-report storage from `api/report_templates/` to
+  top-level `data/report_templates/` — `api/` should hold only code, not
+  runtime data, same reasoning as the `api`/`portal` split.
+  `report_store.STORE_DIR` now resolves to the repo root's `data/`
+  regardless of `api/`'s own location; `docker-compose.yml`'s volume
+  mount moved to match (`./data/report_templates:/app/data/report_templates`).
+
+### Removed
+- The bundled `/api/v1/examples/notice/*` reference example (a
+  Cambodian property-tax notice with a strict `NoticeRequest` schema),
+  `api/app/generator.py`, `templates/notice.docx`, and the
+  `doc_engine` built-in-template fallback (`config.TEMPLATE_DOCX`/
+  `TEMPLATE_HTML`, `segmentation.segment_context`,
+  `excel_engine.render_xlsx`, and `registry.render`'s
+  `template_path=None` default) it depended on — now that
+  `/api/v1/reports` is the only, general path, keeping a second
+  fixed-schema code path around just to demonstrate it wasn't worth the
+  upkeep. `doc_engine.render()`'s `template_path` is now a required
+  keyword argument instead of defaulting to the built-in template.
+
+## [0.1.0] - 2026-09-04
+
+### Added
+- `aksor_khmer_ocr_segmenter`: Tesseract OCR + ICU dictionary-based Khmer word
+  segmentation, inserting ZWSP break points into unspaced Khmer text.
+- `doc_engine`: format-routed rendering (`docx`/`pdf`/`png`/`xlsx`) with
+  two selectable backends for pdf/png — `libreoffice` (docx template,
+  native Khmer justify) and `weasyprint` (HTML/CSS template, lighter
+  footprint).
+- `api`: FastAPI service exposing all four formats with Swagger/OpenAPI
+  docs at `/docs`, backend selectable per request for pdf/png.
+- `docs/khmer-line-breaking.md`: findings on why WeasyPrint/Pango cannot
+  line-break unspaced Khmer natively, and how LibreOffice/ICU do.
+- `docs/architecture.md`: engine-selection decision table.

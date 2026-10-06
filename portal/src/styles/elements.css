@@ -1,0 +1,569 @@
+/* Small reusable UI atoms used across more than one page: panels,
+   alerts, badges, tabs, code snippets, the spinner/dialog primitives. */
+
+/* ---- panels / cards ------------------------------------------------------ */
+
+.panel {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  /* Now that --bg-raised matches the page's own --bg (see tokens.css),
+     a resting shadow is what actually lifts this off the page -- the
+     border alone reads as flat on a same-color backdrop. */
+  box-shadow: var(--shadow-card);
+}
+
+.panel + .panel {
+  margin-top: 20px;
+}
+
+.panel-title {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.panel-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-faint);
+  margin: 0 0 18px;
+}
+
+/* ---- page header ----------------------------------------------------------
+   The one wrapper every top-level page (Reports, Batch render, Schedules,
+   Resources, Template detail, every Admin section, ...) opens with: a
+   `.page-title`/`.page-subtitle` pair on the left, optional actions (a
+   "+ New X" button, a badge, a timestamp) on the right via the
+   `justify-content: space-between`. One definition here means a spacing or
+   sizing change applies everywhere at once instead of drifting between
+   pages. Pages with no title/subtitle at all (e.g. Gallery/Templates) skip
+   this wrapper entirely rather than rendering it empty. */
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  margin: 0 0 6px;
+}
+
+.page-subtitle {
+  font-size: 0.88rem;
+  color: var(--text-faint);
+  margin: 0;
+}
+
+/* One-line variant of the header for pages where the content below is the
+   point and screen height is scarce (the run page): an optional leading
+   control (a back link), then `.page-header-text` carrying the title and
+   subtitle side by side, the subtitle truncating rather than wrapping.
+   Same `.page-title`/`.page-subtitle` inside -- only the scale changes. */
+.page-header-compact {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.page-header-compact .page-header-text {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-soft);
+}
+
+.page-header-compact .page-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 65%;
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-header-compact .page-subtitle {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Phones: title above description beside the back link, not squeezed
+   into one line. */
+@media (max-width: 640px) {
+  .page-header-compact .page-header-text {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+  .page-header-compact .page-title {
+    max-width: 100%;
+  }
+  .page-header-compact .page-subtitle {
+    flex: none;
+    max-width: 100%;
+  }
+}
+
+.alert {
+  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border: 1px solid transparent;
+}
+
+.alert-error {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger-strong);
+}
+
+.alert-success {
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  color: var(--success-strong);
+}
+
+.alert-warning {
+  background: var(--highlight-soft);
+  border-color: color-mix(in srgb, var(--highlight) 40%, transparent);
+  color: var(--highlight-strong);
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.badge-docx {
+  background: var(--info-soft);
+  color: var(--info-strong);
+}
+
+.badge-xlsx {
+  background: var(--success-soft);
+  color: var(--success-strong);
+}
+
+.badge-html {
+  background: var(--highlight-soft);
+  color: var(--highlight-strong);
+}
+
+/* A report that's open to everyone in its org (see TemplateDetail.tsx's
+   AccessTab is_public toggle) -- reuses the accent pair, same as
+   .badge-custom does for its own, unrelated "distinctive" meaning. */
+.badge-public {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* Access Review page: which grant table a row came from. */
+.badge-report {
+  background: var(--info-soft);
+  color: var(--info-strong);
+}
+
+.badge-folder {
+  background: var(--highlight-soft);
+  color: var(--highlight-strong);
+}
+
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 22px;
+  overflow-x: auto;
+}
+
+.tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.88rem;
+  padding: 10px 4px;
+  margin-right: 22px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--text-dim);
+}
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* ---- code snippets -------------------------------------------------------- */
+
+.snippet-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: -1px;
+}
+
+.snippet-tab {
+  appearance: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  padding: 7px 14px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+}
+
+.snippet-tab.active {
+  background: var(--bg-input);
+  color: var(--accent-strong);
+}
+
+.snippet-block {
+  position: relative;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 0 var(--radius) var(--radius) var(--radius);
+  overflow: auto;
+}
+
+.snippet-block pre {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.copy-btn:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent-border);
+}
+
+.copy-btn.copied {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+}
+
+/* ---- utility ------------------------------------------------------------ */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spread {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.muted {
+  color: var(--text-faint);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Visually hidden but still announced -- the accessible label standing in
+   for a skeleton's decorative (aria-hidden) shimmer blocks. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- skeleton loaders --------------------------------------------------
+   One shimmer primitive, sized per use site (ReportSkeleton.tsx, plus
+   RunReportPage's own "opening report" placeholder). A moving highlight
+   band beats a flat pulse -- reads as "content is actually on its way"
+   rather than just "something is disabled." */
+.skel {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-panel);
+  background-image: linear-gradient(100deg, transparent 34%, var(--bg-panel-hover) 50%, transparent 66%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  border-radius: 5px;
+  animation: skel-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes skel-shimmer {
+  from {
+    background-position: -60% 0;
+  }
+  to {
+    background-position: 160% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel {
+    animation: none;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+dialog.modal {
+  /* The native <dialog> UA stylesheet centers a `:modal` dialog via
+     `inset: 0; margin: auto`, but Tailwind's Preflight zeroes `margin`
+     on every element (see the base-layer universal reset) -- author CSS
+     always outranks the UA stylesheet, so that reset silently won and
+     collapsed every dialog to the top-left corner (inset:0, no margin
+     to distribute the leftover space) until this re-declares it. */
+  margin: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  color: var(--text);
+  padding: 22px;
+  max-width: 480px;
+  width: 90vw;
+  /* A form that grows (more fields, a picker with its own list) would
+     otherwise run off the top and bottom of a shorter screen with no way
+     to reach what's cut off -- capped height with its own scroll instead,
+     the same fix .modal-wide already had, now every dialog gets it. */
+  max-height: 92vh;
+  overflow-y: auto;
+  /* Reserve the scrollbar's width up front. Without it, a form that grows past the screen (a resizable text
+     area dragged taller, an error message appearing) adds the scrollbar mid-way, every line re-wraps by
+     ~15px and the whole dialog visibly jumps -- worst with scrollbars set to always show. */
+  scrollbar-gutter: stable;
+  box-shadow: var(--shadow-pop);
+}
+
+/* The × every dialog shares (components/ModalClose.tsx). Sticky + float: it takes no room of its own, the title
+   flows beside it, and in a dialog that scrolls it stays in the corner instead of scrolling away. */
+.modal-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -8px -8px 0 10px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.modal-close:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text);
+}
+
+.modal-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The dialog scrolls itself, and a scrollbar is a square strip: left alone it runs right up into the rounded
+   corners and pokes out past the curve (worst with "always show scrollbars" on). Styling it lets the track be
+   pulled in by the corner radius, so the bar starts and ends inside the curve; the thumb gets a margin of
+   the dialog's own colour so it reads as a floating pill, not a bar glued to the edge. */
+dialog.modal::-webkit-scrollbar {
+  width: 14px;
+}
+
+dialog.modal::-webkit-scrollbar-track {
+  background: transparent;
+  margin: var(--radius-lg) 0;
+}
+
+dialog.modal::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 3px solid var(--bg-raised);
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+dialog.modal::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+dialog.modal::backdrop {
+  background: var(--overlay);
+  /* No backdrop-filter: blurring the whole page behind the dialog means the browser re-blurs it every time
+     anything in the dialog repaints (dragging a resize handle, scrolling), which shows as flicker on many GPUs
+     and costs frames everywhere. A plain dim overlay looks nearly the same. */
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ---- badges (admin status variants) -------------------------------------- */
+
+.badge-active {
+  background: var(--success-soft);
+  color: var(--success-strong);
+}
+
+.badge-inactive,
+.badge-locked {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}
+
+/* Waiting on the account's owner (e.g. a temporary password they haven't
+   replaced yet) -- attention, not failure, so the terracotta highlight rather
+   than the danger red of inactive/locked. */
+.badge-pending {
+  background: var(--highlight-soft);
+  color: var(--highlight-strong);
+}
+
+.badge-system {
+  background: var(--info-soft);
+  color: var(--info-strong);
+}
+
+.badge-custom {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.badge-local {
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.badge-ldap {
+  background: var(--info-soft);
+  color: var(--info-strong);
+}
+
+.badge-enabled {
+  background: var(--success-soft);
+  color: var(--success-strong);
+}
+
+.badge-disabled {
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.badge-success {
+  background: var(--success-soft);
+  color: var(--success-strong);
+}
+
+.badge-failed {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}
+
+.badge-queued {
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.badge-running {
+  background: var(--info-soft);
+  color: var(--info-strong);
+}
+
+.badge-retrying {
+  color: var(--meter-warning);
+  background: color-mix(in srgb, var(--meter-warning) 18%, transparent);
+}
+

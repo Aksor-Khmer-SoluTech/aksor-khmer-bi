@@ -1,0 +1,41 @@
+# Redis, on its own -- Celery's broker and result backend. Kept apart from PostgreSQL
+# (docker-compose.db.yml) and the application (docker-compose.yml) so each has its own lifecycle, and so Redis
+# can be pointed at a managed one (ElastiCache...) by simply not starting this file and setting REDIS_URL.
+#
+# Joins the external network `aksor-network`, so the app containers reach this as `redis`.
+# ./deployment.sh creates the network and starts the stacks in order; to run by hand
+# (full walkthrough: DEPLOYMENT.md):
+#
+#   docker network create aksor-network
+#   docker compose -p aksor-redis -f docker-compose.redis.yml up -d --wait
+#   docker compose -p aksor-db    -f docker-compose.db.yml    up -d --wait
+#   docker compose -p aksor-app   -f docker-compose.yml       up -d --build --wait
+#
+# Use distinct project names (-p) as above: with one shared project, `--remove-orphans`
+# on one stack would delete the others' containers.
+services:
+  # Celery's broker + result backend (api/app/celery_app.py): `api` and `scheduler`
+  # enqueue job runs, `worker` consumes them. AOF persistence so queued runs
+  # survive a restart of this container.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  redisdata:
+    # Same name Compose gave this volume when it lived in the combined file under the
+    # default project name, so an existing queue carries straight over.
+    name: aksor-khmer-bi_redisdata
+
+networks:
+  default:
+    name: aksor-network
+    external: true

@@ -1,0 +1,651 @@
+/* Page chrome, GitLab-shaped: a slim always-visible top bar (brand, an
+   Admin shortcut, who's signed in) with a contextual left rail below it
+   (its own nav lives in AppSidebar.tsx) and a main column beside that.
+   The whole frame is viewport-locked — only the sidebar and the main
+   column scroll independently — so the top bar and rail never disappear
+   as you read a long page. */
+
+.app-root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--bg-raised);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ---- account menu (Profile, Change password, Preferences, Sign out) ----- */
+
+.account-menu {
+  position: relative;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-soft);
+}
+
+.account-trigger {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px 4px 4px;
+  margin: -4px -8px -4px -4px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.account-trigger:hover {
+  background: var(--bg-panel);
+}
+
+.account-trigger .who-name {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.account-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 240px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  z-index: 30;
+  animation: rise 0.15s ease;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.account-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.account-panel-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-panel-sub {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+}
+
+.account-item {
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.account-item:hover {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.account-item.active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.account-divider {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 6px 4px;
+}
+
+.account-item-danger {
+  color: var(--danger);
+}
+
+.account-item-danger:hover {
+  background: var(--danger-soft);
+}
+
+/* ---- notifications bell + dropdown --------------------------------------- */
+
+.notif-menu {
+  position: relative;
+}
+
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  z-index: 30;
+  animation: rise 0.15s ease;
+  overflow: hidden;
+}
+
+.notif-panel-header {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 26px 22px 24px;
+  color: var(--text-faint);
+}
+
+.notif-empty svg {
+  opacity: 0.45;
+  margin-bottom: 4px;
+}
+
+.notif-empty p {
+  margin: 0;
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 0.88rem;
+}
+
+.notif-empty span {
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.8rem;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+/* Shown while UserAvatar.tsx is fetching an uploaded photo that's known
+   to exist (avatar_content_type is set) but hasn't resolved yet -- a
+   shimmer reads as "this has a photo, it's on its way," where the
+   initial-letter fallback would wrongly read as "no photo." Compound
+   selector (not a bare .avatar-skel) so its background/radius win over
+   .avatar's and .skel's own regardless of each file's load order.
+
+   This circle sits on the *tinted top bar* as well as on white panels, and
+   the page's usual skeleton gray (--bg-panel) is a 1.04:1 match for that
+   bar -- the fill vanished, leaving only the shimmer's glow, which read as a
+   blob rather than a round avatar. So it is drawn from translucent tones of
+   the text colour instead (visible over any background, in light and dark),
+   with a defined ring: the edge, not the fill, is what makes it a circle.
+   The shimmer is a soft band of the same tone, and the shape holds even
+   with motion reduced.
+
+   Inside the circle is a head-and-shoulders silhouette -- the universal
+   "user" glyph -- so the placeholder says *a person's picture* rather than
+   just "something is loading". It is two soft-edged shapes (percentages of
+   the box, so it scales from the 28px top-bar avatar to the 64px profile
+   one), in the ring's tone; the shoulders run off the bottom and are clipped
+   by the circle. The shimmer sweeps over it from a separate overlay so the
+   figure catches the light too. */
+.avatar.avatar-skel {
+  --skel-figure: color-mix(in srgb, var(--text-faint) 58%, transparent);
+  position: relative;
+  background-color: color-mix(in srgb, var(--text-faint) 34%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text-faint) 62%, transparent);
+  border-radius: 50%;
+}
+
+/* Inset by the ring's width and rounded, so the figure and the sheen are clipped
+   to the circle *inside* the ring instead of painting over it -- the outline
+   stays one even line all the way round, including where the shoulders meet it. */
+.avatar.avatar-skel::before,
+.avatar.avatar-skel::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  border-radius: 50%;
+}
+
+.avatar.avatar-skel::before {
+  background-image:
+    radial-gradient(ellipse 19% 19% at 50% 37%, var(--skel-figure) 96%, transparent 100%),
+    radial-gradient(ellipse 39% 31% at 50% 97%, var(--skel-figure) 96%, transparent 100%);
+  background-repeat: no-repeat;
+}
+
+.avatar.avatar-skel::after {
+  background: linear-gradient(100deg, transparent 34%, color-mix(in srgb, var(--text) 14%, transparent) 50%, transparent 66%) 0 0 / 200% 100% no-repeat;
+  animation: skel-shimmer 1.6s ease-in-out infinite;
+}
+
+/* Photo circle: neutral behind the image, not the accent green the initial
+   sits on -- otherwise the circle flashes green for the frame or two before
+   the photo paints. */
+.avatar.avatar-photo {
+  background: var(--bg-panel);
+}
+
+/* Whatever replaces the shimmer fades in instead of snapping, so a fast load
+   reads as one soft transition rather than a flash. */
+.avatar-img,
+.avatar-initial {
+  animation: avatar-in 0.28s ease-out both;
+}
+
+@keyframes avatar-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-img,
+  .avatar-initial {
+    animation: none;
+  }
+  /* No sweep: the circle and the silhouette alone still read as a placeholder. */
+  .avatar.avatar-skel::after {
+    display: none;
+  }
+}
+
+/* An uploaded photo (see UserAvatar.tsx) fills the same circle the
+   initials fallback sits in, cropped to cover rather than letterboxed. */
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---- app shell: sidebar + main column ----------------------------------- */
+
+.app-shell {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.app-sidebar {
+  flex: 0 0 224px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 14px;
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-panel);
+  overflow-y: auto;
+  transition: flex-basis 0.15s ease;
+}
+
+.app-sidebar.collapsed {
+  flex-basis: 60px;
+  padding: 16px 8px;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  /* Matches AppSidebar.tsx/TopBar.tsx's own `bg-bg-chrome` (they're
+     Tailwind-classed directly, not styled by the -- mostly dead now --
+     .app-sidebar/.topbar rules elsewhere in this file) so the notch
+     .app-content's rounded corners reveal blends into the same chrome
+     tone as the sidebar instead of showing a mismatched gray patch. */
+  background: var(--bg-chrome);
+}
+
+.app-content {
+  flex: 1;
+  background: var(--bg-raised);
+  border-radius: var(--radius);
+}
+
+/* Gallery/BatchRender/SchedulesPage's own padding -- no max-width/
+   centering (that used to cap this at 1080px "reading width," but on a
+   wide monitor that read as a huge dead margin either side for content
+   that's a card grid/data list, not prose; full width now, same as
+   AdminShell/ResourcesPage/TemplateDetail already were). */
+.shell {
+  width: 100%;
+  padding: 32px 24px 64px;
+}
+
+/* For pages whose content is the point and wants the vertical room
+   (the run page's report viewer). */
+.shell-tight {
+  padding-top: 16px;
+}
+
+.glyph-img {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  object-fit: cover;
+  background: var(--bg-panel);
+}
+
+/* ---- footer ------------------------------------------------------------- */
+
+.app-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-soft);
+  /* --text-faint alone is only ~2.6-3:1 on the tinted chrome this sits on
+     (light and dark), too low for 12px text; leaning it toward --text-dim
+     clears 4.5:1 on every accent while staying visibly quieter than the
+     name below. */
+  color: color-mix(in srgb, var(--text-dim) 75%, var(--text-faint));
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+/* name · © year · license · contribute -- the name carries the weight
+   (dim + semibold) and everything after it stays faint, so the line reads
+   as a signature with fine print rather than equal fragments. */
+.app-footer-legal {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.app-footer-name {
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.app-footer-sep {
+  opacity: 0.6;
+}
+
+/* A hairline underline at rest so the license link reads as a link
+   without shouting; hover swaps in the accent, focus gets a real ring. */
+.app-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.app-footer a:hover {
+  color: var(--accent-strong);
+  text-decoration-color: currentColor;
+}
+
+.app-footer a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app-footer a svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* The one genuinely technical string in the footer, so it takes the mono
+   face (see tokens.css) as a hairline capsule. */
+.app-footer-version {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+/* ---- brand (top bar) + sidebar nav ---------------------------------------- */
+
+.wordmark {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-align: left;
+}
+
+.wordmark .glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-accent);
+  flex: 0 0 auto;
+}
+
+/* Two-line lockup next to the glyph: the brand/product row on top, the
+   tagline ("Business Intelligence" — see branding.ts's `tagline`) below
+   it, small and quiet like the eyebrow line above the wordmark on the
+   sign-in screen (`.login-brand-eyebrow`). */
+.wordmark-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* `align-items: baseline`, not `center` — centering by line-box height
+   looked wrong once the brand and product text landed at very different
+   font sizes in the same display serif: the smaller text's line box is
+   shorter, so a center-aligned box still puts its glyphs visibly lower
+   than the brand's. Baseline alignment lines up the actual text instead;
+   the divider bar (no text of its own) is centered separately since a
+   baseline-aligned empty box would otherwise sit by its own bottom edge. */
+.wordmark-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* Module name ("Control Plane") trailing the brand ("Aksor Khmer BI"),
+   the line between them borrowed from the same divider `.account-menu`
+   uses against the sign-out block — one consistent "separator = a
+   different identity next door" idiom across the top bar. Only renders
+   when a deployment sets PORTAL_PRODUCT_NAME (see branding.ts). */
+.wordmark-product {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.wordmark-divider {
+  align-self: center;
+  width: 1px;
+  height: 18px;
+  background: var(--border-strong);
+  flex: 0 0 auto;
+}
+
+.wordmark-brand {
+  white-space: nowrap;
+}
+
+.wordmark-tagline {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 16px 12px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.nav-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 500;
+  padding: 9px 12px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.nav-item svg {
+  flex: 0 0 auto;
+}
+
+.nav-item:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.nav-item.nav-back {
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  padding: 6px 12px 9px;
+}
+
+.nav-item.nav-back:hover {
+  background: none;
+  color: var(--text-dim);
+}
+
+.nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.chevron {
+  display: inline-flex;
+  transition: transform 0.15s ease;
+}
+
+.chevron-flipped {
+  transform: rotate(180deg);
+}
+
+/* ---- collapsed sidebar: icons only, no labels ----------------------------- */
+
+.app-sidebar.collapsed .nav-label,
+.app-sidebar.collapsed .sidebar-label {
+  display: none;
+}
+
+.app-sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 9px 0;
+}
+
+.app-sidebar.collapsed .nav-item.nav-back {
+  padding: 6px 0 9px;
+}
+
+/* ---- admin console ------------------------------------------------------ */
+
+.admin-content {
+  padding: 24px 28px 64px;
+}
+

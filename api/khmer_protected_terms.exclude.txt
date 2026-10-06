@@ -1,0 +1,19 @@
+# Project-scoped Khmer EXCLUDED-terms file for this API.
+#
+# Same format as khmer_protected_terms.txt (one term per line, '#'
+# comments ignored; .json also supported). Listing a term here removes it
+# from the merge set for this deployment -- whether it's a shared
+# aksor_khmer_ocr_segmenter built-in or came from khmer_protected_terms.txt --
+# reverting to ICU's original (unmerged) behavior for just that term.
+#
+# Use this only if a shared built-in term turns out to be actively wrong
+# for this API's real data (e.g. it collides with a genuinely different
+# word this deployment's users submit). Don't use it to "clean up" a term
+# you simply haven't verified -- see protected-terms-guide.md's
+# classification rubric.
+#
+# Wire it in before starting the API:
+#   export AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE=api/khmer_protected_terms.exclude.txt
+#   uvicorn app.main:app --reload --port 8000
+#
+# Empty by default.

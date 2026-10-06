@@ -1,0 +1,11 @@
+# Example/template file for this directory -- every line here is a
+# comment, so this file contributes zero terms on its own.
+#
+# Copy this pattern into a new file (e.g. customer_acme.txt) in this
+# same directory to add real terms -- one per line, no comment prefix:
+#
+# ក្រុមហ៊ុនឧទាហរណ៍
+# ឈ្មោះទីពីរ
+#
+# See ../khmer_protected_terms.txt and ../../docs/protected-terms-guide.md
+# for the full procedure before adding anything real here.

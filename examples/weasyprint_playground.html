@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="UTF-8">
+<title>Khmer WeasyPrint Test</title>
+<style>
+    @font-face {
+        font-family: "Khmer OS Siemreap";
+        src: url("fonts/KhmerOSSiemreap.ttf");
+    }
+    @font-face {
+        font-family: "Khmer OS Muol Light";
+        src: url("fonts/KhmerOSmuollight.ttf");
+    }
+
+    @page {
+        size: A4;
+        margin: 2cm;
+        @bottom-center {
+            content: "ទំព័រ " counter(page) " / " counter(pages);
+            font-family: "Khmer OS Siemreap";
+            font-size: 10pt;
+        }
+    }
+
+    body {
+        margin: 0;
+        color: #1a1a1a;
+    }
+
+    h1, h2 {
+        font-family: "Khmer OS Muol Light";
+        font-weight: normal;
+        color: #7a1f1f;
+    }
+
+    h1 { font-size: 20pt; margin-bottom: 4pt; }
+    h2 { font-size: 14pt; margin-top: 20pt; margin-bottom: 6pt; }
+
+    p {
+        font-family: "Khmer OS Siemreap";
+        font-size: 13pt;
+        line-height: 1.9;
+        margin: 0 0 10pt 0;
+    }
+
+    .justify {
+        text-align: justify;
+    }
+
+    .no-break {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .word-break {
+        word-break: break-all;
+    }
+
+    .box {
+        border: 1px solid #ccc;
+        padding: 10pt;
+        margin-bottom: 14pt;
+        background: #fafafa;
+    }
+
+    .label {
+        font-family: monospace;
+        font-size: 9pt;
+        color: #777;
+        margin-bottom: 4pt;
+        display: block;
+    }
+
+    .muol-sample {
+        font-family: "Khmer OS Muol Light";
+        font-size: 16pt;
+        line-height: 1.8;
+    }
+
+    .narrow {
+        box-sizing: border-box;
+        flex: 1 1 0;
+        border: 1px dashed #999;
+        padding: 8pt;
+    }
+
+    .cols {
+        display: flex;
+        gap: 4%;
+    }
+</style>
+</head>
+<body>
+
+<h1>តេស្តអក្សរខ្មែរជាមួយ WeasyPrint</h1>
+<p style="font-family: 'Khmer OS Siemreap'; font-size: 10pt; color:#555;">
+    Testing Khmer Unicode rendering, text-justify, and line-break with WeasyPrint —
+    fonts: Khmer OS Siemreap &amp; Khmer OS Muol Light
+</p>
+
+<h2>១. អត្ថបទចំណងជើងជាមួយពុម្ពអក្សរ Khmer OS Muol Light</h2>
+<div class="box muol-sample">
+    ព្រះរាជាណាចក្រកម្ពុជា ជាតិ សាសនា ព្រះមហាក្សត្រ
+</div>
+
+<h2>២. អត្ថបទតម្រឹមសងខាង (Justify) — ប្រយោគមានចន្លោះពាក្យ</h2>
+<span class="label">text-align: justify;</span>
+<div class="box">
+    <p class="justify">
+        មនុស្សទាំងអស់ កើតមកមានសេរីភាព និងសមភាព ក្នុងសិទ្ធិ និងសេចក្តីថ្លៃថ្នូរ។ មនុស្សគ្រប់រូប មានវិចារណញាណ
+        និងសតិសម្បជញ្ញៈជាប់ពីកំណើត ហើយត្រូវប្រព្រឹត្តចំពោះគ្នាទៅវិញទៅមក ក្នុងស្មារតីភាតរភាព។ សិទ្ធិមនុស្ស
+        ត្រូវបានទទួលស្គាល់ជាសកល ដោយមិនប្រកាន់ពូជសាសន៍ ពណ៌សម្បុរ ភេទ ភាសា សាសនា មតិនយោបាយ
+        ដើមកំណើតជាតិ ឬសង្គម ទ្រព្យសម្បត្តិ កំណើត ឬឋានៈផ្សេងទៀតឡើយ។
+    </p>
+</div>
+
+<h2>៣. អត្ថបទតម្រឹមសងខាង — ជាប់គ្នាដោយគ្មានចន្លោះ (តេស្តការបំបែកជួរ)</h2>
+<span class="label">text-align: justify; (no spaces between words — Khmer script style)</span>
+<div class="box">
+    <p class="justify">
+        កម្ពុជាជាប្រទេសមួយស្ថិតនៅតំបន់អាស៊ីអាគ្នេយ៍មានទីរាជធានីគឺភ្នំពេញដែលជាមជ្ឈមណ្ឌលនយោបាយសេដ្ឋកិច្ចវប្បធម៌និងសង្គមកិច្ចរបស់ប្រទេសជាតិដោយមានប្រវត្តិសាស្ត្រយូរអង្វែងជាងពីរពាន់ឆ្នាំមកហើយចាប់តាំងពីសម័យអាណាចក្រហ្វូណនជើនជ្រៃមកម្ល៉េះ។
+    </p>
+</div>
+
+<h2>៤. តេស្តការបំបែកជួរដោយបង្ខំ (word-break: break-all)</h2>
+<span class="label">word-break: break-all; — column width forces wrap mid-syllable</span>
+<div class="box">
+    <p class="justify word-break" style="width: 30%; border-right: 1px dashed #999;">
+        កម្ពុជាជាប្រទេសមួយស្ថិតនៅតំបន់អាស៊ីអាគ្នេយ៍មានទីរាជធានីគឺភ្នំពេញ។
+    </p>
+</div>
+
+<h2>៥. ជួរឈរតូចពីរ ដើម្បីមើលការបំបែកជួរតាមធម្មជាតិ</h2>
+<div class="box cols">
+    <div class="narrow">
+        <p class="justify">
+            អប់រំគឺជាមូលដ្ឋានគ្រឹះដ៏សំខាន់សម្រាប់ការអភិវឌ្ឍន៍ធនធានមនុស្ស និងសង្គមជាតិទាំងមូល។
+        </p>
+    </div>
+    <div class="narrow">
+        <p class="justify">
+            សេដ្ឋកិច្ចឌីជីថល កំពុងក្លាយជាកត្តាចលករថ្មី សម្រាប់កំណើនសេដ្ឋកិច្ចជាតិ នាពេលអនាគត។
+        </p>
+    </div>
+</div>
+
+<h2>៦. តេស្តលេខ និងអក្សរខ្មែរលាយបញ្ចូលគ្នា</h2>
+<div class="box">
+    <p>
+        កាលបរិច្ឆេទ៖ ថ្ងៃទី ០៤ ខែកញ្ញា ឆ្នាំ ២០២៦ — លេខទូរស័ព្ទ៖ ០១២ ៣៤៥ ៦៧៨ — តម្លៃសរុប៖ ១,២៥០,០០០ រៀល
+    </p>
+</div>
+
+<h2>៧. ចំណងជើងវែងសម្រាប់តេស្តការបំបែកជាច្រើនជួរ (Muol Light)</h2>
+<div class="box muol-sample" style="width: 60%;">
+    របាយការណ៍ស្តីពីស្ថានភាពសេដ្ឋកិច្ចសង្គមកិច្ចប្រចាំឆ្នាំ២០២៦
+</div>
+
+<h2>៨. អត្ថបទពិតប្រាកដលាយបញ្ចូលអក្សរឡាតាំង លេខ និងកូដ (លិខិតជូនដំណឹង)</h2>
+<span class="label">text-align: justify; — real-world mixed Khmer/Latin/digits/codes</span>
+<div class="box">
+    <p class="justify">
+        ការិយាល័យមានកិត្តិយសសូមជម្រាបជូន លោក លោកស្រីជាម្ចាស់កម្មសិទ្ធិអចលនទ្រព្យ ដែលមានអត្តសញ្ញាណកម្មអចលនទ្រព្យលេខ PIN-SAMPLE-0000001 និងលិខិត ឬបណ្ណសម្គាល់អចលនទ្រព្យដែលចេញដោយអាជ្ញាធរមានសមត្ថកិច្ចលេខ CERT-SAMPLE-0001 ចុះថ្ងៃទី 24/10/2019 មានអាសយដ្ឋានស្ថិតនៅផ្ទះលេខ 114 ផ្លូវ វេងស្រេង បុរី ពិភពថ្មី ភូមិត្រពាំងថ្លឹង៤ / សង្កាត់ចោមចៅទី១ ខណ្ឌពោធិ៍សែនជ័យ រាជធានីភ្នំពេញ។
+    </p>
+    <p class="justify">
+        សូមអញ្ជើញមកបង់ពន្ធលើអចលនទ្រព្យសម្រាប់ ឆ្នាំ២០២៦ ដែលមានទឹកប្រាក់ដូចនៅក្នុងតារាងលម្អិតខាងក្រោមឱ្យបានរួសរាន់មុនកាលបរិច្ឆេទផុតកំណត់ ថ្ងៃទី៣០ ខែកញ្ញា ឆ្នាំ២០២៦ នៅសាខាខណ្ឌពោធិ៍សែនជ័យ ឬនៅគ្រប់សាខាធនាគារ ធនាគារ ក, ធនាគារ ខ, ធនាគារ គ, ធនាគារ ឃ, ធនាគារ ង, ធនាគារ ច, ធនាគារ ឆ, ធនាគារ ជ, ធនាគារ ឈ, ធនាគារ ញ, ធនាគារ ដ, ធនាគារ ឋ, ធនាគារ ឌ ទូទាំងប្រទេស ឬបង់ពន្ធតាមរយៈកម្មវិធីទូរសព្ទដៃអ្នកជាប់ពន្ធ។
+    </p>
+</div>
+
+</body>
+</html>

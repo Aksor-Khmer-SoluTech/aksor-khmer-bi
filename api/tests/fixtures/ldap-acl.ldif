@@ -1,0 +1,25 @@
+# Loosens osixia/openldap:1.5.0's default ACL (self-read only, "by *
+# none" for everything else) just enough for a bound *user* to look up
+# their own group membership -- required for test_auth_ldap.py's
+# reverse-group-search path (any directory without a memberOf overlay,
+# most plain OpenLDAP installs). Without this, a bind as e.g. jdoe can't
+# even resolve "dc=aksor,dc=test" as a search base ("32 No such object"),
+# let alone see group entries -- confirmed by hand while building this
+# out, not assumed.
+#
+# This is a realistic thing an operator running plain OpenLDAP would
+# actually configure (allow authenticated read of group membership while
+# keeping personal profile data locked down), not a test-only bypass.
+#
+# Apply via the config admin (ldapi:// + SASL EXTERNAL, since this edits
+# cn=config, not the data tree):
+#
+#   docker cp api/tests/fixtures/ldap-acl.ldif <container>:/tmp/acl.ldif
+#   docker exec <container> ldapmodify -Y EXTERNAL -H ldapi:/// -f /tmp/acl.ldif
+
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+replace: olcAccess
+olcAccess: {0}to attrs=userPassword,shadowLastChange by self write by dn="cn=admin,dc=aksor,dc=test" write by anonymous auth by * none
+olcAccess: {1}to dn.subtree="ou=groups,dc=aksor,dc=test" by users read by * none
+olcAccess: {2}to * by self read by dn="cn=admin,dc=aksor,dc=test" write by * none

@@ -1,0 +1,119 @@
+/* Entry stylesheet. Tailwind is the styling engine now (see the repo's
+   Tailwind migration) -- this file wires it to the *existing* design
+   tokens rather than replacing them, so runtime theme/accent switching
+   (data-theme/data-accent on <html>, set by preferences.ts, driving
+   every color via color-mix() -- see tokens.css) keeps working exactly
+   as before. tokens.css is never rewritten, only referenced.
+
+   During the file-by-file migration (see the plan), the 5 remaining
+   hand-written component CSS files stay imported here too -- into named
+   layers, not left unlayered like before, specifically so a Tailwind
+   utility class added alongside an old one always wins: an *unlayered*
+   rule beats every @layer in CSS's cascade, which would have let the
+   old CSS silently outrank new Tailwind utilities the moment both
+   applied to the same element mid-migration. Retired class by class as
+   each file's components get their className rewritten; the goal is an
+   empty (or near-empty) components layer by the end. */
+@import "tailwindcss";
+
+@import "./tokens.css" layer(base);
+@import "./layout.css" layer(components);
+@import "./forms.css" layer(components);
+@import "./elements.css" layer(components);
+@import "./pages.css" layer(components);
+@import "./data-config.css" layer(components);
+@import "./docs.css" layer(components);
+@import "./responsive.css" layer(components);
+
+/* Registers the existing design tokens as Tailwind theme values, so
+   utilities like `bg-bg-raised`, `text-accent-strong`, `font-display`,
+   `rounded-lg` exist and resolve through the SAME custom properties
+   tokens.css defines and dynamically updates -- `inline` (not plain
+   `@theme`) is what keeps these live var() references rather than
+   Tailwind baking in whatever the light/default value happens to be at
+   build time. Every key here either introduces a new, non-colliding
+   name (the --color-* entries, --font-display/-body/-khmer, the
+   --shadow-* entries) or is a deliberate override of one of Tailwind's
+   own defaults (--font-mono, --font-sans, --radius-sm/-md/-lg) --
+   nothing here is an accidental collision; see the migration plan for
+   the full reasoning on each. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-panel-hover: var(--bg-panel-hover);
+  --color-bg-input: var(--bg-input);
+
+  /* Sidebar/top-bar chrome — see tokens.css's accent block for why this
+     is its own token instead of reusing --bg-panel/--bg-raised. */
+  --color-bg-chrome: var(--bg-chrome);
+  --color-bg-chrome-hover: var(--bg-chrome-hover);
+  --color-bg-chrome-active: var(--bg-chrome-active);
+
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-border-strong: var(--border-strong);
+
+  --color-text: var(--text);
+  --color-text-dim: var(--text-dim);
+  --color-text-faint: var(--text-faint);
+
+  --color-highlight: var(--highlight);
+  --color-highlight-soft: var(--highlight-soft);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-strong: var(--success-strong);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-strong: var(--danger-strong);
+
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-strong: var(--info-strong);
+
+  --color-meter-good: var(--meter-good);
+  --color-meter-warning: var(--meter-warning);
+  --color-meter-serious: var(--meter-serious);
+  --color-meter-critical: var(--meter-critical);
+
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-border: var(--accent-border);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-overlay: var(--overlay);
+
+  /* font-mono/font-sans deliberately override Tailwind's own defaults
+     (nothing in this app wants Tailwind's system stacks); display/body/
+     khmer are new names, no collision. */
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-khmer: var(--font-khmer);
+
+  /* This app only ever needs 3 radius steps -- sm/md/lg are repointed
+     at them; Tailwind's own xs/xl/2xl/3xl/4xl steps stay at their
+     defaults, just unused. */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+  --shadow-accent: var(--shadow-accent);
+}
+
+/* Breakpoints are compile-time media-query boundaries, not runtime
+   values, so this is a plain (non-`inline`) override, unlike the color/
+   font/radius theme above. The whole app only ever uses two thresholds
+   (see responsive.css) -- 640px already exactly matches Tailwind's own
+   default `sm`, so only `md` needs repointing (its own unused 768px
+   default becomes 900px instead); `max-sm:`/`max-md:` then reproduce
+   every `@media (max-width: ...)` rule in responsive.css exactly. */
+@theme {
+  --breakpoint-md: 900px;
+}

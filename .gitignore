@@ -1,0 +1,43 @@
+venv/
+output/
+data/report_templates/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.DS_Store
+node_modules/
+api/aksor_khmer_bi.db
+.env
+api/logs/
+data/logs/
+# The encryption key for credentials stored in the portal (app/secret_store.py)
+data/secrets/
+data/jdbc_drivers/
+data/avatars/
+data/image_resources/
+data/stylesheet_resources/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+.env.*
+!.env.example
+.venv/
+.claude/settings.local.json
+.idea/
+.vscode/
+*.swp
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local design notes -- kept on disk, deliberately not committed
+specs/
+
+# deployment.sh backup output
+backups/

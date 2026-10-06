@@ -1,0 +1,19 @@
+# Example exclude-list file for aksor_khmer_ocr_segmenter.
+#
+# Same format as an inject file (protected_terms_example.txt): one term per
+# line, blank lines and '#' comments ignored. Listing a term here removes
+# it from the merge set for this run -- whether it came from the built-in
+# protected_terms/ modules, AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE, or
+# --protected-terms-file -- reverting to ICU's original (unmerged)
+# behavior for just that term.
+#
+# Use this if a built-in protected term is actually wrong for your data
+# (e.g. it happens to collide with a different, correctly-split word in
+# your domain) without having to fork or edit this package.
+#
+# Usage:
+#   aksor-khmer-ocr-segment --text "..." --exclude-terms-file this_file.txt
+# or set it for every call:
+#   export AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE=/path/to/this_file.txt
+
+ឥណ្ឌូនេស៊ី

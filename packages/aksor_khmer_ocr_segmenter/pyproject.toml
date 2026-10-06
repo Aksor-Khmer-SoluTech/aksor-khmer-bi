@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aksor-khmer-ocr-segmenter"
+version = "0.1.0"
+description = "OCR + dictionary-based word segmentation for unspaced Khmer text"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "PyICU>=2.13",
+    "pytesseract>=0.3.13",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+aksor-khmer-ocr-segment = "aksor_khmer_ocr_segmenter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

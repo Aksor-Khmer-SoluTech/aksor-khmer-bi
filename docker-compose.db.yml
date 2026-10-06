@@ -1,0 +1,50 @@
+# PostgreSQL, on its own -- the database half of the stateful services. Redis has its own file
+# (docker-compose.redis.yml) and the application its own (docker-compose.yml), so each has its own
+# lifecycle: `api`/`scheduler`/`worker`/`portal` can be rebuilt, redeployed or rolled back without ever
+# touching the database, and Postgres can be pointed at a managed one (RDS...) by simply not starting
+# this file and setting DATABASE_URL.
+#
+# All three files join one external network, `aksor-network`, so the app containers reach this as
+# `postgres`. ./deployment.sh creates the network and starts the stacks in order; to run by hand
+# (full walkthrough: DEPLOYMENT.md):
+#
+#   docker network create aksor-network
+#   docker compose -p aksor-redis -f docker-compose.redis.yml up -d --wait
+#   docker compose -p aksor-db    -f docker-compose.db.yml    up -d --wait
+#   docker compose -p aksor-app   -f docker-compose.yml       up -d --build --wait
+#
+# Use distinct project names (-p) as above: with one shared project, `--remove-orphans`
+# on one stack would delete the others' containers.
+#
+# Reads POSTGRES_PASSWORD from .env -- the same file the app reads -- so they always agree.
+services:
+  # Report *metadata*, the multi-tenant auth/RBAC schema and job definitions/run
+  # history (api/app/db). The template files themselves stay on disk
+  # (./data/report_templates, mounted by `api`), not in this database.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aksor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aksor}
+      POSTGRES_DB: aksor_khmer_bi
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No `ports:` on purpose -- only containers on aksor-network can reach the database.
+    # For a client on the host: docker compose -p aksor-db -f docker-compose.db.yml exec postgres psql -U aksor aksor_khmer_bi
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aksor -d aksor_khmer_bi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+    # Same name Compose gave this volume when it lived in the combined file under the
+    # default project name, so an existing database carries straight over.
+    name: aksor-khmer-bi_pgdata
+
+networks:
+  default:
+    name: aksor-network
+    external: true

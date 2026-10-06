@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Applies the stored mode/accent (see src/preferences.ts) before first
+         paint, so a returning visitor never sees a default-theme flash. -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem("portal_theme_mode");
+          var accent = localStorage.getItem("portal_theme_accent");
+          if (mode === "light" || mode === "dark") document.documentElement.setAttribute("data-theme", mode);
+          if (accent) document.documentElement.setAttribute("data-accent", accent);
+        } catch (e) {}
+      })();
+    </script>
+    <title>Control Plane</title>
+    <meta name="description" content="An open, self-hostable admin console for Khmer document infrastructure — users, roles, and organizations." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2333366b'/%3E%3Ccircle cx='50' cy='50' r='30' fill='none' stroke='%23f6f5fb' stroke-width='7'/%3E%3Cline x1='50' y1='50' x2='50' y2='20' stroke='%23f6f5fb' stroke-width='7' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='50' r='8' fill='%23f6f5fb'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,500&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="/config.js"></script>
+    <!-- Overrides the <title> above with this deployment's actual brand,
+         mirroring the top bar's own "name · productName" order (see
+         src/branding.ts) — synchronous and pre-paint like the theme
+         script above, so the tab never flashes the generic default
+         before swapping to the configured one. -->
+    <script>
+      (function () {
+        try {
+          var brand = window.PORTAL_BRAND_NAME || "Control Plane";
+          var product = window.PORTAL_PRODUCT_NAME;
+          document.title = product ? brand + " · " + product : brand;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,55 @@
+# Test data for api/tests/test_auth_ldap.py -- two users, two groups.
+# Deliberately does NOT include userPrincipalName: that's an Active-
+# Directory-specific attribute plain OpenLDAP's default schema doesn't
+# define (loading it raises "Undefined attribute type (17)"), which is
+# exactly why upn_bind's success path can't be verified against this
+# server -- see test_auth_ldap.py's upn_bind tests and
+# app/auth_ldap.py's module docstring.
+#
+# Load into a fresh osixia/openldap:1.5.0 container
+# (LDAP_DOMAIN=aksor.test, LDAP_ADMIN_PASSWORD=adminpass123) with:
+#
+#   docker cp api/tests/fixtures/ldap-seed.ldif <container>:/tmp/seed.ldif
+#   docker exec <container> ldapadd -x -H ldap://localhost \
+#     -D "cn=admin,dc=aksor,dc=test" -w adminpass123 -f /tmp/seed.ldif
+#
+# Then also apply ldap-acl.ldif (see that file's header) -- without it,
+# a bound regular user can't read the groups tree at all under this
+# image's restrictive default ACL, and the group-membership tests fail
+# with "No such object," not just "no groups found."
+
+dn: ou=people,dc=aksor,dc=test
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=aksor,dc=test
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=jdoe,ou=people,dc=aksor,dc=test
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+uid: jdoe
+cn: Jane Doe
+sn: Doe
+userPassword: JaneSecret123
+
+dn: uid=bsmith,ou=people,dc=aksor,dc=test
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+uid: bsmith
+cn: Bob Smith
+sn: Smith
+userPassword: BobSecret123
+
+dn: cn=report-admins,ou=groups,dc=aksor,dc=test
+objectClass: groupOfNames
+cn: report-admins
+member: uid=jdoe,ou=people,dc=aksor,dc=test
+
+dn: cn=report-viewers,ou=groups,dc=aksor,dc=test
+objectClass: groupOfNames
+cn: report-viewers
+member: uid=bsmith,ou=people,dc=aksor,dc=test

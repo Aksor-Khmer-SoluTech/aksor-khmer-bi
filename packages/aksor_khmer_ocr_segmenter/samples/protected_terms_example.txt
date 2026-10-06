@@ -1,0 +1,16 @@
+# Example extra-protected-terms file for aksor_khmer_ocr_segmenter.
+#
+# One term per line. Blank lines and lines starting with '#' are ignored.
+# Use this to add project-specific names (company names, local place
+# names, staff names, etc.) that ICU's Khmer dictionary breaker splits
+# incorrectly, without editing the package's built-in protected_terms/
+# modules.
+#
+# Usage:
+#   aksor-khmer-ocr-segment --text "..." --protected-terms-file this_file.txt
+# or set it for every call:
+#   export AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE=/path/to/this_file.txt
+
+ក្រុមហ៊ុនតេស្ត
+
+# Add your own project-specific terms below this line.

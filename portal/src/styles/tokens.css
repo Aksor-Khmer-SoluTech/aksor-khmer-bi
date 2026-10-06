@@ -1,0 +1,427 @@
+/* Design tokens, base resets, atmosphere — see global.css's original
+   header comment (now split across these files) for the full rationale. */
+/* ---------------------------------------------------------------------
+   Control Plane — design tokens
+   GitLab Sans (OFL-1.1, self-hosted below — @gitlab/fonts, a variable
+   weight family based on Inter) now carries both headings/wordmark and
+   body copy, one unified voice instead of a serif/sans pairing;
+   JetBrains Mono is kept only for genuinely technical detail (code,
+   IDs, status pills). Warm Neutral Studio surfaces (cream/sand ground,
+   a sparing terracotta highlight) stay as they were. Radii are a touch
+   softer than a typical dev console, shadows are warm (ink-toned, not
+   neutral-gray), to match.
+
+   User-configurable, from Preferences (see preferences.ts):
+   - Mode: `data-theme="light"|"dark"` on <html>, or absent for "auto"
+     (follows prefers-color-scheme). Dark redefines the surface/text/
+     status palette below; every component consumes it through the same
+     token names, so nothing outside this file needs to know a dark mode
+     exists.
+   - Accent: `data-accent="default|indigo|terracotta|forest|teal|plum|
+     slate"` on <html> (absent, or unrecognized, falls back to
+     "default", now a blue rather than the earlier neutral graphite —
+     see the accent block further down) sets only `--accent-base` (one
+     hex, one line) — the four derived accent tokens (--accent/-strong/
+     -soft/-border/-ink) are computed from it via color-mix() once per
+     mode further down, so adding another accent color never touches
+     the light/dark math.
+--------------------------------------------------------------------- */
+@font-face {
+  font-family: "GitLab Sans";
+  src: url("/fonts/GitLabSans.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "GitLab Sans";
+  src: url("/fonts/GitLabSans-Italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+/* Also matches a plain `[data-theme="light"]` (not just `:root[...]`) so
+   a *nested* element carrying that attribute — SettingsPreferencesPanel.tsx's
+   AccentPreview swatches, which force `data-theme="light"` on a `<span>`
+   to preview true to itself regardless of the page's real current mode
+   — actually gets these values applied directly on itself. A selector
+   scoped to `:root[data-theme="light"]` alone can never match a nested
+   span (`:root` only ever means the root `<html>` element), so before
+   this the span just inherited whatever the *real* root's mode was;
+   applying the light palette to a value assigned directly, though.
+   The same reasoning is why the accent-base/derivation rules below are
+   written as `:root, [data-accent="x"]` rather than
+   `:root[data-accent="x"]`. */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Cool neutral base — chosen to sit naturally alongside the blue
+     accent/GitLab Sans direction (see the accent block below): a warm
+     cream base was the old Fraunces-serif identity's palette and read
+     as visibly mismatched once the chrome started tinting blue, so the
+     whole neutral scale moved from warm (amber-gray) to cool (blue-gray)
+     rather than just patching the two chrome surfaces. --highlight stays
+     warm on purpose (a deliberate spark of contrast against this cool
+     base), everything else here is cool.
+
+     --bg is pure white, same as --bg-raised -- the page and its cards
+     are no longer told apart by a fill-color step (the Linear/Notion/
+     Stripe-dashboard convention: an all-white canvas, surfaces read as
+     "raised" purely through a hairline border + a resting shadow, never
+     a gray wash). --border-soft is nudged a touch darker than a plain
+     fill-contrast palette would need, since it's now doing the full job
+     of edging a card alone; see elements.css/pages.css for the resting
+     shadows added alongside this so cards/panels stay legible without
+     the old color step to lean on. */
+  --bg: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-panel: #ebedf2;
+  --bg-panel-hover: #e0e3ea;
+  --bg-input: #ffffff;
+
+  --border: #dcdfe6;
+  --border-soft: #e1e4ea;
+  --border-strong: #c2c7d1;
+
+  --text: #1f2430;
+  --text-dim: #4d5566;
+  --text-faint: #8991a3;
+
+  /* Sparing secondary highlight — terracotta. Used only for the odd
+     accent touch (bg wash, login ring), never as a second interactive
+     color competing with --accent. Fixed regardless of chosen accent. */
+  --highlight: #c96f4a;
+  --highlight-soft: rgba(201, 111, 74, 0.12);
+  --highlight-strong: #9c5230;
+
+  --success: #3f7d4a;
+  --success-soft: rgba(63, 125, 74, 0.12);
+  --success-strong: #2c5c35;
+
+  --danger: #a03e26;
+  --danger-soft: rgba(160, 62, 38, 0.1);
+  --danger-strong: #7a2e1c;
+
+  --info: #3a5a8c;
+  --info-soft: rgba(58, 90, 140, 0.1);
+  --info-strong: #2b436b;
+
+  /* Status palette for the Monitor page's meters -- fixed steps (not
+     themed to the accent), always paired with a text label, never color
+     alone. See the dataviz skill's "Status palette (fixed — never
+     themed)" reference. */
+  --meter-good: #2f9e44;
+  --meter-warning: #e2a33d;
+  --meter-serious: #e2703a;
+  --meter-critical: #c23b3b;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+
+  --overlay: rgba(31, 36, 48, 0.35);
+  --shadow-card: 0 1px 2px rgba(31, 36, 48, 0.06), 0 12px 28px -16px rgba(31, 36, 48, 0.18);
+  --shadow-pop: 0 20px 48px -14px rgba(31, 36, 48, 0.28);
+
+  --font-display: "GitLab Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: "GitLab Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-khmer: "Khmer OS Siemreap", var(--font-body);
+
+  /* A plain <select>'s native dropdown arrow is rendered by the browser
+     with its own internal inset, which never lines up with a native
+     date/time input's own calendar/clock icon sitting right next to it
+     in the same form (forms.css strips both to `appearance: none` and
+     draws this instead) -- same glyph as lucide's ChevronDown (used for
+     every other dropdown affordance in the app, e.g. run-filter-chevron)
+     and the same --text-faint color the search icon uses, baked into
+     the data URI since a background-image can't reference a CSS
+     variable for its own fill/stroke. Redefined per theme below. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238991a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
+/* ---- dark mode: same cool identity, inverted surfaces ---------------- */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #191b21;
+    --bg-raised: #20232b;
+    --bg-panel: #23262f;
+    --bg-panel-hover: #2c2f3a;
+    --bg-input: #20232b;
+
+    --border: #343846;
+    --border-soft: #2a2d38;
+    --border-strong: #454b5c;
+
+    --text: #e9ebf1;
+    --text-dim: #b8bdcc;
+    --text-faint: #767c8d;
+
+    --highlight: #e0895f;
+    --highlight-soft: rgba(224, 137, 95, 0.16);
+    --highlight-strong: #eda989;
+
+    --success: #5fb06c;
+    --success-soft: rgba(95, 176, 108, 0.16);
+    --success-strong: #8fd39a;
+
+    --danger: #e07456;
+    --danger-soft: rgba(224, 116, 86, 0.16);
+    --danger-strong: #f0967a;
+
+    --info: #6f95c7;
+    --info-soft: rgba(111, 149, 199, 0.16);
+    --info-strong: #9db8dd;
+
+    --meter-good: #46bd5b;
+    --meter-warning: #eab54a;
+    --meter-serious: #ea8f5c;
+    --meter-critical: #e26060;
+
+    --overlay: rgba(0, 0, 0, 0.55);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 28px -16px rgba(0, 0, 0, 0.55);
+    --shadow-pop: 0 20px 48px -14px rgba(0, 0, 0, 0.6);
+
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23767c8d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #191b21;
+  --bg-raised: #20232b;
+  --bg-panel: #23262f;
+  --bg-panel-hover: #2c2f3a;
+  --bg-input: #20232b;
+
+  --border: #343846;
+  --border-soft: #2a2d38;
+  --border-strong: #454b5c;
+
+  --text: #e9ebf1;
+  --text-dim: #b8bdcc;
+  --text-faint: #767c8d;
+
+  --highlight: #e0895f;
+  --highlight-soft: rgba(224, 137, 95, 0.16);
+  --highlight-strong: #eda989;
+
+  --success: #5fb06c;
+  --success-soft: rgba(95, 176, 108, 0.16);
+  --success-strong: #8fd39a;
+
+  --danger: #e07456;
+  --danger-soft: rgba(224, 116, 86, 0.16);
+  --danger-strong: #f0967a;
+
+  --info: #6f95c7;
+  --info-soft: rgba(111, 149, 199, 0.16);
+  --info-strong: #9db8dd;
+
+  --meter-good: #46bd5b;
+  --meter-warning: #eab54a;
+  --meter-serious: #ea8f5c;
+  --meter-critical: #e26060;
+
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 28px -16px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 20px 48px -14px rgba(0, 0, 0, 0.6);
+
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23767c8d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
+/* ---- accent: one hex per option, everything else derived ------------ */
+
+/* "Default" is the true fallback (no data-accent set, or an unrecognized
+   one) -- now a clean blue (GitLab's own Pajamas blue-500, #1f75cb,
+   chosen deliberately rather than an arbitrary hue since GitLab Sans
+   already sets the direction) instead of the earlier neutral graphite,
+   so a fresh install reads as this console's own blue theme out of the
+   box; picking a *different* accent from Preferences is still an
+   opt-in personalization on top of that, same as before.
+
+   Every rule below also matches a bare `[data-accent="x"]` alongside
+   `:root[data-accent="x"]` -- not redundant, since `:root` can only ever
+   match the document's actual root element. Without the bare form, a
+   *nested* element carrying its own `data-accent` (SettingsPreferencesPanel.tsx's
+   AccentPreview swatches, each forcing a specific value so it previews
+   true to itself) has nothing matching it at all, so it just inherits
+   whatever the page's real, currently-active accent happens to be --
+   every swatch silently rendering the same color instead of its own. */
+:root,
+:root[data-accent="default"],
+[data-accent="default"] {
+  --accent-base: #1f75cb;
+}
+:root[data-accent="indigo"],
+[data-accent="indigo"] {
+  --accent-base: #33366b;
+}
+:root[data-accent="terracotta"],
+[data-accent="terracotta"] {
+  --accent-base: #a8502f;
+}
+:root[data-accent="forest"],
+[data-accent="forest"] {
+  --accent-base: #2f5d3a;
+}
+:root[data-accent="teal"],
+[data-accent="teal"] {
+  --accent-base: #1f6068;
+}
+:root[data-accent="plum"],
+[data-accent="plum"] {
+  --accent-base: #6b2f57;
+}
+:root[data-accent="slate"],
+[data-accent="slate"] {
+  --accent-base: #3c4552;
+}
+
+/* Derivation also runs again for any element with its own `data-accent`
+   (not just :root) -- otherwise a nested swatch's now-correct
+   --accent-base would still resolve through inherited --accent/-strong/
+   etc. computed from the *root's* --accent-base instead of its own. */
+:root,
+[data-accent] {
+  --accent: var(--accent-base);
+  --accent-strong: color-mix(in srgb, var(--accent-base) 78%, black);
+  --accent-soft: color-mix(in srgb, var(--accent-base) 10%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent-base) 35%, transparent);
+  --accent-ink: color-mix(in srgb, var(--accent-base) 6%, white);
+  --shadow-accent: 0 4px 14px -6px color-mix(in srgb, var(--accent-base) 50%, transparent);
+
+  /* "Chrome" — the sidebar + top bar's own surface, deliberately a
+     different token from --bg-panel/--bg-raised (still used for cards,
+     modals, hover states elsewhere): those stay neutral regardless of
+     accent, this is the one surface that visibly re-tints when the
+     accent changes — a light wash of whatever --accent-base currently
+     is, GitLab's own sidebar/top-bar convention (a tinted chrome behind
+     neutral content), not a neutral shell with only small accent
+     touches. Three steps (base/hover/active) so the sidebar's own
+     hover/active states still read as distinct from each other and
+     from the chrome's resting color. */
+  --bg-chrome: color-mix(in srgb, var(--accent-base) 12%, white);
+  --bg-chrome-hover: color-mix(in srgb, var(--accent-base) 18%, white);
+  --bg-chrome-active: color-mix(in srgb, var(--accent-base) 26%, white);
+}
+
+/* Blue ("default")'s light-mode chrome is pinned to an exact given
+   color (#e9f3fc) instead of the generic mix-with-white formula above
+   -- close but not identical to what 12% would produce, and worth
+   matching exactly since this is the theme every fresh install sees.
+   Hover/active step from that same base toward --accent-base so the
+   three stay one coherent family rather than jumping to a differently-
+   toned scale. Selected (:not([data-accent]) covers the no-attribute
+   default; [data-accent="default"] covers it written explicitly, both
+   on :root and on a nested element like a Preferences swatch preview.
+   Dark mode's own rules below win over this via higher specificity
+   (:root:not([data-theme="light"]) / :root[data-theme="dark"]), so this
+   never leaks into dark mode. */
+:root:not([data-accent]),
+:root[data-accent="default"],
+[data-accent="default"] {
+  --bg-chrome: #e9f3fc;
+  --bg-chrome-hover: color-mix(in srgb, #e9f3fc, var(--accent-base) 18%);
+  --bg-chrome-active: color-mix(in srgb, #e9f3fc, var(--accent-base) 32%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: color-mix(in srgb, var(--accent-base) 62%, white);
+    --accent-strong: color-mix(in srgb, var(--accent-base) 45%, white);
+    --accent-soft: color-mix(in srgb, var(--accent-base) 22%, transparent);
+    --accent-border: color-mix(in srgb, var(--accent-base) 45%, transparent);
+    --accent-ink: color-mix(in srgb, var(--accent-base) 8%, black);
+
+    /* Mixed into this mode's own --bg-raised (a dark surface), not
+       white -- dark-mode chrome stays dark, just visibly tinted,
+       instead of turning pastel. */
+    --bg-chrome: color-mix(in srgb, var(--accent-base) 22%, var(--bg-raised));
+    --bg-chrome-hover: color-mix(in srgb, var(--accent-base) 30%, var(--bg-raised));
+    --bg-chrome-active: color-mix(in srgb, var(--accent-base) 40%, var(--bg-raised));
+  }
+}
+:root[data-theme="dark"] {
+  --accent: color-mix(in srgb, var(--accent-base) 62%, white);
+  --accent-strong: color-mix(in srgb, var(--accent-base) 45%, white);
+  --accent-soft: color-mix(in srgb, var(--accent-base) 22%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent-base) 45%, transparent);
+  --accent-ink: color-mix(in srgb, var(--accent-base) 8%, black);
+
+  --bg-chrome: color-mix(in srgb, var(--accent-base) 22%, var(--bg-raised));
+  --bg-chrome-hover: color-mix(in srgb, var(--accent-base) 30%, var(--bg-raised));
+  --bg-chrome-active: color-mix(in srgb, var(--accent-base) 40%, var(--bg-raised));
+}
+
+@font-face {
+  font-family: "Khmer OS Siemreap";
+  src: url("/fonts/KhmerOSSiemreap.ttf") format("truetype");
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100%;
+  position: relative;
+  isolation: isolate;
+}
+
+/* ---- atmosphere: soft studio light wash, behind everything ---------- */
+
+/* A precise dot-grid reads as "blueprint/dev-tool," which fights the
+   warm, considered mood here — swapped for a soft double wash of light,
+   like daylight falling across a paper desk: the chosen accent cooling
+   (or warming) the top corner, a whisper of terracotta at the bottom.
+   Pure gradient, no image, and quiet enough to sit behind text at full
+   opacity. */
+.bg-texture {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 60% 45% at 14% -8%, var(--accent-soft) 0%, transparent 70%),
+    radial-gradient(ellipse 55% 40% at 100% 100%, var(--highlight-soft) 0%, transparent 72%);
+}
+
+/* Grain read as "moody atmosphere" on the old dark console; this warm
+   theme wants to read as clean instead, in dark mode too, so this stays
+   retired rather than re-tuned. The element is left in App.tsx/Login.tsx
+   (harmless, zero-cost) rather than removed, in case that call changes. */
+.bg-grain {
+  display: none;
+}
+
+a {
+  color: var(--accent-strong);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
