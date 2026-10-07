@@ -116,6 +116,23 @@ which step it was.
 | 3 | `docker-compose.yml` | `aksor-app` | `api`, `scheduler`, `worker`, `portal` |
 | 4 *(optional)* | `docker-compose.yml` `--profile jdbc` | `aksor-app` | `jdbc-worker` — only for Oracle / SQL Server / Db2 drivers |
 
+**Where the app's images come from.** `docker-compose.yml` has no build instructions: each app service runs a
+prebuilt, version-pinned image from GitHub Container Registry, so nothing is compiled on your server.
+
+| Service | Image (`$AKSOR_IMAGE_PREFIX` = `ghcr.io/aksor-khmer-solutech/aksor-khmer-bi`) |
+|---|---|
+| `api`, `scheduler`, `worker` | `$AKSOR_IMAGE_PREFIX-engine:$AKSOR_VERSION` (one image, three commands) |
+| `portal` | `$AKSOR_IMAGE_PREFIX-portal:$AKSOR_VERSION` |
+| `jdbc-worker` *(optional)* | `$AKSOR_IMAGE_PREFIX-jdbc-worker:$AKSOR_VERSION` |
+
+| | **Prebuilt images** *(default, recommended)* | Build from source *(advanced)* |
+|---|---|---|
+| You set | `AKSOR_VERSION` in `.env` — a released version | nothing extra |
+| Command | `./deployment.sh up` / `update` | `./deployment.sh up --build` / `update --build` |
+| Compose files | `docker-compose.yml` | `docker-compose.yml` + `docker-compose.build.yml` |
+| Needs | Docker and access to `ghcr.io` | internet for Debian, Python and npm packages, ~10 GB of disk, several minutes |
+| Choose it for | every normal deployment and update | a fork, local changes, or an unreleased commit |
+
 They share one Docker network, `aksor-network`, which is how the app finds `postgres` and `redis` by name.
 Each file has its **own project name** (`-p …`) — keep them, or stopping one stack could remove another's
 containers.
@@ -169,7 +186,7 @@ In `.env`, set `AKSOR_VERSION` to the released version you want (the image prefi
 ```
 
 No build happens, so no Node/npm is needed. To build from the source instead (a fork, or a version that isn't
-published), run `./deployment.sh up --build` — the first build takes several minutes and needs internet for
+published), run `./deployment.sh up --build` (this adds `docker-compose.build.yml`) — the first build takes several minutes and needs internet for
 Debian, Python and npm packages.
 
 `up` runs `doctor` itself first, so a missing piece (a closed firewall, a busy port) is reported in
@@ -299,7 +316,7 @@ docker compose -p aksor-app -f docker-compose.yml up -d --wait
 
 No build, so no Node/npm is needed. To build from the source instead (several minutes — it installs LibreOffice,
 Tesseract and fonts; later builds reuse the cache), skip `pull` and run
-`docker compose -p aksor-app -f docker-compose.yml up -d --build --wait`. What happens:
+`docker compose -p aksor-app -f docker-compose.yml -f docker-compose.build.yml up -d --build --wait`. What happens:
 
 1. `api` starts, **runs the database migrations**, then serves on port 8000. Its health check gates the next two.
 2. `scheduler` and `worker` start once `api` is healthy.
@@ -327,7 +344,8 @@ connections work without it.
 2. Start the worker (same project as the app) and recreate `api` so it picks the token up:
 
 ```bash
-docker compose -p aksor-app -f docker-compose.yml --profile jdbc up -d --build jdbc-worker api
+docker compose -p aksor-app -f docker-compose.yml --profile jdbc pull jdbc-worker
+docker compose -p aksor-app -f docker-compose.yml --profile jdbc up -d jdbc-worker api
 docker compose -p aksor-app -f docker-compose.yml --profile jdbc ps jdbc-worker       # running / healthy
 ```
 
@@ -341,7 +359,7 @@ Then upload a driver under **Admin → JDBC Drivers**.
 |---|---|
 | see what's running | `docker compose -p aksor-app -f docker-compose.yml ps` (and `-p aksor-db`, `-p aksor-redis` with their files) |
 | read the API log | `docker compose -p aksor-app -f docker-compose.yml logs -f api` |
-| deploy new code | `git pull` then `docker compose -p aksor-app -f docker-compose.yml up -d --build --wait` — only the app restarts; migrations run as `api` starts; the database and Redis are untouched |
+| deploy a new version | read the [CHANGELOG](CHANGELOG.md), set the new `AKSOR_VERSION` in `.env`, then `docker compose -p aksor-app -f docker-compose.yml pull` and `… up -d --wait` — only the app restarts; migrations run as `api` starts; the database and Redis are untouched |
 | restart one service | `docker compose -p aksor-app -f docker-compose.yml restart api` |
 | apply a `.env` change | `docker compose -p aksor-app -f docker-compose.yml up -d` (recreates what changed) |
 
@@ -413,7 +431,7 @@ top to bottom once. Edit `.env`, then apply it:
 | log more or less | `LOG_LEVEL` (`DEBUG` while investigating), `LOG_MAX_BYTES` | `… up -d` |
 | use my own database or Redis | `DATABASE_URL`, `REDIS_URL` (and skip steps 1–2) | `… up -d` |
 | keep the signing / encryption keys outside `data/` | `JWT_SECRET`, `SECRETS_ENCRYPTION_KEY` | `… up -d` |
-| build on a server with a restricted network | `BUILD_NETWORK`, `APT_MIRROR`, `PIP_INDEX_URL`, `NPM_REGISTRY` | `… up -d --build` (these only matter when building) |
+| build on a server with a restricted network | `BUILD_NETWORK`, `APT_MIRROR`, `PIP_INDEX_URL`, `NPM_REGISTRY` | `… -f docker-compose.yml -f docker-compose.build.yml up -d --build` (these only matter when building from source) |
 | which prebuilt images to deploy (build from source with `--build`) | `AKSOR_IMAGE_PREFIX`, `AKSOR_VERSION` | `./deployment.sh up` |
 
 `… up -d` is short for `docker compose -p aksor-app -f docker-compose.yml up -d`: it recreates only the services

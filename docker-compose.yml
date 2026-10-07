@@ -4,20 +4,12 @@
 # still starting, and its healthcheck gates `scheduler`/`worker` as before.
 services:
   api:
-    # One image for api, scheduler and worker (same code, different command). `./deployment.sh up` PULLS the
-    # prebuilt image: AKSOR_IMAGE_PREFIX / AKSOR_VERSION in .env name it (a released version -- see CHANGELOG.md);
-    # `./deployment.sh up --build` builds it from `build:` below instead. Releases are published by pushing a
-    # `v<version>` git tag (.github/workflows/release-images.yml); `./deployment.sh publish <version>` pushes the
-    # same names by hand.
-    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      network: ${BUILD_NETWORK:-default}
-      args:
-        APT_MIRROR: ${APT_MIRROR:-deb.debian.org}
-        APT_SCHEME: ${APT_SCHEME:-http}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    # One image for api, scheduler and worker (same code, different command). Every app service runs a
+    # PREBUILT image from GitHub Container Registry, pinned by AKSOR_VERSION (and AKSOR_IMAGE_PREFIX) in .env:
+    # nothing is built on the server. A release is published by pushing a `v<version>` git tag
+    # (.github/workflows/release-images.yml). To build from the source instead, add the override file:
+    #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build   (or ./deployment.sh up --build)
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
     restart: unless-stopped
     ports:
       # Host port: API_PORT in .env (default 8000). The container always listens on 8000.
@@ -132,15 +124,7 @@ services:
   # memory/CPU/processes. Nothing is published to the host.
   jdbc-worker:
     profiles: ["jdbc"]
-    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-jdbc-worker:${AKSOR_VERSION:-latest}
-    build:
-      context: .
-      dockerfile: jdbc-worker/Dockerfile
-      network: ${BUILD_NETWORK:-default}
-      args:
-        APT_MIRROR: ${APT_MIRROR:-deb.debian.org}
-        APT_SCHEME: ${APT_SCHEME:-http}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-jdbc-worker:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
     restart: unless-stopped
     environment:
       # The worker exits at start without it -- set JDBC_WORKER_TOKEN in .env before using the jdbc profile.
@@ -168,7 +152,7 @@ services:
   # more than one replica would make every cron trigger fire once per
   # replica, not once total. Scale `worker` instead for more throughput.
   scheduler:
-    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["python", "-m", "app.scheduler"]
     restart: unless-stopped
@@ -196,7 +180,7 @@ services:
   # retry/backoff (app/celery_app.py's run_job task). Horizontally
   # scalable: `docker compose up --scale worker=3`.
   worker:
-    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
     restart: unless-stopped
@@ -232,13 +216,7 @@ services:
   # this container, so there's no network dependency between the two at
   # the container level — only in the browser loading the page.
   portal:
-    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-portal:${AKSOR_VERSION:-latest}
-    build:
-      context: .
-      dockerfile: portal/Dockerfile
-      network: ${BUILD_NETWORK:-default}
-      args:
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-portal:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
     restart: unless-stopped
     ports:
       # Host port: PORTAL_PORT in .env (default 8080). If you change API_PORT, point the portal at it too:

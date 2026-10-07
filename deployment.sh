@@ -43,6 +43,7 @@ APP_PROJECT="aksor-app"
 REDIS_FILE="docker-compose.redis.yml"
 DB_FILE="docker-compose.db.yml"
 APP_FILE="docker-compose.yml"
+APP_BUILD_FILE="docker-compose.build.yml"
 BACKUP_DIR="${BACKUP_DIR:-backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
 # Everything the api writes outside the database (all bind-mounted in docker-compose.yml).
@@ -56,7 +57,16 @@ die()  { printf '%serror:%s %s\n' "$c_red" "$c_off" "$*" >&2; exit 1; }
 
 redis() { docker compose -p "$REDIS_PROJECT" -f "$REDIS_FILE" "$@"; }
 db()    { docker compose -p "$DB_PROJECT"    -f "$DB_FILE"    "$@"; }
-app()   { docker compose -p "$APP_PROJECT"   -f "$APP_FILE"   "$@"; }
+# The app stack runs prebuilt, version-pinned images (docker-compose.yml). APP_BUILD=1 (up/update --build) adds the
+# override that builds them from the Dockerfiles. Without a version, commands that don't need an image (down, logs,
+# status...) still work: a placeholder satisfies the compose file's required AKSOR_VERSION.
+APP_BUILD=0
+app() {
+  local files=(-f "$APP_FILE") ver; ver="$(image_version)"
+  if [ "$APP_BUILD" = 1 ]; then files+=(-f "$APP_BUILD_FILE"); [ -n "$ver" ] || ver=local; fi
+  [ -n "$ver" ] || ver=unset
+  AKSOR_VERSION="$ver" docker compose -p "$APP_PROJECT" "${files[@]}" "$@"
+}
 
 # Redis first, then Postgres, each waiting until healthy (the app needs both).
 start_infra() {
@@ -216,7 +226,7 @@ cmd_up() {
   local build=()
   for a in "$@"; do
     case "$a" in
-      --build) build=(--build) ;;
+      --build) build=(--build); APP_BUILD=1 ;;
       --from-registry) ;;   # the default now; accepted so older instructions still work
       *) die "up [--build]" ;;
     esac
@@ -309,7 +319,7 @@ cmd_update() {
     case "$a" in
       --no-backup) backup=0 ;;
       --pull) pull=(--pull) ;;
-      --build) registry=0 ;;
+      --build) registry=0; APP_BUILD=1 ;;
       --from-registry) ;;   # the default now; accepted so older instructions still work
       *) die "update [--no-backup] [--build] [--pull]" ;;
     esac

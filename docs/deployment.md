@@ -60,7 +60,7 @@ By hand, without the script:
 docker network create aksor-network
 docker compose -p aksor-redis -f docker-compose.redis.yml up -d --wait
 docker compose -p aksor-db    -f docker-compose.db.yml    up -d --wait
-docker compose -p aksor-app   -f docker-compose.yml       up -d --build
+docker compose -p aksor-app   -f docker-compose.yml       up -d --wait      # AKSOR_VERSION in .env; add -f docker-compose.build.yml --build to build from source
 ```
 
 Keep the three `-p` project names distinct: with a shared project, `--remove-orphans`
@@ -407,7 +407,7 @@ separate, locked-down container instead of in `api`:
 
 ```bash
 # in .env: JDBC_WORKER_TOKEN=<a long random string>
-docker compose --profile jdbc up -d --build jdbc-worker api
+docker compose --profile jdbc up -d jdbc-worker api     # pulls the prebuilt jdbc-worker image (AKSOR_VERSION in .env)
 ```
 
 The `jdbc-worker` service has no published port, a read-only filesystem and read-only drivers, no
