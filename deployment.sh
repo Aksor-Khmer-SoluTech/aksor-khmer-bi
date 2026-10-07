@@ -10,16 +10,19 @@
 # rolled back without ever restarting the database or the queue.
 #
 #   ./deployment.sh init              first-time setup: network + .env (from .env.example) with generated secrets
-#   ./deployment.sh up                start redis, then postgres (each waits until healthy), then the app
-#   ./deployment.sh up --from-registry   pull AKSOR_VERSION images instead of building
-#   ./deployment.sh update [--no-backup] [--pull] [--from-registry]
-#                                     back up, rebuild the app, recreate it (migrations run at
-#                                     api start); redis and postgres are left alone
+#   ./deployment.sh up [--build]      start redis, then postgres (each waits until healthy), then the app. The app
+#                                     images are PULLED (AKSOR_IMAGE_PREFIX + AKSOR_VERSION in .env); --build builds
+#                                     them from the Dockerfiles instead (needs internet for apt/pip/npm)
+#   ./deployment.sh update [--no-backup] [--build] [--pull]
+#                                     back up, pull the AKSOR_VERSION images (or --build them; --pull refreshes the
+#                                     base images then), recreate the app (migrations run at api start); redis and
+#                                     postgres are left alone
 #   ./deployment.sh publish <version> [--latest]
-#                                     build api + portal for PLATFORMS (default linux/amd64) and push
-#                                     to the registry named by AKSOR_IMAGE_PREFIX (Docker Hub: user/aksor-khmer-bi)
-#   ./deployment.sh doctor [pull]     check this machine before building (docker, compose, ports, disk, and whether
-#                                     a container can reach what the build downloads); `up` runs it for you
+#                                     build engine, portal and jdbc-worker for PLATFORMS (default linux/amd64) and push
+#                                     to the registry named by AKSOR_IMAGE_PREFIX (GHCR: ghcr.io/<owner>/aksor-khmer-bi)
+#                                     -- normally done by pushing a v* git tag (.github/workflows/release-images.yml)
+#   ./deployment.sh doctor [build]    check this machine (docker, compose, ports, disk; with `build`, also whether a
+#                                     container can reach what the build downloads); `up` runs it for you
 #   ./deployment.sh down              stop the app, then postgres, then redis (volumes and data are kept)
 #   ./deployment.sh restart [redis|db|app]
 #   ./deployment.sh status
@@ -101,7 +104,7 @@ preflight() {
 # Checks the machine before a long build, so a problem shows up in seconds with a fix instead of ten minutes in.
 # Prints ok / warn / FAIL for each check; exits non-zero only on FAIL. SKIP_DOCTOR=1 skips it inside `up`.
 cmd_doctor() {
-  local building="${1:-build}" fails=0
+  local building="${1:-pull}" fails=0
   ok()   { printf '  %sok%s    %s\n' "$c_grn" "$c_off" "$*"; }
   bad()  { printf '  %sFAIL%s  %s\n' "$c_red" "$c_off" "$*"; fails=$((fails + 1)); }
   note() { printf '  %swarn%s  %s\n' "$c_ylw" "$c_off" "$*"; }
@@ -175,7 +178,7 @@ EOF2
       printf '    1. BUILD_NETWORK=host in .env (build on the server'"'"'s own network)\n'
       printf '    2. fix Docker'"'"'s network (UFW forwarding, DNS) -- DEPLOYMENT.md, "Get Docker ready first"\n'
       printf '    3. APT_SCHEME=https if only port 80 is blocked; APT_MIRROR / PIP_INDEX_URL / NPM_REGISTRY for internal mirrors\n'
-      printf '    4. build elsewhere and use ./deployment.sh up --from-registry\n\n'
+      printf '    4. skip the build: ./deployment.sh up (without --build) pulls the prebuilt images instead\n\n'
     fi
   fi
 
@@ -210,13 +213,15 @@ cmd_init() {
 
 cmd_up() {
   require_docker
-  local build=(--build)
+  local build=()
   for a in "$@"; do
     case "$a" in
-      --from-registry) build=() ;;
-      *) die "up [--from-registry]" ;;
+      --build) build=(--build) ;;
+      --from-registry) ;;   # the default now; accepted so older instructions still work
+      *) die "up [--build]" ;;
     esac
   done
+  [ ${#build[@]} -gt 0 ] || require_registry_images
   preflight
   if [ -z "${SKIP_DOCTOR:-}" ]; then
     if [ ${#build[@]} -eq 0 ]; then cmd_doctor pull || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"; else cmd_doctor build || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"; fi
@@ -225,8 +230,8 @@ cmd_up() {
   mkdir -p "${DATA_DIRS[@]}" data/logs
   start_infra
   info "starting app (api, scheduler, worker, portal) -- migrations run as the api starts"
-  if [ ${#build[@]} -eq 0 ]; then app pull; fi
-  app up -d "${build[@]}" --wait
+  if [ ${#build[@]} -eq 0 ]; then pull_app_images; fi
+  app up -d ${build[@]+"${build[@]}"} --wait
   cmd_status
   printf '\n  portal   http://localhost:%s\n  api docs http://localhost:%s/docs\n' "$(env_value PORTAL_PORT | grep . || echo 8080)" "$(env_value API_PORT | grep . || echo 8000)"
 }
@@ -299,23 +304,24 @@ cmd_backup() {
 
 cmd_update() {
   require_docker
-  local backup=1 pull=() registry=0
+  local backup=1 pull=() registry=1
   for a in "$@"; do
     case "$a" in
       --no-backup) backup=0 ;;
       --pull) pull=(--pull) ;;
-      --from-registry) registry=1 ;;
-      *) die "update [--no-backup] [--pull] [--from-registry]" ;;
+      --build) registry=0 ;;
+      --from-registry) ;;   # the default now; accepted so older instructions still work
+      *) die "update [--no-backup] [--build] [--pull]" ;;
     esac
   done
+  [ "$registry" = 1 ] && require_registry_images
   preflight
   ensure_network
   # Redis and Postgres untouched: brought up only if they aren't (a fresh host), never recreated.
   start_infra
   if [ "$backup" = 1 ]; then cmd_backup; else warn "skipping backup (--no-backup)"; fi
   if [ "$registry" = 1 ]; then
-    info "pulling app images ($(image_prefix)-{engine,portal}:${AKSOR_VERSION:-$(env_value AKSOR_VERSION)})"
-    app pull
+    pull_app_images
   else
     info "building app images"
     app build "${pull[@]}"
@@ -326,6 +332,21 @@ cmd_update() {
 }
 
 image_prefix() { echo "${AKSOR_IMAGE_PREFIX:-$(env_value AKSOR_IMAGE_PREFIX)}"; }
+image_version() { echo "${AKSOR_VERSION:-$(env_value AKSOR_VERSION)}"; }
+
+# Deploying prebuilt images needs to know which ones: say so before anything is started or backed up.
+require_registry_images() {
+  case "$(image_prefix)" in
+    */*) ;;
+    *) die "no images to pull: set AKSOR_IMAGE_PREFIX (e.g. ghcr.io/aksor-khmer-solutech/aksor-khmer-bi) and AKSOR_VERSION in .env -- see .env.example. To build from the source instead: add --build" ;;
+  esac
+  [ -n "$(image_version)" ] || die "set AKSOR_VERSION in .env to the released version you want (read CHANGELOG.md first). To build from the source instead: add --build"
+}
+
+pull_app_images() {
+  info "pulling app images ($(image_prefix)-{engine,portal}:$(image_version))"
+  app pull || die "couldn't pull the images -- is version $(image_version) published (a git tag v$(image_version) pushes it), and is the package public or are you logged in (docker login ghcr.io)? Or add --build to build from the source"
+}
 
 cmd_publish() {
   require_docker
@@ -340,17 +361,17 @@ cmd_publish() {
     *) die "set AKSOR_IMAGE_PREFIX (in .env or the environment) to <dockerhub-user>/aksor-khmer-bi -- got '${prefix:-<empty>}'" ;;
   esac
   local platforms="${PLATFORMS:-linux/amd64}"
-  info "publishing $prefix-{engine,portal}:$version for $platforms (docker login first if the push is denied)"
+  info "publishing $prefix-{engine,portal,jdbc-worker}:$version for $platforms (docker login first if the push is denied)"
   local name file tags
-  for name in engine portal; do
-    # Both build from the repo root: the portal bundles /docs (portal/Dockerfile).
-    if [ "$name" = engine ]; then file=Dockerfile; else file=portal/Dockerfile; fi
+  for name in engine portal jdbc-worker; do
+    # All build from the repo root: the portal bundles /docs (portal/Dockerfile).
+    case "$name" in engine) file=Dockerfile ;; *) file="$name/Dockerfile" ;; esac
     tags=(-t "$prefix-$name:$version")
     [ "$latest" = 1 ] && tags+=(-t "$prefix-$name:latest")
     info "building and pushing $prefix-$name"
     docker buildx build --platform "$platforms" "${tags[@]}" -f "$file" --push .
   done
-  info "published. On the server: AKSOR_IMAGE_PREFIX=$prefix AKSOR_VERSION=$version ./deployment.sh up --from-registry"
+  info "published. On the server: AKSOR_IMAGE_PREFIX=$prefix AKSOR_VERSION=$version ./deployment.sh up"
 }
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -367,7 +388,7 @@ main() {
     backup)  cmd_backup "$@" ;;
     update)  cmd_update "$@" ;;
     publish) cmd_publish "$@" ;;
-    doctor)  cmd_doctor "${1:-build}" ;;
+    doctor)  cmd_doctor "${1:-pull}" ;;
     redis)   require_docker; ensure_network; redis "${@:-ps}" ;;
     db)      require_docker; ensure_network; db "${@:-ps}" ;;
     app)     require_docker; ensure_network; app "${@:-ps}" ;;

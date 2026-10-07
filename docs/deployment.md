@@ -47,8 +47,8 @@ names across projects. A step-by-step walkthrough, one file at a time, is in
 | Command | Does |
 |---|---|
 | `init` | Creates `aksor-network`, the `data/` folders, and a mode-600 `.env` with a random `POSTGRES_PASSWORD` and `PORTAL_PASSWORD` (shown once). Never overwrites an existing `.env`; if a Postgres volume already exists it does **not** invent a new database password. |
-| `up` | Starts redis and postgres, waits for health, builds and starts the app. Warns about a default DB password, a missing `PORTAL_PASSWORD`, or unset `CORS_ALLOWED_ORIGINS`. |
-| `update [--no-backup] [--pull]` | Backs up, rebuilds the app images, recreates the app (migrations run as the API starts). Redis and Postgres are not recreated. `--pull` refreshes base images. |
+| `up [--build]` | Starts redis and postgres, waits for health, pulls the prebuilt images for `AKSOR_VERSION` and starts the app (`--build` builds them from the source instead). Warns about a default DB password, a missing `PORTAL_PASSWORD`, or unset `CORS_ALLOWED_ORIGINS`. |
+| `update [--no-backup] [--build] [--pull]` | Backs up, pulls the images for `AKSOR_VERSION` (or `--build`s them), recreates the app (migrations run as the API starts). Redis and Postgres are not recreated. `--pull` (with `--build`) refreshes base images. |
 | `down` | Stops the app, then postgres, then redis. Named volumes and `./data` are kept. |
 | `restart [redis\|db\|app]`, `status`, `logs [service…]` | Operate and inspect. |
 | `backup` | `pg_dump` plus `data/` (templates and every version, uploaded images/stylesheets, avatars, the secrets key) into `./backups/`, newest 14 kept (`BACKUP_KEEP`). The secrets key and the database belong together — restore both or stored credentials can't be decrypted. |
@@ -115,41 +115,43 @@ choose their own at first sign-in, and an admin can reset any local user's
 password later from the same screen (a generated temporary password is
 shown once, and the user must replace it on their next sign-in).
 
-### Publishing images to Docker Hub
+### Publishing images to GitHub Container Registry
 
-Two images are published: `<prefix>-engine` (the API; also runs `scheduler` and `worker`) and `<prefix>-portal`.
+Three images are published: `<prefix>-engine` (the API; also runs `scheduler` and `worker`), `<prefix>-portal`
+and `<prefix>-jdbc-worker` (only used with the `jdbc` profile). The prefix is
+`ghcr.io/aksor-khmer-solutech/aksor-khmer-bi`.
 
-1. **Create the repositories** on hub.docker.com — `aksor-khmer-bi-engine` and `aksor-khmer-bi-portal` under your
-   user or organization (or let the first push create them; choose *private* if the image shouldn't be public).
-2. **Log in** with an access token, not your password (Account settings → Personal access tokens → *Read & Write*):
-   ```bash
-   docker login -u aksorkhmerbi
-   ```
-3. **Set the prefix** in `.env`: `AKSOR_IMAGE_PREFIX=aksorkhmerbi/aksor-khmer-bi`
-4. **Publish**:
-   ```bash
-   ./deployment.sh publish 1.0.1 --latest     # --latest also moves the :latest tag
-   ```
-   which is, for each of engine (`Dockerfile`) and portal (`portal/Dockerfile`), both with context `.`:
-   ```bash
-   docker buildx build --platform linux/amd64 \
-     -t aksorkhmerbi/aksor-khmer-bi-engine:1.0.1 -t aksorkhmerbi/aksor-khmer-bi-engine:latest --push .
-   ```
-   The platform defaults to **`linux/amd64`** because most servers are Intel/AMD even when you build on an
-   Apple-silicon Mac — an arm64 image would die on them with `exec format error`. For both, set
-   `PLATFORMS=linux/amd64,linux/arm64` (the api image is large — LibreOffice — so the arm64 half builds slowly
-   under emulation).
-5. **Deploy from the registry** on the server (it needs this repo's compose files and `.env`, not the source
-   build):
-   ```bash
-   AKSOR_VERSION=1.0.1 ./deployment.sh up --from-registry        # first time
-   AKSOR_VERSION=1.0.2 ./deployment.sh update --from-registry    # upgrade: backup, pull, recreate, migrate
-   ```
-   (Put `AKSOR_VERSION` in `.env` to make it stick.) A private repository needs `docker login` on the server too.
+**The normal way — push a version tag.** The workflow `.github/workflows/release-images.yml` builds the images on
+GitHub and publishes them:
+```bash
+git tag v1.0.2 && git push origin v1.0.2      # publishes ...-engine:1.0.2, ...-portal:1.0.2, ...-jdbc-worker:1.0.2
+```
+The first time, open each package on GitHub (your organization → Packages → the package → *Package settings*) and
+set its visibility to **Public**, so servers can pull without logging in. Public packages have no storage or
+bandwidth charge.
+
+**By hand** (from a machine with internet, logged in with `docker login ghcr.io` using a token that has the
+`write:packages` scope):
+```bash
+AKSOR_IMAGE_PREFIX=ghcr.io/aksor-khmer-solutech/aksor-khmer-bi ./deployment.sh publish 1.0.2
+```
+The platform defaults to **`linux/amd64`** because most servers are Intel/AMD even when you build on an
+Apple-silicon Mac — an arm64 image would die on them with `exec format error`. For both, set
+`PLATFORMS=linux/amd64,linux/arm64` (the api image is large — LibreOffice — so the arm64 half builds slowly
+under emulation).
+
+**Deploy from the registry** on the server (it needs this repo's compose files and `.env`, not the source build).
+Read `CHANGELOG.md` for every version up to the one you want first:
+```bash
+AKSOR_VERSION=1.0.2 ./deployment.sh up        # first time
+AKSOR_VERSION=1.0.3 ./deployment.sh update    # upgrade: backup, pull, recreate, migrate
+```
+Put `AKSOR_IMAGE_PREFIX` and `AKSOR_VERSION` in `.env` to make them stick. A private package needs
+`docker login ghcr.io` on the server too.
 
 Notes:
 - **Pin a version** (`1.0.1`) in `.env` rather than relying on `latest`, so a restart can never silently pick up a
-  new release, and a rollback is just setting the old tag and running `up --from-registry`. Database migrations
+  new release, and a rollback is just setting the old tag and running `up`. Database migrations
   only move forward, so take the backup `update` makes before upgrading, and restore it to roll back across a
   schema change.
 - **The portal's API URL is not in the image's control:** `portal/public/config.js` ships pointing at
@@ -157,8 +159,8 @@ Notes:
   `./portal/public/config.js`). On a server with no checkout, copy that file there, edit
   `PORTAL_API_BASE_URL`, and point `PORTAL_CONFIG_FILE` at it.
 - Never bake secrets into an image: passwords and keys come from `.env` at run time, and `.dockerignore` keeps
-  `.env` out of the build context. Images on Docker Hub can be pulled by anyone if the repository is public.
-- Images are not signed or scanned by this script; Docker Hub's Scout or `docker scout cves <image>` can do the
+  `.env` out of the build context. Public images can be pulled by anyone.
+- Images are not signed or scanned by this script; `docker scout cves <image>` or Trivy can do the
   latter.
 
 ### Two origins now — CORS and the portal's API URL

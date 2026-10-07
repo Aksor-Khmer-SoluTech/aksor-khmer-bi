@@ -1,0 +1,25 @@
+# Throwaway Ubuntu 26.04 "server" with its own Docker daemon, for trying ./deployment.sh without committing.
+#   docker compose -f scripts/deploy-test/docker-compose.yml up -d --build
+#   docker compose -f scripts/deploy-test/docker-compose.yml exec ubuntu bash     # then: cd /app/aksor-khmer-bi && ./deployment.sh doctor
+#   docker compose -f scripts/deploy-test/docker-compose.yml down                 # add -v to also drop the inner images
+# The repo is mounted read-write: edits apply immediately, and the deployment's .env etc. land in your working tree
+# (gitignored; delete afterwards). The container shares your host's kernel -- only the userland is Ubuntu 26.04.
+name: aksor-deploy-test
+services:
+  ubuntu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aksor-ubuntu
+    container_name: aksor-ubuntu
+    privileged: true          # the inner Docker daemon needs it
+    tty: true
+    stdin_open: true
+    working_dir: /app/aksor-khmer-bi
+    # No systemd in a container, so start the inner daemon here and keep the container alive.
+    command: ["sh", "-c", "dockerd >/var/log/dockerd.log 2>&1 & exec sleep infinity"]
+    volumes:
+      - ../..:/app/aksor-khmer-bi
+      - dind:/var/lib/docker   # overlay can't nest on the container's own overlay filesystem
+volumes:
+  dind:

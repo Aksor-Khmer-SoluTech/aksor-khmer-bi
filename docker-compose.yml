@@ -4,11 +4,12 @@
 # still starting, and its healthcheck gates `scheduler`/`worker` as before.
 services:
   api:
-    # One image for api, scheduler and worker (same code, different command). Built here by
-    # `up --build`, or pulled from a registry with `./deployment.sh up --from-registry`:
-    # AKSOR_IMAGE_PREFIX is e.g. `yourname/aksor-khmer-bi` (Docker Hub), AKSOR_VERSION a tag.
-    # `./deployment.sh publish <version>` pushes exactly these names.
-    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    # One image for api, scheduler and worker (same code, different command). `./deployment.sh up` PULLS the
+    # prebuilt image: AKSOR_IMAGE_PREFIX / AKSOR_VERSION in .env name it (a released version -- see CHANGELOG.md);
+    # `./deployment.sh up --build` builds it from `build:` below instead. Releases are published by pushing a
+    # `v<version>` git tag (.github/workflows/release-images.yml); `./deployment.sh publish <version>` pushes the
+    # same names by hand.
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -131,7 +132,7 @@ services:
   # memory/CPU/processes. Nothing is published to the host.
   jdbc-worker:
     profiles: ["jdbc"]
-    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-jdbc-worker:${AKSOR_VERSION:-latest}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-jdbc-worker:${AKSOR_VERSION:-latest}
     build:
       context: .
       dockerfile: jdbc-worker/Dockerfile
@@ -167,7 +168,7 @@ services:
   # more than one replica would make every cron trigger fire once per
   # replica, not once total. Scale `worker` instead for more throughput.
   scheduler:
-    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["python", "-m", "app.scheduler"]
     restart: unless-stopped
@@ -195,7 +196,7 @@ services:
   # retry/backoff (app/celery_app.py's run_job task). Horizontally
   # scalable: `docker compose up --scale worker=3`.
   worker:
-    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-engine:${AKSOR_VERSION:-latest}
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
     restart: unless-stopped
@@ -231,7 +232,7 @@ services:
   # this container, so there's no network dependency between the two at
   # the container level — only in the browser loading the page.
   portal:
-    image: ${AKSOR_IMAGE_PREFIX:-aksor-khmer-bi}-portal:${AKSOR_VERSION:-latest}
+    image: ${AKSOR_IMAGE_PREFIX:-ghcr.io/aksor-khmer-solutech/aksor-khmer-bi}-portal:${AKSOR_VERSION:-latest}
     build:
       context: .
       dockerfile: portal/Dockerfile
