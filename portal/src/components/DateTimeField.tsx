@@ -247,20 +247,89 @@ function withDay(moment: Moment | null, day: Pick<Moment, "year" | "month" | "da
 
 // --- calendar -------------------------------------------------------------------------
 
+/** Which grid the calendar shows: the days of one month, the twelve months of
+ * one year, or a page of twelve years -- the title's month and year jump to the
+ * last two, so a date years away is three clicks, not dozens. */
+type CalendarMode = "days" | "months" | "years";
+
 function Calendar({ selected, onPick }: { selected: Moment | null; onPick: (day: { year: number; month: number; day: number }) => void }) {
   const today = momentOf(new Date());
   const anchor = selected ?? today;
   const [view, setView] = useState({ year: anchor.year, month: anchor.month });
   // The day that holds the roving tab stop; arrow keys move it.
   const [focus, setFocus] = useState({ year: anchor.year, month: anchor.month, day: anchor.day });
+  const [mode, setMode] = useState<CalendarMode>("days");
   const gridRef = useRef<HTMLDivElement>(null);
   const moved = useRef(true); // focus the day on open, and after each arrow key
 
   useEffect(() => {
-    if (!moved.current) return;
+    if (!moved.current || mode !== "days") return;
     moved.current = false;
     gridRef.current?.querySelector<HTMLButtonElement>(`[data-day="${dayKey(focus.year, focus.month, focus.day)}"]`)?.focus();
-  }, [focus, view]);
+  }, [focus, view, mode]);
+
+  function showDays(year: number, month: number) {
+    setView({ year, month });
+    setFocus((f) => ({ year, month, day: Math.min(f.day, daysInMonth(year, month)) }));
+    moved.current = true;
+    setMode("days");
+  }
+
+  if (mode === "months") {
+    return (
+      <PickerGrid
+        key={mode}
+        kind="month"
+        title={String(view.year)}
+        onTitle={() => setMode("years")}
+        titleLabel={`${view.year}, choose a year`}
+        step={1}
+        page={(n) => setView((v) => ({ ...v, year: v.year + n }))}
+        cursor={view.month}
+        cells={MONTHS.map((name, i) => ({
+          value: i + 1,
+          label: name.slice(0, 3),
+          name: `${name} ${view.year}`,
+          selected: selected?.year === view.year && selected.month === i + 1,
+          current: today.year === view.year && today.month === i + 1,
+        }))}
+        // Arrowing past December or before January carries into the next/previous year.
+        onMove={(month) => {
+          const total = view.year * 12 + (month - 1);
+          setView({ year: Math.floor(total / 12), month: (((total % 12) + 12) % 12) + 1 });
+        }}
+        onChoose={(month) => showDays(view.year, month)}
+        onBack={() => showDays(view.year, view.month)}
+      />
+    );
+  }
+
+  if (mode === "years") {
+    const first = Math.floor(view.year / 12) * 12;
+    return (
+      <PickerGrid
+        key={mode}
+        kind="year"
+        title={`${first} – ${first + 11}`}
+        step={12}
+        page={(n) => setView((v) => ({ ...v, year: v.year + n }))}
+        cursor={view.year}
+        cells={Array.from({ length: 12 }, (_, i) => first + i).map((year) => ({
+          value: year,
+          label: String(year),
+          name: String(year),
+          selected: selected?.year === year,
+          current: today.year === year,
+        }))}
+        onMove={(year) => setView((v) => ({ ...v, year }))}
+        onChoose={(year) => {
+          setView((v) => ({ ...v, year }));
+          setMode("months");
+        }}
+        onBack={() => setMode("months")}
+      />
+    );
+  }
 
   function shift(months: number) {
     const total = view.year * 12 + (view.month - 1) + months;
@@ -298,7 +367,12 @@ function Calendar({ selected, onPick }: { selected: Moment | null; onPick: (day:
           <ChevronLeft size={15} aria-hidden="true" />
         </button>
         <div className="dt-cal-title" aria-live="polite">
-          <span>{MONTHS[view.month - 1]}</span> <span className="dt-cal-year">{view.year}</span>
+          <button type="button" className="dt-title-btn" aria-label={`${MONTHS[view.month - 1]}, choose a month`} onClick={() => setMode("months")}>
+            {MONTHS[view.month - 1]}
+          </button>
+          <button type="button" className="dt-title-btn dt-cal-year" aria-label={`${view.year}, choose a year`} onClick={() => setMode("years")}>
+            {view.year}
+          </button>
         </div>
         <button type="button" className="dt-nav" aria-label="Next month" onClick={() => shift(1)}>
           <ChevronRight size={15} aria-hidden="true" />
@@ -337,6 +411,111 @@ function Calendar({ selected, onPick }: { selected: Moment | null; onPick: (day:
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** The month or year grid: three across, four down, sized like the day grid so the
+ * popover doesn't jump. Arrows move (crossing into the next year or page), PageUp/Down
+ * turn the page, Enter picks, Escape steps back a level instead of closing. */
+function PickerGrid({
+  kind,
+  title,
+  onTitle,
+  titleLabel,
+  step,
+  page,
+  cursor,
+  cells,
+  onMove,
+  onChoose,
+  onBack,
+}: {
+  kind: "month" | "year";
+  title: string;
+  /** Present when the title zooms out a level (a year's months -> pages of years). */
+  onTitle?: () => void;
+  titleLabel?: string;
+  step: number;
+  page: (by: number) => void;
+  /** The value holding the roving tab stop. */
+  cursor: number;
+  cells: { value: number; label: string; name: string; selected: boolean; current: boolean }[];
+  onMove: (value: number) => void;
+  onChoose: (value: number) => void;
+  onBack: () => void;
+}) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const moved = useRef(true); // focus the cursor on arrival, and after each arrow key
+
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    gridRef.current?.querySelector<HTMLButtonElement>(`[data-value="${cursor}"]`)?.focus();
+  }, [cursor, title]);
+
+  function onKeyDown(e: KeyboardEvent) {
+    const by = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[e.key];
+    if (by !== undefined) {
+      e.preventDefault();
+      moved.current = true;
+      onMove(cursor + by);
+    } else if (e.key === "PageUp" || e.key === "PageDown") {
+      e.preventDefault();
+      moved.current = true;
+      page(e.key === "PageUp" ? -step : step);
+    } else if (e.key === "Escape") {
+      // Back to the level below rather than closing the whole popover.
+      e.preventDefault();
+      e.stopPropagation();
+      onBack();
+    }
+  }
+
+  const unit = kind === "month" ? "year" : "12 years";
+  return (
+    <div className="dt-calendar">
+      <div className="dt-cal-head">
+        <button type="button" className="dt-nav" aria-label={`Previous ${unit}`} onClick={() => page(-step)}>
+          <ChevronLeft size={15} aria-hidden="true" />
+        </button>
+        <div className="dt-cal-title" aria-live="polite">
+          {onTitle ? (
+            <button type="button" className="dt-title-btn" aria-label={titleLabel} onClick={onTitle}>
+              {title}
+            </button>
+          ) : (
+            <span className="dt-title-static">{title}</span>
+          )}
+        </div>
+        <button type="button" className="dt-nav" aria-label={`Next ${unit}`} onClick={() => page(step)}>
+          <ChevronRight size={15} aria-hidden="true" />
+        </button>
+      </div>
+      <div
+        className="dt-picker-grid"
+        ref={gridRef}
+        role="grid"
+        aria-label={kind === "month" ? `Months of ${title}` : `Years ${title}`}
+        onKeyDown={onKeyDown}
+      >
+        {cells.map((c) => (
+          <button
+            key={c.value}
+            type="button"
+            role="gridcell"
+            data-value={c.value}
+            tabIndex={c.value === cursor ? 0 : -1}
+            aria-selected={c.selected}
+            aria-current={c.current ? "date" : undefined}
+            aria-label={c.name}
+            className={`dt-day dt-pick${c.selected ? " is-selected" : ""}${c.current ? " is-today" : ""}`}
+            onClick={() => onChoose(c.value)}
+          >
+            {c.label}
+          </button>
+        ))}
       </div>
     </div>
   );

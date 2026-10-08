@@ -471,9 +471,50 @@ label > span.req-url:focus-within {
 
 .dt-cal-title {
   flex: 1;
+  display: flex;
+  justify-content: center;
   text-align: center;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+/* The title's month and year are buttons that zoom out to a month / year grid:
+   quiet until hovered, so the header still reads as a title. */
+.dt-title-btn,
+.dt-title-static {
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.dt-title-btn {
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.dt-title-btn:hover {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.dt-title-btn.dt-cal-year {
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.dt-title-btn.dt-cal-year:hover {
+  color: var(--text);
+}
+
+.dt-title-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .dt-cal-year {
@@ -535,6 +576,34 @@ label > span.req-url:focus-within {
 .dt-day:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Months of a year / a page of years: 3 x 4, the same height as the weekday row
+   plus six weeks of days, so switching levels never resizes the popover. */
+.dt-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  gap: 4px;
+  height: 231px;
+  animation: dt-zoom-in 0.16s ease-out;
+}
+
+.dt-day.dt-pick {
+  height: auto;
+}
+
+@keyframes dt-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dt-picker-grid {
+    animation: none;
+  }
 }
 
 .dt-time {

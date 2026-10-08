@@ -78,6 +78,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   holding LDAP syntax can only ever be a name.
 
 ### Added
+- **Date picker: jump by month and year.** The month and the year in the calendar's title are now buttons: the month
+  opens a grid of the twelve months, the year a page of twelve years (‹ › turn the page), so a date years away is
+  three clicks instead of dozens of arrow presses. Both grids work from the keyboard (arrows, PageUp/PageDown, Enter;
+  Escape steps back a level instead of closing) and keep the popover the same size.
 - **Reorder a report's parameters.** On the template's Parameters tab each card has a drag handle, a position number and
   up/down arrows (also usable from the keyboard, with spoken announcements by name), and **Reorder** folds the cards to
   one line each for long lists. The saved order is the order people see the filters in on the run page, the Preview tab's
