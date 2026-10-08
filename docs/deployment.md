@@ -611,6 +611,7 @@ GitHub and publishes them:
 ```bash
 git tag v1.0.2 && git push origin v1.0.2      # publishes ...-engine:1.0.2, ...-portal:1.0.2, ...-jdbc-worker:1.0.2
 ```
+It publishes only a commit **CI has already passed** on (a seconds-long check, not a re-run of the tests — if CI is still running it waits; if CI failed it stops with the reason), then builds the three images in parallel with a layer cache kept between releases, so a release takes minutes. Tag a commit CI is green on.
 The first time, open each package on GitHub (your organization → Packages → the package → *Package settings*) and
 set its visibility to **Public**, so servers can pull without logging in. Public packages have no storage or
 bandwidth charge.

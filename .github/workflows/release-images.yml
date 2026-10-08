@@ -1,9 +1,15 @@
 name: Release images
 
 # Pushing a version tag (git tag v1.0.2 && git push origin v1.0.2) builds the images and publishes them to
-# GitHub Container Registry as ghcr.io/<owner>/aksor-khmer-bi-{engine,portal,jdbc-worker}:<version>.
-# Servers then deploy them with AKSOR_VERSION=<version> ./deployment.sh up -- no build, no Node.
+# GitHub Container Registry as ghcr.io/<owner>/aksor-khmer-bi-{engine,portal}:<version> (plus -jdbc-worker, the
+# small optional image for uploaded JDBC drivers). Servers then deploy them with
+# AKSOR_VERSION=<version> ./deployment.sh up -- no build, no Node.
 # After the first publish, set each package to Public (GitHub -> Packages -> package settings) so pulls need no login.
+#
+# Quick on purpose: the three images build in parallel, every layer is cached between releases (an unchanged apt /
+# pip / npm layer is reused, not rebuilt), and the tests are NOT re-run here -- the "gate" job only checks, in
+# seconds, that the CI workflow already passed for this exact commit (and waits for it if you tagged a moment
+# early). Tag a commit CI is green on and a release takes a few minutes.
 on:
   push:
     tags: ["v*"]
@@ -11,14 +17,33 @@ on:
 permissions:
   contents: read
   packages: write
+  actions: read
 
 jobs:
-  # A tag never publishes images for a commit whose tests fail: the whole CI workflow runs first.
-  ci:
-    uses: ./.github/workflows/ci.yml
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: CI must have passed for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Poll for up to ~25 minutes: green -> go; a finished run that failed -> stop; still running -> wait.
+          for i in $(seq 1 50); do
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=20" \
+                    --jq '[.workflow_runs[] | {status, conclusion}]')"
+            if echo "$runs" | jq -e 'any(.[]; .conclusion == "success")' >/dev/null; then
+              echo "CI already passed for $GITHUB_SHA"; exit 0
+            fi
+            if echo "$runs" | jq -e 'length > 0 and all(.[]; .status == "completed")' >/dev/null; then
+              echo "::error::CI finished without passing for $GITHUB_SHA -- fix it, then tag again"; exit 1
+            fi
+            echo "CI hasn't finished for $GITHUB_SHA yet -- waiting (${i}/50)"; sleep 30
+          done
+          echo "::error::CI did not finish in time for $GITHUB_SHA"; exit 1
 
   publish:
-    needs: ci
+    needs: gate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -52,7 +77,11 @@ jobs:
           file: ${{ matrix.file }}
           platforms: linux/amd64
           push: true
-          # Build provenance and a software bill of materials, attached to each image in the registry.
-          provenance: true
-          sbom: true
           tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+          # Layer cache kept in GitHub's cache between releases, one per image: the heavy apt (LibreOffice, Tesseract)
+          # and pip layers only rebuild when they change. No provenance/SBOM attestations -- they add time and show up
+          # as extra "unknown/unknown" entries beside the image in the registry.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: false
+          sbom: false

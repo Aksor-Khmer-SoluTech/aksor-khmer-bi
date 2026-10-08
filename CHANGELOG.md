@@ -24,6 +24,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   read by anyone who opens that page.
 
 ### Fixed
+- **CI: the LDAP login test asserted a stale permission list.** `ROLE_REPORT_ADMIN` has long held folder and
+  protected-terms management as well as the report permissions; the test (which only runs where an OpenLDAP server is
+  available, i.e. in CI) now reads the expected set from the role's own definition.
 - **Deployment hardening** (`deployment.sh`, `.env.example`, `.dockerignore`):
   - `.env.example` no longer ships `POSTGRES_PASSWORD=Pleasechangeit` / `PORTAL_PASSWORD=admin` (its comments always said
     "empty"): a manual `cp .env.example .env` can't leave a guessable administrator login behind. `up` / `update` now
@@ -54,8 +57,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `up` / `update` check `.env` before the image settings, `restart` restarts redis → db → app, `logs jdbc-worker`
     works without `--profile`, the "port is ours" check looks at this stack's own containers, `set_env` adds a missing
     key, and the local LDAP test server listens on 127.0.0.1 only.
-  - Releases: pushing a `v*` tag now runs the whole CI workflow first and only publishes if it passes; images carry
-    build provenance and an SBOM.
+  - Releases: pushing a `v*` tag publishes only if CI already passed for that commit (a seconds-long check, not a
+    re-run of the tests; it waits if CI is still running); the engine, portal and jdbc-worker images build in
+    parallel with a layer cache kept between releases, so a release takes minutes.
 
 ### Security
 - **Directory (AD / LDAP) users have no password here — now pinned by tests and hardened.** Already true: such a user

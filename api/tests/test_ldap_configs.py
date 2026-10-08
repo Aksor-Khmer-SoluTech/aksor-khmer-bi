@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from ldap3 import MODIFY_ADD, MODIFY_DELETE, Connection, Server
 
 from app.main import app
-from app.rbac import ROOT_ORG_ID
+from app.rbac import _ORG_ROLE_PERMISSIONS, ROOT_ORG_ID
 from tests.test_auth_ldap import (  # noqa: F401 -- reuse the skip guard + constants
     LDAP_ADMIN_DN,
     LDAP_ADMIN_PASSWORD_ENV,
@@ -188,7 +188,9 @@ def test_ldap_user_can_log_in_and_gets_synced_role(auth_headers):
     assert verify.json()["username"] == "jdoe"
 
     perms = client.get(f"/api/v1/users/{user_id}/permissions", headers=auth_headers).json()["permissions"]
-    assert set(perms) == {"report:manage", "report:render", "report:view"}
+    # Exactly what the mapped role holds -- read from the role's own definition, so growing the role (it gained folder
+    # and protected-terms management) can't leave this test asserting a stale list.
+    assert set(perms) == set(_ORG_ROLE_PERMISSIONS["ROLE_REPORT_ADMIN"])
 
 
 def test_ldap_user_wrong_password_rejected(auth_headers):
