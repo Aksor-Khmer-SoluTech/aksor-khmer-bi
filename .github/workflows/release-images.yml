@@ -38,6 +38,11 @@ jobs:
             if echo "$runs" | jq -e 'length > 0 and all(.[]; .status == "completed")' >/dev/null; then
               echo "::error::CI finished without passing for $GITHUB_SHA -- fix it, then tag again"; exit 1
             fi
+            # No run at all after ~2 minutes: this commit was never pushed to a branch CI watches (or CI is off) -- say so
+            # now instead of waiting the full 25 minutes.
+            if [ "$i" -ge 5 ] && echo "$runs" | jq -e 'length == 0' >/dev/null; then
+              echo "::error::No CI run exists for $GITHUB_SHA -- push the commit to main (or open a PR) so CI runs, then tag again"; exit 1
+            fi
             echo "CI hasn't finished for $GITHUB_SHA yet -- waiting (${i}/50)"; sleep 30
           done
           echo "::error::CI did not finish in time for $GITHUB_SHA"; exit 1
