@@ -1,5 +1,16 @@
-import { useState } from "react";
-import { CircleCheck, FlaskConical, Plus, Trash2 } from "lucide-react";
+import { useState, type CSSProperties } from "react";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { ChevronDown, ChevronUp, CircleCheck, FlaskConical, GripVertical, ListOrdered, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { supportsMonthDay, supportsNow, toOptionsSource, type DataConfigDraft, type EditableParameter } from "../dataConfig";
 import type { OptionsPreview, ParameterType, ReportMeta } from "../types";
@@ -51,6 +62,13 @@ export default function ParametersTab({
   canManageSecrets: boolean;
   orgId: string;
 }) {
+  // "Reorder" folds every card down to one line, so a long list can be rearranged without scrolling past forms.
+  const [compact, setCompact] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
   if (draft.status === "idle" || draft.status === "loading") {
     return (
       <div className="panel data-config">
@@ -59,6 +77,26 @@ export default function ParametersTab({
       </div>
     );
   }
+
+  const keys = draft.parameters.map((p) => p.key);
+  // Spoken by screen readers while a card is moved with the keyboard -- by name and position, not by an internal id.
+  const nameOf = (id: string | number) => {
+    const found = draft.parameters.find((p) => p.key === Number(id));
+    return found?.label || found?.name || "this parameter";
+  };
+  const positionOf = (id: string | number) => keys.indexOf(Number(id)) + 1;
+  const announcements = {
+    onDragStart: ({ active }: { active: { id: string | number } }) => `Picked up ${nameOf(active.id)}, position ${positionOf(active.id)} of ${keys.length}.`,
+    onDragOver: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over ? `${nameOf(active.id)} is over position ${positionOf(over.id)} of ${keys.length}.` : undefined,
+    onDragEnd: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over ? `${nameOf(active.id)} moved to position ${positionOf(over.id)} of ${keys.length}.` : `${nameOf(active.id)} was dropped where it was.`,
+    onDragCancel: ({ active }: { active: { id: string | number } }) => `Moving ${nameOf(active.id)} was cancelled; it is still at position ${positionOf(active.id)}.`,
+  };
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    draft.moveParameter(keys.indexOf(Number(active.id)), keys.indexOf(Number(over.id)));
+  };
 
   return (
     <div className="panel data-config">
@@ -70,23 +108,40 @@ export default function ParametersTab({
       {draft.loadError && <p className="alert alert-error">{draft.loadError}</p>}
 
       <section className="data-config-section">
-        <h3 className="data-config-heading">Filter parameters</h3>
+        <div className="spread">
+          <h3 className="data-config-heading">Filter parameters</h3>
+          {draft.parameters.length > 1 && (
+            <button type="button" className={`btn btn-sm${compact ? " btn-primary" : ""}`} aria-pressed={compact} onClick={() => setCompact((c) => !c)}>
+              <ListOrdered size={14} aria-hidden="true" /> {compact ? "Done reordering" : "Reorder"}
+            </button>
+          )}
+        </div>
+        <p className="field-hint data-config-hint">
+          People see the filters <strong>in this order</strong> when they run the report. Drag a card by its handle (or use the arrows) to move it.
+        </p>
         <p className="field-hint data-config-hint">
           A <strong>choice list</strong> can be limited per person or role in the Access Privilege tab (for example, a branch filter that lists every
           branch, limited so someone only gets theirs). <strong>Free text</strong> can't be limited.
         </p>
 
-        {draft.parameters.map((p) => (
-          <ParameterCard
-            key={p.key}
-            p={p}
-            reportId={report.report_id}
-            draft={draft}
-            canManageConnections={canManageConnections}
-            canManageSecrets={canManageSecrets}
-            orgId={orgId}
-          />
-        ))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={{ announcements }}>
+          <SortableContext items={keys} strategy={verticalListSortingStrategy}>
+            {draft.parameters.map((p, index) => (
+              <ParameterCard
+                key={p.key}
+                p={p}
+                index={index}
+                count={draft.parameters.length}
+                compact={compact}
+                reportId={report.report_id}
+                draft={draft}
+                canManageConnections={canManageConnections}
+                canManageSecrets={canManageSecrets}
+                orgId={orgId}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
 
         <button type="button" className="btn btn-sm" onClick={draft.addParameter}>
           <Plus size={14} /> Add parameter
@@ -100,6 +155,9 @@ export default function ParametersTab({
 
 function ParameterCard({
   p,
+  index,
+  count,
+  compact,
   reportId,
   draft,
   canManageConnections,
@@ -107,6 +165,9 @@ function ParameterCard({
   orgId,
 }: {
   p: EditableParameter;
+  index: number;
+  count: number;
+  compact: boolean;
   reportId: string;
   draft: DataConfigDraft;
   canManageConnections: boolean;
@@ -114,15 +175,58 @@ function ParameterCard({
   orgId: string;
 }) {
   const update = (patch: Partial<EditableParameter>) => draft.updateParameter(p.key, patch);
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: p.key });
+  // Slide vertically only: a card never drifts sideways while it is dragged.
+  const style: CSSProperties = { transform: CSS.Translate.toString(transform ? { ...transform, x: 0 } : null), transition };
+  const title = p.label || p.name || "this parameter";
 
   function changeType(textType: ParameterType) {
     // A default only makes sense in the type it was written for -- "H.E" isn't a date.
     update({ textType, defaultValue: "", defaultMode: keepMode(p.defaultMode, textType) });
   }
 
+  const rail = (
+    <div className="param-rail">
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        className="param-grip"
+        aria-label={`Move ${title}: position ${index + 1} of ${count}. Press space, then the arrow keys.`}
+        data-tip="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={16} aria-hidden="true" />
+      </button>
+      <span className="param-position" aria-hidden="true">{index + 1}</span>
+      <div className="param-arrows">
+        <button type="button" className="param-arrow" disabled={index === 0} onClick={() => draft.moveParameter(index, index - 1)} aria-label={`Move ${title} up`} data-tip="Move up">
+          <ChevronUp size={14} aria-hidden="true" />
+        </button>
+        <button type="button" className="param-arrow" disabled={index === count - 1} onClick={() => draft.moveParameter(index, index + 1)} aria-label={`Move ${title} down`} data-tip="Move down">
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div ref={setNodeRef} style={style} className={`data-config-card param-compact${isDragging ? " dragging" : ""}`}>
+        {rail}
+        <div className="param-compact-main">
+          <strong>{p.label || <span className="muted">(no label)</span>}</strong>
+          <span className="mono muted">{p.name || "—"}</span>
+        </div>
+        <span className="param-compact-kind">{p.kind === "choices" ? "Choice list" : TEXT_TYPES.find((t) => t.value === p.textType)?.label ?? "Free text"}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="data-config-card">
+    <div ref={setNodeRef} style={style} className={`data-config-card param-sortable${isDragging ? " dragging" : ""}`}>
       <div className="data-config-row param-head">
+        {rail}
         <label>
           <span>Name</span>
           <input

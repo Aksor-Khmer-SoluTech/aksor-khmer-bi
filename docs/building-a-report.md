@@ -356,7 +356,14 @@ asked for when they run the report, and where the server gets its data. They are
 one configuration and save together — a data source's URL names filters by `{{ name }}`, so a
 filter can't be renamed apart from the URL that uses it.
 
-**Parameters** — each filter is *free text* (text, number, date, date & time, time) or a *choice
+**Parameters** are shown to the person running the report **in the order they are listed**. Reorder them by
+dragging a card's handle, with the up/down arrows, or with the keyboard (focus the handle, press Space, use the arrow
+keys, Space again); **Reorder** folds the cards to one line each, which is easier for a long list. Moving a parameter
+is a change like any other — it is saved with **Save changes**, and the run page, the Preview tab's live run and
+embedded runs all follow the saved order. (Names are what templates and data sources refer to, so the order never
+affects the data.)
+
+Each filter is *free text* (text, number, date, date & time, time) or a *choice
 list*:
 
 - **Default value** (free-text kinds): what the run form starts with — a literal (`H.E`,

@@ -1202,3 +1202,142 @@ textarea.jdbc-description {
   line-height: 1.5;
   resize: vertical;
 }
+
+/* ---- reordering parameters ------------------------------------------------------ */
+
+/* The first column of a parameter card's head row: grip, position, and the two arrows. */
+.data-config-card .data-config-row.param-head {
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) 160px auto;
+}
+
+.param-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 22px; /* lines up with the inputs, not their labels */
+}
+
+.param-grip {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: grab;
+  touch-action: none;
+}
+
+.param-grip:hover,
+.param-grip:focus-visible {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.param-position {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+}
+
+.param-arrows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.param-arrow {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 18px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.param-arrow:hover:not(:disabled) {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+.param-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.param-sortable.dragging,
+.param-compact.dragging {
+  position: relative;
+  z-index: 6;
+  box-shadow: var(--shadow-pop);
+  border-color: var(--accent-border);
+}
+
+.param-sortable,
+.param-compact {
+  /* dnd-kit sets the transition while a neighbour slides out of the way */
+  will-change: transform;
+}
+
+/* "Reorder" mode: each card folds to one line. */
+.param-compact {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.param-compact .param-rail {
+  flex-direction: row;
+  padding-top: 0;
+  gap: 8px;
+}
+
+.param-compact .param-arrows {
+  flex-direction: row;
+}
+
+.param-compact-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.param-compact-kind {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-panel);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+@media (max-width: 700px) {
+  .data-config-card .data-config-row.param-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .param-rail {
+    flex-direction: row;
+    padding-top: 0;
+  }
+}

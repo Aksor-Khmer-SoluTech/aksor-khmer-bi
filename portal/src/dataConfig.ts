@@ -373,6 +373,8 @@ export interface DataConfigDraft {
   addParameter: () => void;
   updateParameter: (key: number, patch: Partial<EditableParameter>) => void;
   removeParameter: (key: number) => void;
+  /** Move the parameter at `from` to position `to` -- the order people see the filters in. */
+  moveParameter: (from: number, to: number) => void;
   useSource: boolean;
   setUseSource: (on: boolean) => void;
   source: EditableSource;
@@ -520,6 +522,16 @@ export function useDataConfigDraft(reportId: string, enabled: boolean): DataConf
     removeParameter: (key) => {
       touch();
       setParameters((prev) => prev.filter((p) => p.key !== key));
+    },
+    moveParameter: (from, to) => {
+      if (from === to) return;
+      touch();
+      setParameters((prev) => {
+        if (from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+        const next = [...prev];
+        next.splice(to, 0, next.splice(from, 1)[0]);
+        return next;
+      });
     },
     useSource,
     setUseSource: (on) => {

@@ -71,6 +71,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   holding LDAP syntax can only ever be a name.
 
 ### Added
+- **Reorder a report's parameters.** On the template's Parameters tab each card has a drag handle, a position number and
+  up/down arrows (also usable from the keyboard, with spoken announcements by name), and **Reorder** folds the cards to
+  one line each for long lists. The saved order is the order people see the filters in on the run page, the Preview tab's
+  live run and embedded runs; it needed no API change (the list was always stored in order) and is covered by tests.
 - **Fonts under Resources, like JasperReports Server's font extensions** (Resources → **Fonts**; migration
   `0003_font_resources` — run `alembic upgrade head`). A developer with the new `font:manage` permission (system
   administrators) uploads a `.ttf` / `.otf` and the **next render** of every template that names its family uses it — in
