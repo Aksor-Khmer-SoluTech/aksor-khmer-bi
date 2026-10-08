@@ -56,6 +56,10 @@ RUN pip install --no-cache-dir -e packages/aksor_khmer_ocr_segmenter \
 
 COPY templates templates
 
+# These exact font files are bundled on purpose (templates/fonts, Siemreap "Version 6.00 January 14, 2010"). Debian's
+# `fonts-khmeros` package looks like a drop-in but is not: its Siemreap is the older 1.00 (2007) -- different glyphs
+# and line metrics -- and the same Khmer paragraph then breaks lines and justifies differently, so layouts that were
+# designed against 6.00 would shift. Do not swap them for a distro package without re-checking every template.
 # Report templates reference these font families by name ("Khmer OS
 # Siemreap" / "Khmer OS Muol Light"); WeasyPrint loads the .ttf files
 # directly via @font-face, but LibreOffice needs them registered as

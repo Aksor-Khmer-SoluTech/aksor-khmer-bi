@@ -822,7 +822,9 @@ recommended backend.
 
 The bundled Khmer fonts (`templates/fonts/*.ttf`) are copied into
 `/usr/share/fonts/truetype/aksor-khmer` and registered with `fc-cache` at
-build time — this step exists because LibreOffice needs fonts installed
+build time (these exact files, not Debian's `fonts-khmeros`: that package's Siemreap
+is the older version 1.00 with different glyphs and line metrics, and the same Khmer
+paragraph breaks and justifies differently — measured, not assumed) — this step exists because LibreOffice needs fonts installed
 system-wide to find them by name during conversion; WeasyPrint doesn't
 need this since it loads font files directly via `@font-face`. If you
 register your own template (via `/api/v1/reports`) that references a
