@@ -54,6 +54,7 @@ You need the `report:manage` permission.
 |---|---|---|
 | **Name** | yes | What people see in the gallery. |
 | **Code** | no | A stable address instead of the random `report_id`: 3–64 lowercase letters, digits and single hyphens, unique across the deployment (e.g. `revenue-comparison`). Use the **same code in every environment** and integrations need no per-environment id. Hard to change later — anything calling the old code breaks. |
+| **Folder** | no | Which Resources folder the report is filed in — **Root** (the default) or any folder you may file into. It decides where the report appears in the Reports page's tree view (section 3.4). |
 | **Description** | no | Shown on the card. |
 | **Template file** | yes | `.docx`, `.xlsx` or `.html`. Drag and drop or browse. |
 
@@ -111,6 +112,38 @@ added or dropped. A typo in a label or note can be fixed afterwards with
 > template can produce. The form warns you first, because anything asking for a format
 > the new file can't make will fail.
 > An `.html` template can't be replaced in place — register it as a new template.
+
+### 3.4 Folders and shortcuts
+
+Templates are organised in **Resources** folders (Admin → Resources), which can be nested as deep as you
+like. The **Reports** page (where people go to *run* things) offers **Tree** (the default, first in the layout
+switch), **Grid** and **List**: the tree shows each folder with a count, its sub-folders inside it, and what is
+filed there. The **Templates** page is a flat catalogue of every template — grid or list — because folders and
+shortcuts are about where people find a report, not about managing the template. Your choice is remembered per
+page.
+
+- **File a template** with the **Folder** field on the Register dialog, or later on the template's
+  **Overview** tab (then *Save changes*). **Root** means no folder. Filing into a folder needs
+  `manage` access on that folder, and the folder must belong to the template's organization.
+- **Why shortcuts exist: one report, several teams.** When two or more departments or teams use the same
+  report, each can keep it in *their own* folder and arrange that space the way they like (their own
+  sub-folders, their own order of things) without copying the report. There is still one report, one template
+  and one set of permissions. To set it up: give each team's role access to the report itself (Access tab →
+  report grant), then add a shortcut in each team's folder. Folder access alone is not enough — a shortcut never
+  grants the report.
+- **A shortcut** lists the same template in *another* folder as well, so one report can sit under
+  "Finance / Q1" and "Audit" without a copy. On the template's **Shortcuts** tab, choose a
+  folder and **Add shortcut**; remove one with the ✕. A shortcut is only a second place to find the report:
+  opening it opens the original, so it has **exactly the original's permissions**.
+  - It grants nothing. Giving someone access to the folder that holds a shortcut does **not** give them the
+    report, and never reveals it to them.
+  - People see it only if they already have access to the original, and only in folders they may open.
+  - Making one needs `manage` on the report **and** on the destination folder. Removing one needs `manage`
+    on the report *or* on the folder it sits in, and never touches the report.
+  - Deleting the report removes its shortcuts. Deleting a folder removes the shortcuts in it (they are only
+    links); filing the report itself into a folder where it has a shortcut replaces that shortcut.
+  - In Admin → Resources a shortcut shows with a *Shortcut* badge, **Open the original** and
+    **Remove shortcut**; it can't be dragged (move the original instead).
 
 ---
 
@@ -679,8 +712,12 @@ in the template. Setup in
 
 1. **Placeholders tab** — compare the detected fields with what your data will send.
    (It's a best-effort scan: docx via docxtpl's own parser, xlsx by regex.)
-2. **Preview tab** — paste sample JSON, render, fix, repeat; **save** the good one as the
-   sample payload so the Integration tab's snippets are ready to run.
+2. **Preview tab** — two modes. **Sample data**: paste JSON, render, fix, repeat; **save** the good one as the
+   sample payload so the Integration tab's snippets are ready to run. It skips the filters and the data source, so it
+   is for laying the template out. If the report has filters or a data source, the tab opens on **Live run**: choose
+   the filters and run it exactly as the people who open it will (same route, same data source, same defaults and
+   required filters) — use this to test a report that fetches its own data. A live run uses the *saved*
+   Parameters and Data source, so save them first.
 3. **Try every branch** — render once with each `if` taking each path, once with the
    optional fields missing, once with an empty list.
 4. **Try long data** — a very long Khmer paragraph and a table past one page.
@@ -718,5 +755,6 @@ in the template. Setup in
 - [ ] Dates formatted by slicing, or sent pre-formatted
 - [ ] Khmer font set; long Khmer text tested
 - [ ] Registered with a **code** if anything integrates with it
+- [ ] Filed in the right **folder** (add a shortcut if it belongs under more than one)
 - [ ] Sample payload saved; every branch previewed
 - [ ] A version note written whenever you replace the file

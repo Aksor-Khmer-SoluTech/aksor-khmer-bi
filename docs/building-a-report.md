@@ -359,9 +359,11 @@ list*:
 
 - **Default value** (free-text kinds): what the run form starts with — a literal (`H.E`,
   `2026-09-30`) or, on a date, date-time or time filter, `now()`: today's date, the current
-  date and time, or the current time. The portal fills `now()` from the viewer's own clock. A
-  run that leaves the filter out entirely (an API call, an embed) gets the same default, with
-  `now()` read in `REPORT_TIMEZONE` (default UTC); a filter sent as an empty string stays empty.
+  date and time, or the current time. A date or date-time filter can also default to
+  `firstDayOfMonth()` or `lastDayOfMonth()` (a date-time reads 00:00 on the first day, 23:59 on
+  the last) — handy for "this month so far" ranges. The portal fills these from the viewer's own
+  clock. A run that leaves the filter out entirely (an API call, an embed) gets the same default,
+  with them read in `REPORT_TIMEZONE` (default UTC); a filter sent as an empty string stays empty.
 - **Choice list — a fixed list** (`value` or `value | label`, one per line), or **a REST API**:
   the *server* fetches the choices, so they can be limited per person in the Access Privilege
   tab like a fixed list. The request is set up like a data source (below); the response is read

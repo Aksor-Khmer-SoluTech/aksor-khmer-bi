@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete, select
 
 from .. import audit, db
 from ..auth import ensure_org_scope, get_current_user, require_folder_permission
@@ -101,7 +101,7 @@ def list_folders(
             query = query.where(db.Folder.org_id == org_id)
         rows = session.execute(query).scalars().all()
         visible = [row for row in rows if can_view_folder_contents(session, context, row.id)]
-        return [_row_to_out(row) for row in visible]
+        return [_row_to_out(row).model_copy(update={"can_manage": can_manage_folder_contents(session, context, row.id)}) for row in visible]
 
 
 @router.get("/{folder_id}", summary="Get one folder", response_model=FolderOut)
@@ -189,6 +189,9 @@ def delete_folder(
         if has_subfolder or has_report or has_image:
             raise HTTPException(status_code=409, detail="Folder is not empty -- move or delete its contents first")
 
+        # Shortcuts are only links -- the reports they point at stay where they are -- so they don't hold a
+        # folder open; they go with it.
+        session.execute(sa_delete(db.ReportShortcut).where(db.ReportShortcut.folder_id == folder_id))
         session.delete(row)
         session.commit()
         audit.record(

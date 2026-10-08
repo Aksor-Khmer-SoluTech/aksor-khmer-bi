@@ -15,6 +15,13 @@ How people and programs prove who they are, how a sign-in lasts, and how it ends
 The break-glass login (`PORTAL_USERNAME` / `PORTAL_PASSWORD`) and LDAP/Active Directory users go through the
 same flow; only the password check differs.
 
+**A directory user has no password in this application.** Their credential is whatever the directory (AD / LDAP)
+says: no password hash is stored, an administrator can't set, reset or require a change of one (`400 Password is
+managed by the user's identity provider`), the user can't change one from Settings (the control isn't shown, and the API
+refuses it), and creating such a user with a password is rejected. A sign-in with a blank password is refused before the
+directory is contacted, and the user name is escaped wherever it is placed into a bind DN or search filter. Changing
+or resetting their password happens in the directory.
+
 ## How signing in works
 
 ```

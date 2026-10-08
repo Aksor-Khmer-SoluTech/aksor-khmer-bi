@@ -58,7 +58,7 @@ export const DOCS: DocMeta[] = [
   {
     slug: "deployment",
     title: "Deployment",
-    description: "Docker, docker-compose, and what's verified to run.",
+    description: "Install it with Docker (quick script or step by step), run it day to day, and the settings, volumes, database, LDAP and TLS behind it.",
     group: "For administrators",
   },
   {

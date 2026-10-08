@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from .. import db
 from ..auth import get_current_user
-from ..models import MyDashboard, MyRun, MyTopReport
+from ..models import MyDashboard, MyDay, MyRun, MyTopReport
 from ..rbac import AuthContext
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
@@ -67,6 +67,9 @@ def my_dashboard(context: AuthContext = Depends(get_current_user)) -> MyDashboar
             )
 
     succeeded = [r for r in rows if r.action == "report.run"]
+    ok_by_day: Counter[str] = Counter(r.created_at[:10] for r in succeeded)
+    failed_by_day: Counter[str] = Counter(r.created_at[:10] for r in rows if r.action != "report.run")
+    days = [(now - timedelta(days=offset)).date().isoformat() for offset in range(29, -1, -1)]
     return MyDashboard(
         since=since,
         runs_7d=sum(1 for r in succeeded if r.created_at >= week),
@@ -74,5 +77,6 @@ def my_dashboard(context: AuthContext = Depends(get_current_user)) -> MyDashboar
         failed_30d=len(rows) - len(succeeded),
         last_run_at=rows[0].created_at if rows else None,
         recent=recent,
+        daily=[MyDay(date=d, runs=ok_by_day[d], failed=failed_by_day[d]) for d in days],
         top_reports=[MyTopReport(report_id=rid, name=names.get(rid), runs=n) for rid, n in runs_by_report.most_common(_TOP)],
     )

@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ArrowDownAZ, ArrowUpAZ, Check, Copy, FileCode, FileSpreadsheet, FileText, History, LayoutGrid, List, Plus, Search, SearchX, X } from "lucide-react";
+import { ArrowDownAZ, ArrowUpAZ, Check, Copy, FileCode, FileSpreadsheet, FileText, History, Plus, Search, SearchX, X } from "lucide-react";
 import { api } from "../api";
 import { useCopy } from "../hooks";
 import { versionName, type AuthInfo, type ReportMeta, type TemplateExt } from "../types";
 import RegisterDialog from "./RegisterDialog";
+import ViewSwitch, { readView, saveView, type LayoutView } from "./ViewSwitch";
 import { CardGridSkeleton, ListSkeleton } from "./Skeletons";
 
 const VIEW_KEY = "portal_gallery_view";
-type GalleryView = "grid" | "list";
+/** The Templates page is a flat catalogue of every template -- grid or list. The folder tree lives on Reports
+ * (where people browse to *run* things); here, where a template is also listed is on its own Shortcuts tab. */
+type GalleryView = Exclude<LayoutView, "tree">;
+const GALLERY_VIEWS = ["grid", "list"] as const;
 type ExtFilter = "all" | TemplateExt;
 
 const SORT_KEY = "portal_gallery_sort";
@@ -109,13 +113,7 @@ export default function Gallery({ auth, onOpenReport }: { auth: AuthInfo; onOpen
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [extFilter, setExtFilter] = useState<ExtFilter>("all");
-  const [view, setView] = useState<GalleryView>(() => {
-    try {
-      return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
-    } catch {
-      return "grid";
-    }
-  });
+  const [view, setView] = useState<GalleryView>(() => readView(VIEW_KEY, GALLERY_VIEWS) as GalleryView);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>(() => {
@@ -138,11 +136,7 @@ export default function Gallery({ auth, onOpenReport }: { auth: AuthInfo; onOpen
 
   function changeView(next: GalleryView) {
     setView(next);
-    try {
-      localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      // best-effort only — view preference just won't persist
-    }
+    saveView(VIEW_KEY, next);
   }
 
   function changeSort(next: SortKey) {
@@ -267,26 +261,7 @@ export default function Gallery({ auth, onOpenReport }: { auth: AuthInfo; onOpen
             </button>
           </div>
 
-          <div className="segmented" role="group" aria-label="Layout">
-            <button
-              type="button"
-              className={`segmented-btn icon-only${view === "grid" ? " active" : ""}`}
-              onClick={() => changeView("grid")}
-              data-tip="Grid view"
-              aria-label="Grid view"
-            >
-              <LayoutGrid size={16} />
-            </button>
-            <button
-              type="button"
-              className={`segmented-btn icon-only${view === "list" ? " active" : ""}`}
-              onClick={() => changeView("list")}
-              data-tip="List view"
-              aria-label="List view"
-            >
-              <List size={16} />
-            </button>
-          </div>
+          <ViewSwitch view={view} views={GALLERY_VIEWS} onChange={(v) => changeView(v as GalleryView)} />
 
           <div className="segmented" role="group" aria-label="Sort templates">
             {SORT_ORDER.map((key) => {

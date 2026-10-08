@@ -22,6 +22,7 @@ import type {
   DeploymentTerms,
   EffectivePermissions,
   Folder,
+  ReportShortcut,
   Grant,
   ImageResource,
   Job,
@@ -441,6 +442,25 @@ export const api = {
     return getJSON("/reports/accessible");
   },
 
+  /** Shortcuts in folders the caller may open, for reports they can open (the Resources screen). */
+  listShortcuts(): Promise<ReportShortcut[]> {
+    return getJSON("/reports/shortcuts");
+  },
+
+  /** Manager-only: the folders a report is also listed in. */
+  listReportShortcuts(reportId: string): Promise<ReportShortcut[]> {
+    return getJSON(`/reports/${reportId}/shortcuts`);
+  },
+
+  createShortcut(reportId: string, folderId: string): Promise<ReportShortcut> {
+    return sendJSON(`/reports/${reportId}/shortcuts`, "POST", { folder_id: folderId });
+  },
+
+  /** Removes the link only -- the report itself is untouched. */
+  deleteShortcut(shortcutId: string): Promise<void> {
+    return del(`/reports/shortcuts/${shortcutId}`, "Couldn't remove the shortcut");
+  },
+
   /** Manager-only: a report's filter parameters (with their full option
    * lists) and REST data source. */
   getDataConfig(id: string): Promise<DataConfig> {
@@ -540,7 +560,8 @@ export const api = {
     description: string,
     file: File,
     resourceBindings?: Record<string, ResourceBinding>,
-    code?: string
+    code?: string,
+    folderId?: string | null
   ): Promise<ReportMeta> {
     const form = new FormData();
     form.set("name", name);
@@ -548,6 +569,7 @@ export const api = {
     form.set("file", file);
     if (resourceBindings) form.set("resource_bindings", JSON.stringify(resourceBindings));
     if (code?.trim()) form.set("code", code.trim());
+    if (folderId) form.set("folder_id", folderId);
     return apiFetch("/reports", { method: "POST", body: form }).then((r) => asJson<ReportMeta>(r));
   },
 

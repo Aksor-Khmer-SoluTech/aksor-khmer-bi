@@ -51,7 +51,7 @@ export default function ResourceTree(props: Props) {
         <span className="resource-row-grip" aria-hidden="true" />
         <span className="tree-chevron" aria-hidden="true" />
         <FolderOpenIcon />
-        <span className="resource-row-name">All Resources</span>
+        <span className="resource-row-name">Root</span>
       </div>
 
       <div className="resource-tree-children">

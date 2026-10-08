@@ -220,3 +220,45 @@ def test_the_time_zone_defaults_to_utc_and_a_bad_name_falls_back_to_it(monkeypat
     monkeypatch.setenv("REPORT_TIMEZONE", "Mars/Olympus_Mons")
     assert report_data._report_timezone() == timezone.utc
     assert "Mars/Olympus_Mons" in caplog.text
+
+
+# --- firstDayOfMonth() / lastDayOfMonth() -----------------------------------------------------
+
+
+@pytest.mark.parametrize("spelling", ["firstDayOfMonth()", "firstDayOfMonth", " FIRSTDAYOFMONTH ( ) "])
+def test_first_day_of_month_is_stored_in_one_spelling(spelling):
+    assert _validate([{"name": "p", "type": "date", "default_value": spelling}])[0]["default_value"] == "firstDayOfMonth()"
+
+
+@pytest.mark.parametrize("type_", ["time", "number", "text"])
+@pytest.mark.parametrize("expression", ["firstDayOfMonth()", "lastDayOfMonth()"])
+def test_month_days_only_make_sense_on_dates(type_, expression):
+    with pytest.raises(report_data.DataConfigError, match="only works for date and datetime"):
+        _validate([{"name": "p", "type": type_, "default_value": expression}])
+
+
+def test_month_days_resolve_against_the_current_month():
+    leap = datetime(2028, 2, 10, 15, 30, tzinfo=timezone.utc)
+    resolve = lambda type_, expr, at: report_data.resolve_default({"type": type_, "default_value": expr}, now=at)  # noqa: E731
+    assert resolve("date", "firstDayOfMonth()", leap) == "2028-02-01"
+    assert resolve("date", "lastDayOfMonth()", leap) == "2028-02-29"
+    assert resolve("datetime", "firstDayOfMonth()", leap) == "2028-02-01T00:00"
+    assert resolve("datetime", "lastDayOfMonth()", leap) == "2028-02-29T23:59"
+    assert resolve("date", "lastDayOfMonth()", datetime(2026, 12, 31, tzinfo=timezone.utc)) == "2026-12-31"
+
+
+# --- a text value can't break out of a raw request body ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "content_type, value, expected",
+    [
+        ("application/json", 'x", "admin": true, "y": "', 'x\\", \\"admin\\": true, \\"y\\": \\"'),
+        ("text/xml; charset=utf-8", "</q><admin/>", "&lt;/q&gt;&lt;admin/&gt;"),
+        ("application/x-www-form-urlencoded", "a&role=admin", "a%26role%3Dadmin"),
+        ("text/plain", "a&b", "a&b"),
+    ],
+)
+def test_raw_body_values_are_escaped_for_the_content_type(content_type, value, expected):
+    escape = report_data._body_escaper({"Content-Type": content_type})
+    assert report_data._render_value("[{{ q }}]", report_data._env(), {"q": value}, escape) == f"[{expected}]"

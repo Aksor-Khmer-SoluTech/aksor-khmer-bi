@@ -35,6 +35,7 @@ see [`SUPPORT.md`](SUPPORT.md). Security issues: [`SECURITY.md`](SECURITY.md).
 | **Charts in documents** | Bar/line/pie charts embedded as images in a docx template — Khmer + Latin mixed text handled correctly (see [`building-a-report.md`](docs/building-a-report.md#charts-docx-templates-only)) |
 | **Standard sign-in** | Short-lived JWT access tokens + rotating refresh tokens (HttpOnly cookie, reuse detection), revocable sessions, optional TOTP 2FA, LDAP/AD, per-organization roles — see [`docs/authentication.md`](docs/authentication.md) |
 | **Management portal** | A small, separately-deployable web UI ([`portal/`](portal)) to register/preview/edit/delete templates, no `curl` required — plus an Admin mode (users, dynamic per-org roles, organizations, an embedded API explorer, live host resource monitoring, a reserved plugins page) for anyone holding the right permissions, and white-label branding config so the portal isn't hard-wired to this project's own name |
+| **Folders and shortcuts** | Templates are filed in nested Resources folders and browsed as a tree on the Reports page (alongside grid and list), with a Shortcuts tab on each template; a report can also be listed in other folders by a shortcut that carries exactly the original's permissions — see [`create-a-template.md`](docs/create-a-template.md#34-folders-and-shortcuts) |
 | **Two rendering engines** | LibreOffice (native justify, docx-sourced) or WeasyPrint (HTML/CSS-templated, lighter) — pick per request |
 | **OCR + segmentation, usable standalone** | The Khmer word-segmentation package has no dependency on the rest of this repo — `pip install` it alone for unrelated Khmer text work |
 | **Self-hostable** | MIT-licensed, Docker-ready, no external service dependency — matters for financial/legal documents where data locality is a real requirement |
@@ -110,7 +111,7 @@ xlsx_bytes = render(data, "xlsx", template_path="my_template.xlsx")
 
 - [`docs/getting-started.md`](docs/getting-started.md) — install and run (Docker or local dev)
 - [`docs/building-a-report.md`](docs/building-a-report.md) — build your own receipt/invoice/certificate template
-- [`docs/deployment.md`](docs/deployment.md) — Docker, env vars, volumes, TLS
+- [`docs/deployment.md`](docs/deployment.md) — install it (Docker, quick or step by step), then env vars, volumes, TLS
 - [`docs/architecture.md`](docs/architecture.md) — engine-selection decision table
 - [`docs/khmer-line-breaking.md`](docs/khmer-line-breaking.md) — the underlying research
 - [`docs/protected-terms-guide.md`](docs/protected-terms-guide.md) — known ICU mis-splits (names, brands, loanwords) and how to add more

@@ -7,7 +7,7 @@ FROM python:3.12-slim-trixie
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 # Where apt, pip and npm download from. The defaults are the public ones; on a server that can't reach them,
-# point these (APT_MIRROR / PIP_INDEX_URL / NPM_REGISTRY in .env) at an internal mirror -- see DEPLOYMENT.md.
+# point these (APT_MIRROR / PIP_INDEX_URL / NPM_REGISTRY in .env) at an internal mirror -- see docs/deployment.md ("Get Docker ready").
 ARG APT_MIRROR=deb.debian.org
 ARG APT_SCHEME=http
 ARG PIP_INDEX_URL=https://pypi.org/simple

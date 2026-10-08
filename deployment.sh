@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy and operate Aksor Khmer BI with Docker Compose.
 #
-# Three stacks, deliberately separate (see DEPLOYMENT.md for the same steps by hand):
+# Three stacks, deliberately separate (see docs/deployment.md, "Install it", for the same steps by hand):
 #   redis  docker-compose.redis.yml  redis                 project "aksor-redis"
 #   db     docker-compose.db.yml     postgres              project "aksor-db"
 #   app    docker-compose.yml        api, scheduler,       project "aksor-app"
@@ -27,11 +27,14 @@
 #   ./deployment.sh restart [redis|db|app]
 #   ./deployment.sh status
 #   ./deployment.sh logs [service...] follow logs (default: api)
-#   ./deployment.sh backup            pg_dump + templates, resources, avatars, secrets key -> ./backups/
+#   ./deployment.sh backup            pg_dump + templates, resources, avatars, JDBC drivers, secrets key -> ./backups/
+#   ./deployment.sh restore <aksor-...sql.gz> [<aksor-...-files.tar.gz>] [--yes] [--no-backup]
+#                                     put a backup back: stops the app, REPLACES the database and data/ with the backup
+#                                     (the current data/ is moved aside, not deleted), then you run `up`
 #   ./deployment.sh redis|db|app <up|down|status|logs ...>   operate one stack alone
 #
 # Settings come from ./.env (never committed): POSTGRES_PASSWORD, PORTAL_USERNAME,
-# PORTAL_PASSWORD, CORS_ALLOWED_ORIGINS, ... -- see DEPLOYMENT.md and docs/deployment.md.
+# PORTAL_PASSWORD, CORS_ALLOWED_ORIGINS, ... -- see docs/deployment.md.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -46,8 +49,12 @@ APP_FILE="docker-compose.yml"
 APP_BUILD_FILE="docker-compose.build.yml"
 BACKUP_DIR="${BACKUP_DIR:-backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
+# The data/ folder is written by the containers (as root), so a normal host user may not be able to read parts of
+# it (the secrets key is mode 600). Backups archive it from inside a throwaway container instead; it needs only
+# tar, gzip and chown, so the Postgres image -- already on this machine once the stack is up -- will do.
+BACKUP_HELPER_IMAGE="${BACKUP_HELPER_IMAGE:-postgres:16-alpine}"
 # Everything the api writes outside the database (all bind-mounted in docker-compose.yml).
-DATA_DIRS=(data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars)
+DATA_DIRS=(data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/jdbc_drivers)
 
 c_red=$'\033[31m'; c_grn=$'\033[32m'; c_ylw=$'\033[33m'; c_off=$'\033[0m'
 [ -t 1 ] || { c_red=; c_grn=; c_ylw=; c_off=; }
@@ -86,13 +93,20 @@ ensure_network() {
   docker network inspect "$NETWORK" >/dev/null 2>&1 || { info "creating network $NETWORK"; docker network create "$NETWORK" >/dev/null; }
 }
 
-env_value() { # env_value KEY -> value from .env (empty if absent)
+env_value() { # env_value KEY -> value from .env, read the way Compose reads it (empty if absent)
   [ -f .env ] || return 0
-  sed -n "s/^$1=//p" .env | tail -n1
+  # Last assignment wins. Drops a Windows line ending, an inline " # comment" and one pair of surrounding quotes,
+  # so `AKSOR_VERSION="1.2.0"  # latest` is 1.2.0 here exactly as it is for `docker compose`.
+  sed -n "s/^$1=//p" .env | tail -n1 | tr -d '\r' | sed -e 's/[[:space:]]\{1,\}#.*$//' -e 's/[[:space:]]*$//' \
+    -e "s/^\"\(.*\)\"\$/\1/" -e "s/^'\(.*\)'\$/\1/"
 }
 
-set_env() { # set_env KEY VALUE -- fill KEY= in .env (portable: no sed -i)
-  awk -v k="$1" -v v="$2" 'BEGIN{FS=OFS="="} $1==k {print k "=" v; next} {print}' .env > .env.tmp && mv .env.tmp .env
+set_env() { # set_env KEY VALUE -- fill KEY= in .env, or add it when the file has no such line (portable: no sed -i)
+  if grep -q "^$1=" .env; then
+    awk -v k="$1" -v v="$2" 'BEGIN{FS=OFS="="} $1==k {print k "=" v; next} {print}' .env > .env.tmp && mv .env.tmp .env
+  else
+    printf '%s=%s\n' "$1" "$2" >> .env
+  fi
 }
 
 random_secret() { # URL/shell-safe, 32 chars
@@ -100,11 +114,45 @@ random_secret() { # URL/shell-safe, 32 chars
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 || true
 }
 
+# A password anyone would try first. Compared lower-case, so Admin / ADMIN / Pleasechangeit are caught too.
+is_guessable() { # is_guessable VALUE -> 0 when it is empty-ish, too short or on the short list
+  local v; v="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  [ "${#v}" -lt 8 ] && return 0
+  case "$v" in
+    password|password1|password123|pleasechangeit|changeme|changeit|change-me|letmein|administrator|admin1234|12345678|123456789|qwertyui|aksor|aksorkhmer) return 0 ;;
+  esac
+  return 1
+}
+
 preflight() {
   [ -f .env ] || die ".env not found -- run ./deployment.sh init first"
-  [ -n "$(env_value PORTAL_PASSWORD)" ] || warn "PORTAL_PASSWORD is unset: admin routes answer 503 until a break-glass login is configured"
-  case "$(env_value POSTGRES_PASSWORD)" in
-    ""|aksor) warn "POSTGRES_PASSWORD is the default ('aksor') -- fine for a throwaway machine, not for a server anyone else can reach" ;;
+  local portal_pw; portal_pw="$(env_value PORTAL_PASSWORD)"
+  if [ -z "$portal_pw" ]; then
+    warn "PORTAL_PASSWORD is unset: admin routes answer 503 until a break-glass login is configured"
+  elif is_guessable "$portal_pw" && [ -z "${ALLOW_WEAK_PASSWORDS:-}" ]; then
+    # It is the full administrator login for the whole deployment: never start the stack with one anyone would guess.
+    die "PORTAL_PASSWORD in .env is too easy to guess (under 8 characters, or a common one like 'admin'). Set a long random one (openssl rand -hex 16), or ALLOW_WEAK_PASSWORDS=1 on a throwaway machine"
+  fi
+  # Postgres isn't published on a host port, and an existing database keeps the password it was created with,
+  # so this one warns instead of refusing.
+  # The password is placed inside DATABASE_URL (docker-compose.yml), where `@ : / # % ?` would be read as URL syntax.
+  if [ -z "$(env_value DATABASE_URL)" ] && printf '%s' "$(env_value POSTGRES_PASSWORD)" | grep -q '[^A-Za-z0-9._~-]'; then
+    die "POSTGRES_PASSWORD in .env contains a character that breaks the database URL (use letters, digits and . _ ~ - only, e.g. openssl rand -hex 16). A database that already exists needs: ALTER USER aksor PASSWORD '<new>' first"
+  fi
+  if [ -z "$(env_value REDIS_URL)" ] && printf '%s' "$(env_value REDIS_PASSWORD)" | grep -q '[^A-Za-z0-9._~-]'; then
+    die "REDIS_PASSWORD in .env contains a character that breaks the Redis URL (use letters and digits, e.g. openssl rand -hex 16)"
+  fi
+  if is_guessable "$(env_value POSTGRES_PASSWORD)"; then
+    warn "POSTGRES_PASSWORD is empty or guessable (the compose default is 'aksor') -- fine for a throwaway machine, not for a server anyone else can reach"
+  fi
+  # The portal's config file is bind-mounted; if the path is wrong Docker invents a *directory* there and the portal
+  # then serves nothing useful. And a config still pointing at localhost only works in a browser on this machine.
+  local cfg; cfg="$(env_value PORTAL_CONFIG_FILE)"; cfg="${cfg:-./portal/public/config.js}"
+  [ -f "$cfg" ] || die "PORTAL_CONFIG_FILE ($cfg) is not a file -- fix the path in .env (Docker would create a directory there)"
+  case "$(env_value CORS_ALLOWED_ORIGINS)" in
+    ""|*localhost*|*127.0.0.1*) ;;
+    *) grep -q 'PORTAL_API_BASE_URL *= *"https\?://\(localhost\|127\.0\.0\.1\)' "$cfg" \
+         && warn "CORS_ALLOWED_ORIGINS is a public address but $cfg still points the portal at http://localhost: -- other people's browsers would talk to themselves. Set PORTAL_API_BASE_URL there (see docs/deployment.md, \"A server with a domain name\")" ;;
   esac
   if [ -z "$(env_value CORS_ALLOWED_ORIGINS)" ]; then
     warn "CORS_ALLOWED_ORIGINS is unset (defaults to http://localhost:8080) -- set it to the portal's public URL"
@@ -118,9 +166,9 @@ cmd_doctor() {
   ok()   { printf '  %sok%s    %s\n' "$c_grn" "$c_off" "$*"; }
   bad()  { printf '  %sFAIL%s  %s\n' "$c_red" "$c_off" "$*"; fails=$((fails + 1)); }
   note() { printf '  %swarn%s  %s\n' "$c_ylw" "$c_off" "$*"; }
-  info "checking this machine (details: DEPLOYMENT.md, \"Before you start\")"
+  info "checking this machine (details: docs/deployment.md, \"Before you start\")"
 
-  command -v docker >/dev/null && ok "docker: $(docker --version 2>/dev/null | head -n1)" || { bad "docker is not installed -- see DEPLOYMENT.md, \"Get Docker ready\""; return 1; }
+  command -v docker >/dev/null && ok "docker: $(docker --version 2>/dev/null | head -n1)" || { bad "docker is not installed -- see docs/deployment.md, \"Get Docker ready\""; return 1; }
   if docker compose version >/dev/null 2>&1; then ok "compose: $(docker compose version --short 2>/dev/null)"; else bad "the Docker Compose v2 plugin is missing (the old \`docker-compose\` command is not enough)"; fi
   docker info >/dev/null 2>&1 && ok "the Docker daemon answers" || { bad "can't reach the Docker daemon -- is it running, and are you in the docker group (or using sudo)?"; return 1; }
 
@@ -142,7 +190,7 @@ cmd_doctor() {
     port="$(env_value "$name" | grep . || { [ "$name" = API_PORT ] && echo 8000 || echo 8080; })"
     if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
       # Our own containers answering is fine; anything else is a clash.
-      if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":$port->"; then ok "port $port is ours (already running)"; else bad "port $port is already in use -- set $name in .env"; fi
+      if docker ps --filter "label=com.docker.compose.project=$APP_PROJECT" --format '{{.Ports}}' 2>/dev/null | grep -q ":$port->"; then ok "port $port is ours (already running)"; else bad "port $port is already in use -- set $name in .env"; fi
     else ok "port $port is free"; fi
   done
 
@@ -186,7 +234,7 @@ EOF2
     if [ "$fails" -gt "$before" ]; then
       printf '\n  The build would fail at the download step. Try, in this order:\n'
       printf '    1. BUILD_NETWORK=host in .env (build on the server'"'"'s own network)\n'
-      printf '    2. fix Docker'"'"'s network (UFW forwarding, DNS) -- DEPLOYMENT.md, "Get Docker ready first"\n'
+      printf '    2. fix Docker'"'"'s network (UFW forwarding, DNS) -- docs/deployment.md, "Get Docker ready"\n'
       printf '    3. APT_SCHEME=https if only port 80 is blocked; APT_MIRROR / PIP_INDEX_URL / NPM_REGISTRY for internal mirrors\n'
       printf '    4. skip the build: ./deployment.sh up (without --build) pulls the prebuilt images instead\n\n'
     fi
@@ -209,11 +257,13 @@ cmd_init() {
   if docker volume inspect aksor-khmer-bi_pgdata >/dev/null 2>&1; then
     # An existing database was initialised with a password we can't see; a new random one
     # in .env would make every connection fail. Leave it blank (= the compose default).
-    warn "an existing Postgres volume was found -- not generating POSTGRES_PASSWORD (the database keeps the password it was created with)"
-    warn "if you know it, set POSTGRES_PASSWORD in .env"
+    set_env POSTGRES_PASSWORD ""
+    warn "an existing Postgres volume was found -- not generating POSTGRES_PASSWORD (the database keeps the password it was created with); it is left empty, i.e. the compose default 'aksor', which is what a database made by the old single-file setup has"
+    warn "if the database was created with another password, set POSTGRES_PASSWORD in .env to it"
   else
     set_env POSTGRES_PASSWORD "$(random_secret)"
   fi
+  set_env REDIS_PASSWORD "$(random_secret)"   # keeps the job queue closed to anything else on aksor-network
   local portal_pass; portal_pass="$(random_secret)"
   set_env PORTAL_PASSWORD "$portal_pass"
   info "wrote .env from .env.example (mode 600)"
@@ -231,8 +281,8 @@ cmd_up() {
       *) die "up [--build]" ;;
     esac
   done
-  [ ${#build[@]} -gt 0 ] || require_registry_images
   preflight
+  [ ${#build[@]} -gt 0 ] || require_registry_images
   if [ -z "${SKIP_DOCTOR:-}" ]; then
     if [ ${#build[@]} -eq 0 ]; then cmd_doctor pull || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"; else cmd_doctor build || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"; fi
   fi
@@ -259,7 +309,7 @@ cmd_down() {
 cmd_restart() {
   require_docker
   case "${1:-all}" in
-    all)   app restart; db restart; redis restart ;;
+    all)   redis restart; db restart; app restart ;;   # dependencies first, so the app doesn't lose them mid-restart
     app)   app restart ;;
     db)    db restart ;;
     redis) redis restart ;;
@@ -285,23 +335,44 @@ cmd_logs() {
   local pids=()
   if [ ${#redis_svcs[@]} -gt 0 ]; then redis logs --tail=100 -f "${redis_svcs[@]}" & pids+=($!); fi
   if [ ${#db_svcs[@]} -gt 0 ];    then db    logs --tail=100 -f "${db_svcs[@]}"    & pids+=($!); fi
-  if [ ${#app_svcs[@]} -gt 0 ];   then app   logs --tail=100 -f "${app_svcs[@]}"   & pids+=($!); fi
+  if [ ${#app_svcs[@]} -gt 0 ]; then
+    # jdbc-worker only exists under the `jdbc` profile; without it compose says "no such service".
+    local prof=(); case " ${app_svcs[*]} " in *" jdbc-worker "*) prof=(--profile jdbc) ;; esac
+    app ${prof[@]+"${prof[@]}"} logs --tail=100 -f "${app_svcs[@]}" & pids+=($!)
+  fi
   wait "${pids[@]}"
 }
 
 cmd_backup() {
   require_docker
-  mkdir -p "$BACKUP_DIR"
+  mkdir -p "$BACKUP_DIR" "${DATA_DIRS[@]}"
+  local backup_abs; backup_abs="$(cd "$BACKUP_DIR" && pwd)"   # BACKUP_DIR may be relative or absolute
   local stamp; stamp="$(date +%Y%m%d-%H%M%S)"
   local sql="$BACKUP_DIR/aksor-$stamp.sql.gz" files="$BACKUP_DIR/aksor-$stamp-files.tar.gz"
   db ps --status running --services 2>/dev/null | grep -qx postgres || die "postgres isn't running -- nothing to back up"
+  # Each file is written under a temporary name and only renamed once it checks out, so a failure never leaves a
+  # truncated archive that looks like a backup (and counts toward the retention below).
   info "dumping database -> $sql"
   # -T: no TTY, so the dump isn't mangled; credentials come from the container's own env.
-  db exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' | gzip > "$sql"
-  [ -s "$sql" ] || { rm -f "$sql"; die "pg_dump produced nothing"; }
-  info "archiving templates, resources, avatars and the secrets key -> $files"
-  # The key is useless without the database and vice versa: back both up together.
-  tar -czf "$files" "${DATA_DIRS[@]}"
+  if ! db exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' | gzip > "$sql.part"; then
+    rm -f "$sql.part"; die "pg_dump failed -- no backup was made"
+  fi
+  [ -s "$sql.part" ] && gzip -t "$sql.part" 2>/dev/null || { rm -f "$sql.part"; die "pg_dump produced nothing usable -- no backup was made"; }
+  mv "$sql.part" "$sql"
+
+  info "archiving templates, resources, avatars, JDBC drivers and the secrets key -> $files"
+  # The key is useless without the database and vice versa: back both up together. The archive is made inside a
+  # container because data/ is written by the containers as root (the key is mode 600 in a mode-700 folder), which
+  # the host user may be unable to read; the file is handed back to the host user afterwards. Paths in it stay
+  # data/<folder>, as before.
+  if ! docker run --rm --pull=never -v "$PWD/data:/work/data:ro,z" -v "$backup_abs:/out:z" \
+      -e "OWNER=$(id -u):$(id -g)" -e "OUT=aksor-$stamp-files.tar.gz.part" "$BACKUP_HELPER_IMAGE" \
+      sh -c 'tar -czf "/out/$OUT" -C /work "$@" && chown "$OWNER" "/out/$OUT" && chmod 600 "/out/$OUT"' sh "${DATA_DIRS[@]}"; then
+    rm -f "$files.part" "$sql"
+    die "couldn't archive data/ -- is the image $BACKUP_HELPER_IMAGE on this machine (it is once the stack is up)? Set BACKUP_HELPER_IMAGE to any image that has tar. The database dump was removed too: a backup is the pair."
+  fi
+  tar -tzf "$files.part" >/dev/null 2>&1 || { rm -f "$files.part" "$sql"; die "the data archive didn't verify -- no backup was made"; }
+  mv "$files.part" "$files"
   chmod 600 "$sql" "$files"
   # Retention: keep the newest $BACKUP_KEEP of each kind.
   local kind
@@ -310,6 +381,63 @@ cmd_backup() {
     ls -1t "$BACKUP_DIR"/$kind 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | while read -r f; do rm -f -- "$f"; done
   done
   info "done (keeping the newest $BACKUP_KEEP of each)"
+}
+
+# Put a backup made by `backup` back. Destructive on purpose -- it REPLACES the database and data/ -- so it asks first,
+# takes a safety backup of what is there now (unless --no-backup), and moves the current data/ folders aside
+# (data.before-restore-<time>/) instead of deleting them.
+cmd_restore() {
+  require_docker
+  local sql="" files="" yes=0 safety=1 a
+  for a in "$@"; do
+    case "$a" in
+      --yes) yes=1 ;;
+      --no-backup) safety=0 ;;
+      *.sql.gz) sql="$a" ;;
+      *-files.tar.gz) files="$a" ;;
+      *) die "restore <backups/aksor-...sql.gz> [<backups/aksor-...-files.tar.gz>] [--yes] [--no-backup]" ;;
+    esac
+  done
+  [ -n "$sql" ] || die "restore <backups/aksor-...sql.gz> [<...-files.tar.gz>] -- name the database dump to restore (ls $BACKUP_DIR)"
+  [ -f "$sql" ] || die "$sql not found"
+  # The two halves of a backup share a time stamp: find the data archive next to the dump unless one was named.
+  [ -n "$files" ] || { files="${sql%.sql.gz}-files.tar.gz"; [ -f "$files" ] || files=""; }
+  gzip -t "$sql" 2>/dev/null || die "$sql is not a valid gzip file"
+  if [ -n "$files" ]; then
+    [ -f "$files" ] || die "$files not found"
+    tar -tzf "$files" >/dev/null 2>&1 || die "$files is not a valid archive"
+  else
+    warn "no data archive found next to $sql -- only the database will be restored (templates, images and the secrets key stay as they are)"
+  fi
+  [ -f .env ] || die ".env not found -- restore needs the same .env the backup was made with (POSTGRES_PASSWORD...)"
+
+  printf '\nThis will REPLACE the database%s with:\n    %s\n' "$([ -n "$files" ] && echo ' and data/')" "$sql"
+  [ -n "$files" ] && printf '    %s\n' "$files"
+  printf 'The app is stopped first. Everything changed after that backup is lost%s.\n' "$([ "$safety" = 1 ] && echo ' (a safety backup of the current state is taken first)')"
+  if [ "$yes" != 1 ]; then
+    [ -t 0 ] || die "not a terminal: add --yes to restore without being asked"
+    local answer; read -r -p "Type restore to go on: " answer
+    [ "$answer" = restore ] || die "cancelled -- nothing was changed"
+  fi
+
+  ensure_network
+  start_infra
+  if [ "$safety" = 1 ]; then info "safety backup of the current state"; cmd_backup || die "the safety backup failed -- nothing was changed (--no-backup to restore anyway)"; fi
+  info "stopping the app"
+  app down
+  info "replacing the database"
+  db exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"' || die "couldn't recreate the database"
+  gzip -dc "$sql" | db exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -q -o /dev/null' || die "loading $sql failed -- the database is now empty; fix the cause and run restore again (the safety backup is in $BACKUP_DIR)"
+
+  if [ -n "$files" ]; then
+    local stamp aside; stamp="$(date +%Y%m%d-%H%M%S)"; aside="data.before-restore-$stamp"
+    info "restoring data/ (the current folders are kept in $aside/)"
+    local files_abs backup_abs; backup_abs="$(cd "$(dirname "$files")" && pwd)"; files_abs="$(basename "$files")"
+    docker run --rm --pull=never -v "$PWD:/work:z" -v "$backup_abs:/in:ro,z" -e "ASIDE=$aside" -e "FILE=$files_abs" "$BACKUP_HELPER_IMAGE" \
+      sh -c 'set -e; cd /work; mkdir -p "$ASIDE"; for d in "$@"; do if [ -e "$d" ]; then mkdir -p "$ASIDE/$(dirname "$d")"; mv "$d" "$ASIDE/$d"; fi; done; tar -xzf "/in/$FILE" -C /work' sh "${DATA_DIRS[@]}" \
+      || die "couldn't restore data/ -- the previous folders are in $aside/ (move them back)"
+  fi
+  info "restored. Start it again with ./deployment.sh up (set AKSOR_VERSION in .env to the version the backup was made with, or newer: migrations only go forward)"
 }
 
 cmd_update() {
@@ -324,8 +452,8 @@ cmd_update() {
       *) die "update [--no-backup] [--build] [--pull]" ;;
     esac
   done
-  [ "$registry" = 1 ] && require_registry_images
   preflight
+  [ "$registry" = 1 ] && require_registry_images
   ensure_network
   # Redis and Postgres untouched: brought up only if they aren't (a fresh host), never recreated.
   start_infra
@@ -396,6 +524,7 @@ main() {
     status)  cmd_status "$@" ;;
     logs)    cmd_logs "$@" ;;
     backup)  cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
     update)  cmd_update "$@" ;;
     publish) cmd_publish "$@" ;;
     doctor)  cmd_doctor "${1:-pull}" ;;
@@ -407,4 +536,7 @@ main() {
   esac
 }
 
-main "$@"
+# Always runs -- unless DEPLOYMENT_SH_NO_MAIN is set, which lets the functions above be sourced and tested on their own.
+# (Deliberately not "run only when executed": comparing $0 to the script path can silently do nothing under an
+# unusual way of starting it, and a deploy script that prints nothing and changes nothing is the worst failure.)
+[ -n "${DEPLOYMENT_SH_NO_MAIN:-}" ] || main "$@"

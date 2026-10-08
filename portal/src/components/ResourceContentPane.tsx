@@ -1,5 +1,6 @@
 import { useDraggable } from "@dnd-kit/core";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Link2 } from "lucide-react";
 import { UploadIcon } from "../admin/icons";
 import { api, ApiError } from "../api";
 import type { Folder, ImageResource, ReportMeta } from "../types";
@@ -27,6 +28,32 @@ function ReportCard({ report }: { report: ReportMeta }) {
       <div className="card-meta">
         <span>Report</span>
         <span>{new Date(report.updated_at).toLocaleDateString()}</span>
+      </div>
+    </article>
+  );
+}
+
+/** A report listed here from somewhere else. Not draggable: it is a link, and it opens the original, with the
+ * original's permissions. */
+function ShortcutCard({ report, canManage, onRemove }: { report: ReportMeta; canManage: boolean; onRemove: () => void }) {
+  return (
+    <article className="card resource-card resource-card-shortcut">
+      <div className="card-top">
+        <h3 className="card-name">{report.name}</h3>
+        <span className="shortcut-chip">
+          <Link2 size={12} aria-hidden="true" /> Shortcut
+        </span>
+      </div>
+      <p className="card-desc">{report.description}</p>
+      <div className="card-meta">
+        <a className="link-btn" href={`#/reports/${encodeURIComponent(report.report_id)}`}>
+          Open the original
+        </a>
+        {canManage && (
+          <button type="button" className="link-btn" onClick={onRemove}>
+            Remove shortcut
+          </button>
+        )}
       </div>
     </article>
   );
@@ -99,6 +126,8 @@ export default function ResourceContentPane({
   folder,
   reports,
   images,
+  shortcuts,
+  onRemoveShortcut,
   canManage,
   orgId,
   onImageUploaded,
@@ -107,6 +136,8 @@ export default function ResourceContentPane({
   folder: Folder | null;
   reports: ReportMeta[];
   images: ImageResource[];
+  shortcuts: { shortcut: { id: string }; report: ReportMeta }[];
+  onRemoveShortcut: (id: string) => void;
   canManage: boolean;
   orgId: string;
   onImageUploaded: (image: ImageResource) => void;
@@ -142,13 +173,13 @@ export default function ResourceContentPane({
     }
   }
 
-  const empty = reports.length === 0 && images.length === 0;
+  const empty = reports.length === 0 && images.length === 0 && shortcuts.length === 0;
 
   return (
     <div className="resource-content">
       <div className="resource-content-header">
         <div>
-          <h2 className="resource-content-title">{folder ? folder.name : "All Resources"}</h2>
+          <h2 className="resource-content-title">{folder ? folder.name : "Root"}</h2>
           {folder?.description && <p className="muted" style={{ margin: "2px 0 0" }}>{folder.description}</p>}
         </div>
         {canManage && (
@@ -178,8 +209,13 @@ export default function ResourceContentPane({
               <ReportCard report={r} />
             </div>
           ))}
+          {shortcuts.map(({ shortcut, report }, i) => (
+            <div key={shortcut.id} style={{ "--i": reports.length + i } as CSSProperties}>
+              <ShortcutCard report={report} canManage={canManage} onRemove={() => onRemoveShortcut(shortcut.id)} />
+            </div>
+          ))}
           {images.map((img, i) => (
-            <div key={img.id} style={{ "--i": reports.length + i } as CSSProperties}>
+            <div key={img.id} style={{ "--i": reports.length + shortcuts.length + i } as CSSProperties}>
               <ImageCard image={img} canManage={canManage} onDelete={() => handleDelete(img.id)} />
             </div>
           ))}

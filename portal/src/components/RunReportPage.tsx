@@ -31,7 +31,7 @@ const isTemporal = (type: ParameterType): type is "date" | "time" | "datetime" =
 /** One filter control. A choice list narrowed to a single value is shown
  * locked rather than as a one-item dropdown: the user should see *why*
  * they can't pick anything else, not wonder if the page is broken. */
-function ParameterField({
+export function ParameterField({
   parameter,
   value,
   onChange,

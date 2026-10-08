@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import { defaultCredentialValue, type CredentialValue } from "./components/CredentialPicker";
-import { NOW_EXPRESSION } from "./dateFormat";
+import { FIRST_DAY_EXPRESSION, LAST_DAY_EXPRESSION, NOW_EXPRESSION } from "./dateFormat";
 import type {
   ConnectionSummary,
   DataConfig,
@@ -208,10 +208,19 @@ export function sourceConfigured(e: EditableSource): boolean {
 
 // --- parameters ----------------------------------------------------------------------
 
-export type DefaultMode = "none" | "fixed" | "now";
+export type DefaultMode = "none" | "fixed" | "now" | "firstDay" | "lastDay";
 
 /** A `date`, `datetime` or `time` parameter can default to the moment it's run. */
 export const supportsNow = (type: ParameterType) => type === "date" || type === "datetime" || type === "time";
+
+/** ...and a `date` or `datetime` one to the first or last day of the current month. */
+export const supportsMonthDay = (type: ParameterType) => type === "date" || type === "datetime";
+
+const EXPRESSION_MODES: Record<string, DefaultMode> = {
+  [NOW_EXPRESSION]: "now",
+  [FIRST_DAY_EXPRESSION]: "firstDay",
+  [LAST_DAY_EXPRESSION]: "lastDay",
+};
 
 export interface EditableParameter {
   key: number;
@@ -269,8 +278,8 @@ export function toEditableParameter(p: ReportParameter): EditableParameter {
     optionsText: (p.options ?? []).map((o) => (o.label ? `${o.value} | ${o.label}` : o.value)).join("\n"),
     textType: p.type,
     required: p.required,
-    defaultMode: p.default_value === NOW_EXPRESSION ? "now" : p.default_value ? "fixed" : "none",
-    defaultValue: p.default_value && p.default_value !== NOW_EXPRESSION ? p.default_value : "",
+    defaultMode: (p.default_value && EXPRESSION_MODES[p.default_value]) || (p.default_value ? "fixed" : "none"),
+    defaultValue: p.default_value && !EXPRESSION_MODES[p.default_value] ? p.default_value : "",
     request: source ? toEditableRequest(source, source.body) : EMPTY_REQUEST,
     itemsPath: source?.items_path ?? "",
     valuePath: source?.value_field ?? "",
@@ -305,6 +314,8 @@ export function toOptionsSource(e: EditableParameter): OptionsSource {
 function toDefault(e: EditableParameter): string | null {
   if (e.kind !== "text") return null;
   if (e.defaultMode === "now" && supportsNow(e.textType)) return NOW_EXPRESSION;
+  if (e.defaultMode === "firstDay" && supportsMonthDay(e.textType)) return FIRST_DAY_EXPRESSION;
+  if (e.defaultMode === "lastDay" && supportsMonthDay(e.textType)) return LAST_DAY_EXPRESSION;
   if (e.defaultMode === "fixed") return e.defaultValue.trim() || null;
   return null;
 }

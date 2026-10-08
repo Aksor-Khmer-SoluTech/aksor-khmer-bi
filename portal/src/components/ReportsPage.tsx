@@ -3,11 +3,10 @@ import {
   ArrowDownAZ,
   ArrowUpAZ,
   ChevronRight,
+  Link2,
   Eye,
   History,
   Inbox,
-  LayoutGrid,
-  List,
   Play,
   Search,
   SearchX,
@@ -17,11 +16,14 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { useFavoriteReports } from "../favorites";
+import { buildReportTree, folderIds } from "../reportTree";
+import ReportsTree, { useTreeCollapsed } from "./ReportsTree";
+import ViewSwitch, { readView, saveView, TreeCollapseButtons, type LayoutView } from "./ViewSwitch";
 import { CardGridSkeleton, ListSkeleton } from "./Skeletons";
 import type { AccessibleReport, ReportAccessLevel } from "../types";
 
 const VIEW_KEY = "portal_reports_view";
-type ReportsView = "grid" | "list";
+type ReportsView = LayoutView;
 
 const SORT_KEY = "portal_reports_sort";
 type SortKey = "name-asc" | "name-desc" | "updated-desc";
@@ -167,7 +169,10 @@ function ReportRow({
   onManage,
   starred,
   onToggleStar,
+  shortcutFrom,
 }: {
+  /** Set when this row is a shortcut: where the original is filed. It opens the original, with its access. */
+  shortcutFrom?: string;
   report: AccessibleReport;
   index: number;
   onRun: (id: string) => void;
@@ -198,6 +203,11 @@ function ReportRow({
       <div className="list-row-main">
         <div className="list-row-title">
           <h3>{report.name}</h3>
+          {shortcutFrom && (
+            <span className="shortcut-chip" title={`A shortcut to the report filed in ${shortcutFrom}. It has the original's access.`}>
+              <Link2 size={12} aria-hidden="true" /> Shortcut · {shortcutFrom}
+            </span>
+          )}
         </div>
         <p className="list-row-desc" title={report.description || undefined} aria-hidden={report.description ? undefined : true}>
           {report.description || "\u00a0"}
@@ -234,13 +244,7 @@ export default function ReportsPage({
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [view, setView] = useState<ReportsView>(() => {
-    try {
-      return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
-    } catch {
-      return "grid";
-    }
-  });
+  const [view, setView] = useState<ReportsView>(() => readView(VIEW_KEY));
   const [sort, setSort] = useState<SortKey>(() => {
     try {
       const stored = localStorage.getItem(SORT_KEY);
@@ -259,11 +263,7 @@ export default function ReportsPage({
 
   function changeView(next: ReportsView) {
     setView(next);
-    try {
-      localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      // best-effort only — view preference just won't persist
-    }
+    saveView(VIEW_KEY, next);
   }
 
   function changeSort(next: SortKey) {
@@ -291,6 +291,9 @@ export default function ReportsPage({
   }, [reports, query, sort, favorites]);
 
   const hasActiveSearch = query.trim() !== "";
+  const tree = useMemo(() => buildReportTree(filtered, (r) => r.report_id), [filtered]);
+  const { collapsed, toggle: toggleFolder, collapseAll, expandAll } = useTreeCollapsed(username);
+  const allFolders = useMemo(() => folderIds(tree.folders), [tree]);
 
   return (
     <div>
@@ -330,26 +333,11 @@ export default function ReportsPage({
             </button>
           </form>
 
-          <div className="segmented" role="group" aria-label="Layout">
-            <button
-              type="button"
-              className={`segmented-btn icon-only${view === "grid" ? " active" : ""}`}
-              onClick={() => changeView("grid")}
-              data-tip="Grid view"
-              aria-label="Grid view"
-            >
-              <LayoutGrid size={16} />
-            </button>
-            <button
-              type="button"
-              className={`segmented-btn icon-only${view === "list" ? " active" : ""}`}
-              onClick={() => changeView("list")}
-              data-tip="List view"
-              aria-label="List view"
-            >
-              <List size={16} />
-            </button>
-          </div>
+          <ViewSwitch view={view} onChange={changeView} />
+
+          {view === "tree" && allFolders.length > 0 && !hasActiveSearch && (
+            <TreeCollapseButtons onExpandAll={expandAll} onCollapseAll={() => collapseAll(allFolders)} />
+          )}
 
           <div className="segmented" role="group" aria-label="Sort reports">
             {SORT_ORDER.map((key) => {
@@ -373,7 +361,7 @@ export default function ReportsPage({
 
       {error && <p className="alert alert-error">{error}</p>}
 
-      {reports === null && !error && (view === "list" ? <ListSkeleton badge={false} /> : <CardGridSkeleton badge={false} />)}
+      {reports === null && !error && (view !== "grid" ? <ListSkeleton badge={false} /> : <CardGridSkeleton badge={false} />)}
 
       {reports !== null && reports.length === 0 && (
         <div className="empty-state">
@@ -401,6 +389,19 @@ export default function ReportsPage({
             <ReportCard key={report.report_id} report={report} index={i} onRun={onRunReport} onManage={onManageTemplate} starred={isFavorite(report.report_id)} onToggleStar={() => toggle(report.report_id)} />
           ))}
         </div>
+      )}
+
+      {filtered.length > 0 && view === "tree" && (
+        <ReportsTree
+          tree={tree}
+          idOf={(r) => r.report_id}
+          collapsed={collapsed}
+          forceOpen={hasActiveSearch}
+          onToggle={toggleFolder}
+          renderReport={(report, i, entry) => (
+            <ReportRow report={report} index={i} shortcutFrom={entry?.shortcutFrom} onRun={onRunReport} onManage={onManageTemplate} starred={isFavorite(report.report_id)} onToggleStar={() => toggle(report.report_id)} />
+          )}
+        />
       )}
 
       {filtered.length > 0 && view === "list" && (

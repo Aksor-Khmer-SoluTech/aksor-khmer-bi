@@ -64,6 +64,14 @@ class MyTopReport(BaseModel):
     runs: int
 
 
+class MyDay(BaseModel):
+    """One UTC day of the caller's own runs, for the Home page's trend chart."""
+
+    date: str
+    runs: int
+    failed: int
+
+
 class MyDashboard(BaseModel):
     """The signed-in person's own activity -- nobody else's -- for the portal's Home page."""
 
@@ -74,3 +82,4 @@ class MyDashboard(BaseModel):
     last_run_at: str | None
     recent: list[MyRun]
     top_reports: list[MyTopReport]
+    daily: list[MyDay] = []

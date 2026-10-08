@@ -29,6 +29,9 @@ def test_it_summarises_only_the_callers_own_runs(auth_headers, make_local_user):
     assert body["top_reports"][0] == {"report_id": "a", "name": "Report a", "runs": 2}
     assert body["recent"][0]["ok"] is False and body["recent"][0]["reason"] == "boom"
     assert all(r["parameters_selected"] == 2 for r in body["recent"])
+    assert len(body["daily"]) == 30
+    assert body["daily"][-1]["runs"] == 3 and body["daily"][-1]["failed"] == 1
+    assert sum(d["runs"] for d in body["daily"]) == 3
 
 
 def test_it_needs_a_signed_in_user():

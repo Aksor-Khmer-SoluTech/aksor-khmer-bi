@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CircleCheck, FlaskConical, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "../api";
-import { supportsNow, toOptionsSource, type DataConfigDraft, type EditableParameter } from "../dataConfig";
+import { supportsMonthDay, supportsNow, toOptionsSource, type DataConfigDraft, type EditableParameter } from "../dataConfig";
 import type { OptionsPreview, ParameterType, ReportMeta } from "../types";
 import DataConfigSaveBar from "./DataConfigSaveBar";
 import DateTimeField from "./DateTimeField";
@@ -15,6 +15,15 @@ const TEXT_TYPES: { value: ParameterType; label: string }[] = [
   { value: "datetime", label: "Date & time" },
   { value: "time", label: "Time" },
 ];
+
+/** The expression default a parameter keeps when its type changes, if the new type still supports it. */
+function keepMode(mode: EditableParameter["defaultMode"], type: EditableParameter["textType"]): EditableParameter["defaultMode"] {
+  if (mode === "now") return supportsNow(type) ? "now" : "none";
+  if (mode === "firstDay" || mode === "lastDay") return supportsMonthDay(type) ? mode : "none";
+  return "none";
+}
+
+const MODE_LABELS = { now: "now()", firstDay: "firstDayOfMonth()", lastDay: "lastDayOfMonth()" } as const;
 
 const NOW_MEANING: Record<"date" | "datetime" | "time", string> = {
   date: "today's date",
@@ -108,7 +117,7 @@ function ParameterCard({
 
   function changeType(textType: ParameterType) {
     // A default only makes sense in the type it was written for -- "H.E" isn't a date.
-    update({ textType, defaultValue: "", defaultMode: p.defaultMode === "now" && supportsNow(textType) ? "now" : "none" });
+    update({ textType, defaultValue: "", defaultMode: keepMode(p.defaultMode, textType) });
   }
 
   return (
@@ -215,12 +224,13 @@ function DefaultValue({ p, update }: { p: EditableParameter; update: (patch: Par
               ["none", "None"],
               ["fixed", "Fixed"],
               ["now", "now()"],
+              ...(supportsMonthDay(p.textType) ? ([["firstDay", "firstDayOfMonth()"], ["lastDay", "lastDayOfMonth()"]] as const) : []),
             ] as const
           ).map(([mode, label]) => (
             <button
               key={mode}
               type="button"
-              className={`segmented-btn${p.defaultMode === mode ? " active" : ""}${mode === "now" ? " mono" : ""}`}
+              className={`segmented-btn${p.defaultMode === mode ? " active" : ""}${mode in MODE_LABELS ? " mono" : ""}`}
               aria-pressed={p.defaultMode === mode}
               onClick={() => update({ defaultMode: mode, defaultValue: mode === "fixed" ? p.defaultValue : "" })}
             >
@@ -234,6 +244,12 @@ function DefaultValue({ p, update }: { p: EditableParameter; update: (patch: Par
           </div>
         )}
       </div>
+      {(p.defaultMode === "firstDay" || p.defaultMode === "lastDay") && (
+        <span className="run-field-note">
+          Starts as the {p.defaultMode === "firstDay" ? "first" : "last"} day of the current month
+          {kind === "datetime" ? (p.defaultMode === "firstDay" ? " at 00:00" : " at 23:59") : ""}, taken from the browser when the report is opened.
+        </span>
+      )}
       {p.defaultMode === "now" && (
         <span className="run-field-note">Starts as {NOW_MEANING[kind]}, taken from the browser when the report is opened.</span>
       )}

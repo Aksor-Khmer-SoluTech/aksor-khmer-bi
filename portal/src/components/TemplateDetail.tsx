@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Braces, CodeXml, Database, Eye, FileText, History, Maximize2, Minimize2, Plus, ShieldCheck, SlidersHorizontal, SpellCheck, type LucideIcon } from "lucide-react";
+import { Braces, CodeXml, Database, Eye, FileText, History, Link2, Maximize2, Minimize2, Plus, ShieldCheck, SlidersHorizontal, SpellCheck, type LucideIcon } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useDataConfigDraft } from "../dataConfig";
+import { initialValue } from "../dateFormat";
+import { downloadBlob } from "../download";
 import { useDialogRef } from "../hooks";
 import { PREVIEW_LAYOUT_CODE, parsePreviewLayout, type PreviewLayout } from "../preferences";
 import { checkCode, isCodeError, suggestCode } from "../reportCode";
@@ -13,6 +15,7 @@ import {
   type ReportMeta,
   type ReportParameter,
   type ReportSchema,
+  type RunForm,
   type Role,
   type User,
   versionName,
@@ -24,8 +27,11 @@ import HistoryTab from "./HistoryTab";
 import IntegrationTab from "./IntegrationTab";
 import ParametersTab from "./ParametersTab";
 import ProtectedTermsTab from "./ProtectedTermsTab";
+import { ParameterField } from "./RunReportPage";
 import ReplaceTemplate from "./ReplaceTemplate";
+import FolderPicker from "./FolderPicker";
 import ReportCodeField from "./ReportCodeField";
+import ShortcutsField from "./ShortcutsField";
 import ReportSkeleton from "./ReportSkeleton";
 import { LinesSkeleton } from "./Skeletons";
 import TemplateDownloadButtons from "./TemplateDownload";
@@ -44,7 +50,7 @@ const ReportViewer = lazy(() => import("./ReportViewer"));
 const NAME_MAX = 100;
 const DESCRIPTION_MAX = 500;
 
-type Tab = "overview" | "placeholders" | "parameters" | "datasource" | "preview" | "access" | "integration" | "terms" | "history";
+type Tab = "overview" | "placeholders" | "parameters" | "datasource" | "preview" | "access" | "shortcuts" | "integration" | "terms" | "history";
 
 // Order = how soon a manager needs the tab, then what it costs to open --
 // most needed and cheapest first, occasional and heavy last. What "cost"
@@ -79,6 +85,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "datasource", label: "Data source", icon: Database },
   { id: "preview", label: "Preview", icon: Eye },
   { id: "access", label: "Access Privilege", icon: ShieldCheck },
+  { id: "shortcuts", label: "Shortcuts", icon: Link2 },
   { id: "integration", label: "Integration", icon: CodeXml },
   { id: "terms", label: "Protected Terms", icon: SpellCheck },
   { id: "history", label: "History", icon: History },
@@ -175,6 +182,7 @@ function OverviewTab({
   const [name, setName] = useState(report.name);
   const [description, setDescription] = useState(report.description ?? "");
   const [code, setCode] = useState(report.code ?? "");
+  const [folderId, setFolderId] = useState<string | null>(report.folder_id);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -190,7 +198,14 @@ function OverviewTab({
     const nextCode = code.trim() === "" ? null : code.trim();
     const codeChanged = nextCode !== (report.code ?? null);
     try {
-      const updated = await api.updateReport(report.report_id, { name, description, ...(codeChanged ? { code: nextCode } : {}) });
+      const folderChanged = folderId !== report.folder_id;
+      const updated = await api.updateReport(report.report_id, {
+        name,
+        description,
+        ...(codeChanged ? { code: nextCode } : {}),
+        ...(folderChanged ? { folder_id: folderId } : {}),
+      });
+      setFolderId(updated.folder_id);
       onUpdated(updated);
       setCode(updated.code ?? "");
       setSaved(true);
@@ -231,6 +246,13 @@ function OverviewTab({
             suggestion={suggestCode(name)}
             serverError={codeError}
           />
+          <FolderPicker
+            value={folderId}
+            onChange={(v) => {
+              setFolderId(v);
+              setSaved(false);
+            }}
+          />
           <label>
             <span className="field-label-row">
               <span>Description</span>
@@ -246,6 +268,7 @@ function OverviewTab({
             Save changes
           </button>
         </form>
+
       </section>
 
       <section className="overview-file">
@@ -312,14 +335,42 @@ function PlaceholdersTab({ schema }: { schema: ReportSchema | null }) {
   );
 }
 
+/** Where else this template is listed. A shortcut only adds a place to find the report; the access stays the
+ * original's -- see ShortcutsField. */
+function ShortcutsTab({ report }: { report: ReportMeta }) {
+  return (
+    <div className="panel">
+      <h2 className="panel-title">Shortcuts</h2>
+      <p className="panel-subtitle">
+        When several departments or teams use this report, list it in each team's own folder so they can arrange their space the way
+        they like — without copying it. A shortcut opens this same report and has exactly its permissions; nothing is granted by it, so
+        each team still needs access to the report itself (Access Privilege).
+      </p>
+      <ShortcutsField report={report} />
+    </div>
+  );
+}
+
+// What the viewer is showing: the template against hand-typed sample JSON, or a real run with filter values.
+type Viewing = { kind: "sample"; context: Record<string, unknown> } | { kind: "live"; values: Record<string, string> };
+const NO_CONTEXT: Record<string, unknown> = {};
+
+/** Two ways to check a template. **Live run** is what the people who open it get: the report's filters, then its
+ * data source, then the template -- the same /run route as the Reports page, so defaults, required filters, choice
+ * lists, grants and the data source are all exercised. **Sample data** renders the template against JSON typed here,
+ * which skips the filters and the data source: right for laying out a template before any data source exists, wrong
+ * for testing one. A report with filters or a data source opens on Live run. */
 function PreviewTab({
   report,
   schema,
   onSampleSaved,
+  unsavedConfig,
 }: {
   report: ReportMeta;
   schema: ReportSchema | null;
   onSampleSaved: (ctx: Record<string, unknown>) => void;
+  /** The Parameters or Data source tab has changes not yet saved -- a live run uses what is saved. */
+  unsavedConfig: boolean;
 }) {
   // Only a `docx`-sourced template has a PDF rendering path at all (see
   // types.ts's FORMATS_BY_EXT) -- that's what ReportViewer pages through.
@@ -331,21 +382,52 @@ function PreviewTab({
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [renderedContext, setRenderedContext] = useState<Record<string, unknown> | null>(null);
+  const [viewing, setViewing] = useState<Viewing | null>(null);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const { get: getSetting } = useUserSettings();
   const previewLayout = parsePreviewLayout(getSetting(PREVIEW_LAYOUT_CODE));
+
+  // The live-run form: the report's filters as the Reports page would show them (None until loaded; a report
+  // with neither filters nor a data source has nothing to run live, so only sample data is offered).
+  const [form, setForm] = useState<RunForm | null>(null);
+  const [liveAvailable, setLiveAvailable] = useState(false);
+  const [mode, setMode] = useState<"live" | "sample">("sample");
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.getRunForm(report.report_id).catch(() => null), api.getDataConfig(report.report_id).catch(() => null)]).then(
+      ([f, config]) => {
+        if (cancelled) return;
+        setForm(f);
+        const live = f !== null && (f.parameters.length > 0 || Boolean(config?.data_source));
+        setLiveAvailable(live);
+        if (live && f) {
+          setMode("live");
+          setValues(
+            Object.fromEntries(
+              f.parameters.map((p) => [p.name, p.options ? (p.options.length === 1 ? p.options[0].value : "") : initialValue(p.type, p.default_value)]),
+            ),
+          );
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [report.report_id]);
+
   // The preview lives in a dialog (a slide-over from the right/left edge,
   // or a centered modal -- a Preferences tab choice, saved to the account)
   // rather than inline in the page -- `open` just tracks whether a render
-  // has been requested; closing it clears renderedContext so the next
-  // "Render preview" click starts fresh.
-  const drawerRef = useDialogRef(canPreview && renderedContext !== null);
+  // has been requested; closing it clears `viewing` so the next
+  // click starts fresh.
+  const drawerRef = useDialogRef(canPreview && viewing !== null);
   // Header button's toggle -- session-only, and cleared on close so every
   // open starts in the layout the user picked in Preferences.
   const [maximized, setMaximized] = useState(false);
   const closeDrawer = () => {
-    setRenderedContext(null);
+    setViewing(null);
     setMaximized(false);
   };
 
@@ -368,9 +450,32 @@ function PreviewTab({
     }
   }
 
+  const liveComplete =
+    form !== null &&
+    form.parameters.every((p) => !p.required || ((p.options === null || p.options.length > 0) && (values[p.name] ?? "") !== ""));
+
   async function handleRender() {
     setError(null);
     setSaveMsg(null);
+
+    if (mode === "live") {
+      if (!form || !liveComplete) return;
+      if (canPreview) {
+        setViewing({ kind: "live", values: { ...values } });
+        return;
+      }
+      setPending(true);
+      try {
+        const { blob, filename } = await api.runReport(report.report_id, values, form.formats[0], report.name);
+        downloadBlob(blob, filename);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Run failed");
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
+
     const data = parsed();
     if (!data) return;
 
@@ -378,7 +483,7 @@ function PreviewTab({
       // ReportViewer does its own PDF render (and its export menu covers
       // every format this template supports) -- this just hands it the
       // context to render against.
-      setRenderedContext(data);
+      setViewing({ kind: "sample", context: data });
       return;
     }
 
@@ -411,29 +516,76 @@ function PreviewTab({
     }
   }
 
+  const live = mode === "live" && liveAvailable;
+
   return (
     <div className="panel panel-fill">
       <h2 className="panel-title">Preview</h2>
       <p className="panel-subtitle">
-        {canPreview
-          ? "Render this template against context data and page through the result, right here."
-          : "Render this template against context data, right here."}
+        {live
+          ? "Run this report the way the people who open it will: choose the filters, and it fetches its data and renders."
+          : canPreview
+            ? "Render this template against context data and page through the result, right here."
+            : "Render this template against context data, right here."}
       </p>
-      <label className="fill-field">
-        <span>Context data (JSON)</span>
-        <textarea className="mono-input json-editor" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
-      </label>
+
+      <div className="preview-toolbar">
+        {liveAvailable && (
+          <div className="segmented" role="group" aria-label="What to preview with">
+            <button type="button" className={`segmented-btn${live ? " active" : ""}`} onClick={() => setMode("live")}>
+              Live run
+            </button>
+            <button type="button" className={`segmented-btn${!live ? " active" : ""}`} onClick={() => setMode("sample")}>
+              Sample data
+            </button>
+          </div>
+        )}
+        <div className="preview-actions">
+          <button type="button" className="btn btn-primary" onClick={handleRender} disabled={pending || (live && !liveComplete)}>
+            {pending && <span className="spinner" />}
+            {live ? (canPreview ? "Run report" : "Run and download") : canPreview ? "Render preview" : "Render & download"}
+          </button>
+          {!live && (
+            <button type="button" className="btn" onClick={handleSaveSample}>
+              Save as sample
+            </button>
+          )}
+        </div>
+      </div>
+
       {error && <p className="alert alert-error">{error}</p>}
       {saveMsg && <p className="alert alert-success">{saveMsg}</p>}
-      <div className="row">
-        <button type="button" className="btn btn-primary" onClick={handleRender} disabled={pending}>
-          {pending && <span className="spinner" />}
-          {canPreview ? "Render preview" : "Render & download"}
-        </button>
-        <button type="button" className="btn" onClick={handleSaveSample}>
-          Save as sample
-        </button>
-      </div>
+      {live && form ? (
+        <>
+          {unsavedConfig && (
+            <p className="alert alert-warning">
+              The Parameters or Data source tab has unsaved changes. A live run uses what is saved — save them first to test them here.
+            </p>
+          )}
+          {form.parameters.length > 0 ? (
+            <div className="preview-filters">
+              {form.parameters.map((p) => (
+                <ParameterField key={p.name} parameter={p} value={values[p.name] ?? ""} onChange={(next) => setValues((prev) => ({ ...prev, [p.name]: next }))} />
+              ))}
+            </div>
+          ) : (
+            <p className="muted">This report has no filters — it just fetches its data and renders.</p>
+          )}
+        </>
+      ) : (
+        <>
+          {liveAvailable && (
+            <p className="field-hint" style={{ margin: "0 0 8px" }}>
+              Sample data skips the filters and the data source: it shows how the template looks with the JSON below, nothing more. Use{" "}
+              <strong>Live run</strong> to test the filters and data.
+            </p>
+          )}
+          <label className="fill-field">
+            <span>Context data (JSON)</span>
+            <textarea className="mono-input json-editor" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
+          </label>
+        </>
+      )}
 
       {canPreview && (
         <dialog
@@ -466,7 +618,7 @@ function PreviewTab({
             </div>
           </div>
           <div className="min-h-0 flex-1">
-            {renderedContext && (
+            {viewing && (
               <Suspense
                 fallback={
                   <div className="report-viewer-stage">
@@ -478,7 +630,10 @@ function PreviewTab({
                   reportId={report.report_id}
                   reportName={report.name}
                   templateExt={report.template_ext}
-                  contextData={renderedContext}
+                  contextData={viewing.kind === "sample" ? viewing.context : NO_CONTEXT}
+                  renderer={
+                    viewing.kind === "live" ? (format, part) => api.runReport(report.report_id, viewing.values, format, report.name, part) : undefined
+                  }
                 />
               </Suspense>
             )}
@@ -993,9 +1148,11 @@ export default function TemplateDetail({
               report={report}
               schema={schema}
               onSampleSaved={(ctx) => setReport({ ...report, sample_context: ctx })}
+              unsavedConfig={dataConfig.parametersDirty || dataConfig.sourceDirty}
             />
           )}
           {tab === "access" && has(auth, "report:manage") && <AccessTab report={report} onUpdated={setReport} />}
+          {tab === "shortcuts" && <ShortcutsTab report={report} />}
           {tab === "integration" && <IntegrationTab report={report} onOpenOverview={() => onTabChange(undefined)} />}
         </div>
       </div>

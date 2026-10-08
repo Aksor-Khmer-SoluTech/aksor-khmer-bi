@@ -34,6 +34,7 @@ class FolderOut(BaseModel):
     created_by: str | None = None
     created_at: str
     updated_at: str
+    can_manage: bool = Field(False, description="List endpoint only: whether the caller may file things into this folder")
 
 
 class ImageOut(BaseModel):

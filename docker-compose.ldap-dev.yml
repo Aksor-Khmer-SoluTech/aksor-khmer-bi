@@ -23,4 +23,4 @@ services:
       LDAP_DOMAIN: aksor.test
       LDAP_ADMIN_PASSWORD: adminpass123
     ports:
-      - "3389:389"
+      - "127.0.0.1:3389:389"   # this machine only: it has a published admin password

@@ -287,6 +287,7 @@ def create_report(
     resource_bindings: dict | None = None,
     *,
     code: str | None = None,
+    folder_id: str | None = None,
     actor: Actor | None = None,
     note: str | None = None,
     original_filename: str | None = None,
@@ -300,6 +301,7 @@ def create_report(
     row = ReportRow(
         report_id=report_id,
         org_id=org_id,
+        folder_id=folder_id,
         name=name,
         description=description,
         template_ext=template_ext,
@@ -621,6 +623,7 @@ def delete_report(report_id: str) -> None:
         if row is None:
             raise ReportNotFoundError(report_id)
         session.execute(delete(ReportVersion).where(ReportVersion.report_id == report_id))
+        session.execute(delete(db.ReportShortcut).where(db.ReportShortcut.report_id == report_id))
         # Not left to the FK's ON DELETE CASCADE: SQLite ignores foreign keys unless asked to.
         session.execute(delete(ApiClientReport).where(ApiClientReport.report_id == report_id))
         session.delete(row)

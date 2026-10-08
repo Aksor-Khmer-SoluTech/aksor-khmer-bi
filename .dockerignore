@@ -15,3 +15,23 @@ dist/
 **/.env
 **/node_modules
 portal/dist
+
+# Local data, databases, logs, backups and notes never belong in an image: `COPY api api` would otherwise carry a
+# developer's own api/aksor_khmer_bi.db (users, password hashes) and api/logs into something that gets published.
+**/*.db
+**/*.db-journal
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+**/logs
+data
+backups
+data.before-restore-*
+specs
+**/.env.*
+.claude
+.idea
+.vscode
+tmp

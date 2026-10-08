@@ -9,7 +9,7 @@ covering everything filed under it.
 """
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, _gen_id
@@ -34,6 +34,24 @@ class Folder(Base):
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ReportShortcut(Base):
+    """A report listed in a second folder, without a second copy: the shortcut is only a *placement*.
+    Why: one report is often used by several departments or teams, and each wants it in its own folder so they can
+    arrange (beautify) their own space; the report, its template and its permissions stay single.
+    Opening it opens the original, so it carries exactly the original's permissions -- nothing here grants
+    anything, and a grant on the folder holding a shortcut does not reach the report (access is only ever
+    decided from the report's own grants and its own folder chain; see routers/reports.py)."""
+
+    __tablename__ = "report_shortcuts"
+    __table_args__ = (UniqueConstraint("report_id", "folder_id", name="uq_report_shortcuts_report_folder"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_gen_id)
+    report_id: Mapped[str] = mapped_column(ForeignKey("reports.report_id"), nullable=False, index=True)
+    folder_id: Mapped[str] = mapped_column(ForeignKey("folders.id"), nullable=False, index=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class FolderAccessGrant(Base):

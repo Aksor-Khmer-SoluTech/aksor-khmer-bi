@@ -325,12 +325,16 @@ a folder grant **does** inherit down the tree: granting `view` on
 | GET    | `/api/v1/folders`                    | yes            | folders visible to the caller (`?org_id=`)                   |
 | GET    | `/api/v1/folders/{id}`               | yes            | one folder                                                    |
 | PATCH  | `/api/v1/folders/{id}`               | yes            | rename, and/or move to a different `parent_folder_id` (`null` = root) |
-| DELETE | `/api/v1/folders/{id}`               | yes            | delete — `409` unless it's empty                              |
+| DELETE | `/api/v1/folders/{id}`               | yes            | delete — `409` unless it holds no sub-folders, reports or images (shortcuts in it don't count; they are removed with it) |
 | POST   | `/api/v1/images`                     | yes            | upload (`multipart/form-data`: `file`, `name`, `org_id`, optional `folder_id`) |
 | GET    | `/api/v1/images`                     | yes            | images visible to the caller (`?org_id=`, `?folder_id=`)      |
 | GET    | `/api/v1/images/{id}`                | yes            | one image's metadata                                          |
 | GET    | `/api/v1/images/{id}/file`           | yes            | raw image bytes                                                |
 | DELETE | `/api/v1/images/{id}`                | yes            | delete                                                          |
+| GET    | `/api/v1/reports/shortcuts`          | yes            | shortcuts in folders the caller may open, for reports they can open |
+| GET    | `/api/v1/reports/{id}/shortcuts`     | report `manage`| the folders a report is also listed in                         |
+| POST   | `/api/v1/reports/{id}/shortcuts`     | report `manage` + folder `manage` | list a report in another folder (`{"folder_id"}`); `400` if it's already filed there, `409` if a shortcut exists |
+| DELETE | `/api/v1/reports/shortcuts/{id}`     | report `manage` or folder `manage` | remove a shortcut — the report is untouched |
 | POST   | `/api/v1/grants/folders`             | `folder:manage`| grant a user or role `view`/`manage` on one folder             |
 | GET    | `/api/v1/grants/folders?folder_id=`  | `folder:manage`| list a folder's grants                                          |
 | DELETE | `/api/v1/grants/folders/{grant_id}`  | `folder:manage`| revoke                                                           |
@@ -348,6 +352,21 @@ management of one folder's own contents). Unlike `/api/v1/reports`'
 list/get/render, folder and image listing are **not** public — Resources
 is a new surface with no "stays open" precedent to preserve, and
 per-folder visibility is the actual point of the grants above.
+
+**Filing a report.** `POST /api/v1/reports` takes an optional `folder_id` form field, and `PATCH
+/api/v1/reports/{id}` moves it (`null` = root). Either needs `manage` on the destination folder, and the folder
+must exist in the report's own organization (otherwise `404`, the same answer for a missing and a foreign
+folder). `GET /api/v1/folders` includes `can_manage` for each folder, so a client can offer only the folders the
+caller may file into.
+
+**Shortcuts.** *Why they exist: one report used by several departments or teams, each wanting it in its own folder
+to arrange their own space — without copies.* A shortcut lists a report in a second folder (`report_shortcuts` table, one row per report and
+folder). It is a *placement*, not a copy and not a permission: opening it opens the original, so access is only
+ever decided from the report's own grants and its own folder chain. A grant on the folder that holds a shortcut
+does **not** reach the report, and `GET /api/v1/reports/accessible` lists a shortcut (`shortcuts`, with the visible
+folder path of each) only for a caller who already holds access to the original, and only in folders they may
+open. `folder_path` on each accessible report likewise names only the folders the caller may open. Creating and
+removing shortcuts is audited (`report.shortcut_create`, `report.shortcut_delete`).
 
 An uploaded image can also be embedded directly into a rendered `.docx`
 report — see [`docs/building-a-report.md`](../docs/building-a-report.md#images-docx-templates-only).

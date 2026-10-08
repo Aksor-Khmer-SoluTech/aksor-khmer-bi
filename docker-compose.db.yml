@@ -6,7 +6,7 @@
 #
 # All three files join one external network, `aksor-network`, so the app containers reach this as
 # `postgres`. ./deployment.sh creates the network and starts the stacks in order; to run by hand
-# (full walkthrough: DEPLOYMENT.md):
+# (full walkthrough: docs/deployment.md, "Install it"):
 #
 #   docker network create aksor-network
 #   docker compose -p aksor-redis -f docker-compose.redis.yml up -d --wait
@@ -17,6 +17,14 @@
 # on one stack would delete the others' containers.
 #
 # Reads POSTGRES_PASSWORD from .env -- the same file the app reads -- so they always agree.
+# Docker keeps every container's stdout forever by default; on a long-running server that fills the disk.
+# Rotate it: 5 files of 20 MB per service. (The app's own dated log files in data/logs rotate separately.)
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   # Report *metadata*, the multi-tenant auth/RBAC schema and job definitions/run
   # history (api/app/db). The template files themselves stay on disk
@@ -24,6 +32,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: aksor
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aksor}

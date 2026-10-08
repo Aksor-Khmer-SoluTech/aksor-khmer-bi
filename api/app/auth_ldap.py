@@ -61,6 +61,8 @@ from datetime import datetime, timezone
 
 from ldap3 import BASE, Connection, Server
 from ldap3.core.exceptions import LDAPException
+from ldap3.utils.conv import escape_filter_chars
+from ldap3.utils.dn import escape_rdn
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -173,11 +175,22 @@ def authenticate(config: LdapConfig, username: str, password: str) -> LdapBindRe
     mistake (missing service-bind password env var), since that's an
     admin problem, not a "this login attempt failed" outcome.
     """
+    # A DN with an *empty* password is an "unauthenticated bind" (RFC 4513): several directories answer it with
+    # success, which would let anyone in as any LDAP user by leaving the password blank. ldap3 happens to refuse it
+    # client-side, but a sign-in must never depend on that -- so refuse here, before any directory I/O.
+    if not password or not password.strip() or "\0" in password:
+        _log.warning("Refused an LDAP sign-in with an empty password for username=%r", username)
+        return None
+
     group_search_base = config.group_search_base or config.base_dn
+    # The name goes into a DN and into a search filter; escape it for each so a name holding LDAP syntax
+    # (`,` `=` `*` `(` `)` ...) can only ever be a name, never part of the query.
+    dn_name = escape_rdn(username)
+    filter_name = escape_filter_chars(username)
 
     if config.bind_method == "direct_bind":
         template = config.direct_bind_dn_template or "uid={username},{base_dn}"
-        user_dn = template.format(username=username, base_dn=config.base_dn)
+        user_dn = template.format(username=dn_name, base_dn=config.base_dn)
         conn = _bind(config.server_uri, user_dn, password)
         if conn is None:
             return None
@@ -193,7 +206,7 @@ def authenticate(config: LdapConfig, username: str, password: str) -> LdapBindRe
         if service_conn is None:
             raise LdapConfigError(f"LdapConfig {config.id!r}: service bind account itself failed to authenticate")
 
-        search_filter = config.user_search_filter.format(username=username)
+        search_filter = config.user_search_filter.format(username=filter_name)
         found = service_conn.search(search_base=config.base_dn, search_filter=search_filter, attributes=["cn"])
         if not found or not service_conn.entries:
             service_conn.unbind()
@@ -211,7 +224,7 @@ def authenticate(config: LdapConfig, username: str, password: str) -> LdapBindRe
     if config.bind_method == "upn_bind":
         if not config.upn_domain:
             raise LdapConfigError(f"LdapConfig {config.id!r}: upn_bind requires upn_domain")
-        user_dn = f"{username}@{config.upn_domain}"
+        user_dn = f"{dn_name}@{config.upn_domain}"
         conn = _bind(config.server_uri, user_dn, password)
         if conn is None:
             return None

@@ -238,10 +238,21 @@ export function nowIso(kind: DateKind, now: Date = new Date()): string {
 /** The `now()` a manager writes for a date, time or datetime default. */
 export const NOW_EXPRESSION = "now()";
 
-/** What a run-form field starts with: the parameter's default, with `now()`
- * read from the viewer's clock, or "" when it has none. */
+/** The first / last day of the month a date or datetime default is read in. */
+export const FIRST_DAY_EXPRESSION = "firstDayOfMonth()";
+export const LAST_DAY_EXPRESSION = "lastDayOfMonth()";
+
+/** What a run-form field starts with: the parameter's default, with `now()`,
+ * `firstDayOfMonth()` and `lastDayOfMonth()` read from the viewer's clock, or ""
+ * when it has none. A datetime takes 00:00 on the first day and 23:59 on the last. */
 export function initialValue(type: string, defaultValue: string | null | undefined, now: Date = new Date()): string {
   if (!defaultValue) return "";
   if (defaultValue === NOW_EXPRESSION) return type === "date" || type === "time" || type === "datetime" ? nowIso(type, now) : "";
+  if (defaultValue === FIRST_DAY_EXPRESSION || defaultValue === LAST_DAY_EXPRESSION) {
+    if (type !== "date" && type !== "datetime") return "";
+    const first = defaultValue === FIRST_DAY_EXPRESSION;
+    const day = first ? 1 : new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return toIso({ year: now.getFullYear(), month: now.getMonth() + 1, day, hour: first ? 0 : 23, minute: first ? 0 : 59, second: 0 }, type);
+  }
   return defaultValue;
 }

@@ -4,7 +4,7 @@
 #
 # Joins the external network `aksor-network`, so the app containers reach this as `redis`.
 # ./deployment.sh creates the network and starts the stacks in order; to run by hand
-# (full walkthrough: DEPLOYMENT.md):
+# (full walkthrough: docs/deployment.md, "Install it"):
 #
 #   docker network create aksor-network
 #   docker compose -p aksor-redis -f docker-compose.redis.yml up -d --wait
@@ -13,6 +13,14 @@
 #
 # Use distinct project names (-p) as above: with one shared project, `--remove-orphans`
 # on one stack would delete the others' containers.
+# Docker keeps every container's stdout forever by default; on a long-running server that fills the disk.
+# Rotate it: 5 files of 20 MB per service. (The app's own dated log files in data/logs rotate separately.)
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   # Celery's broker + result backend (api/app/celery_app.py): `api` and `scheduler`
   # enqueue job runs, `worker` consumes them. AOF persistence so queued runs
@@ -20,11 +28,18 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    logging: *default-logging
+    # REDIS_PASSWORD (in .env; `./deployment.sh init` generates one) makes Redis require it. Unset, Redis is open to
+    # every container on aksor-network, as before -- fine for a private host, but anything that can reach the queue
+    # can enqueue jobs. The app builds its REDIS_URL from the same variable.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    # Goes through the image's own entrypoint so Redis still drops to the `redis` user (a bare `sh -c` would keep root).
+    entrypoint: ["sh", "-c", "set -- redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass \"$$REDIS_PASSWORD\"}; exec docker-entrypoint.sh \"$$@\""]
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "[ -z \"$$REDIS_PASSWORD\" ] || export REDISCLI_AUTH=\"$$REDIS_PASSWORD\"; redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 10

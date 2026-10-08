@@ -42,6 +42,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import case, func, select
+from sqlalchemy import delete as sa_delete
 
 from doc_engine import ConversionError
 from doc_engine import render as doc_render
@@ -69,9 +70,11 @@ from ..models import (
     ReportUpdate,
     RunForm,
     RunRequest,
+    ShortcutCreate,
+    ShortcutOut,
 )
 from ..protected_terms_config import ProtectedTermsConfigError, resolve_protected_terms, validate_protected_terms_config
-from ..rbac import AuthContext, effective_parameter_limits, has_folder_access, has_report_access
+from ..rbac import AuthContext, _folder_ancestor_chain, can_manage_folder_contents, can_view_folder_contents, effective_parameter_limits, has_folder_access, has_report_access
 from ..render_log import record_render_event
 from ..template_fields import detect_fields
 from ..security_events import record_access_denied
@@ -166,6 +169,7 @@ async def create_report(
         description="Optional code to address this report by instead of its id "
         "(lowercase letters, digits, single hyphens; 3-64; globally unique)",
     ),
+    folder_id: str | None = Form(None, description="Resources folder to file the report in; needs manage access on it"),
     context: AuthContext = Depends(require_permission("report:manage")),
 ) -> dict:
     actor = audit.Actor.of(context, request)
@@ -179,6 +183,9 @@ async def create_report(
     # the root org, same as every other org-less thing this deployment
     # has before any real tenant is set up.
     org_id = context.org_id or rbac.ROOT_ORG_ID
+    folder_id = (folder_id or "").strip() or None
+    if folder_id is not None:
+        _check_destination_folder(context, folder_id, org_id)
 
     if template_ext == "html":
         try:
@@ -202,18 +209,31 @@ async def create_report(
         return _register(
             actor, filename, note,
             name=name, content=content, template_ext=template_ext, description=description,
-            org_id=org_id, resource_bindings=bindings or None, code=code,
+            org_id=org_id, resource_bindings=bindings or None, code=code, folder_id=folder_id,
         )
 
     if not report_store.is_valid_office_file(content, template_ext):
         raise HTTPException(status_code=400, detail=f"Uploaded file is not a valid .{template_ext}")
     return _register(
         actor, filename, note,
-        name=name, content=content, template_ext=template_ext, description=description, org_id=org_id, code=code,
+        name=name, content=content, template_ext=template_ext, description=description, org_id=org_id, code=code, folder_id=folder_id,
     )
 
 
 _CODE_TAKEN = "That code is already taken — choose another"
+
+
+def _check_destination_folder(context: AuthContext, folder_id: str, org_id: str | None) -> None:
+    """Filing a report in `folder_id` (on upload or by moving it): the folder must exist in the report's own
+    organization, and the caller needs `manage` on it -- the report permission alone doesn't let someone file
+    into a folder they can't otherwise touch. Not-found and wrong-org look the same, so ids can't be probed."""
+    with db.SessionLocal() as session:
+        folder = session.get(db.Folder, folder_id)
+        if folder is None or (org_id is not None and folder.org_id != org_id):
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if not context.is_superuser and not context.has_permission("folder:manage"):
+            if not has_folder_access(session, context, folder_id, "manage"):
+                raise HTTPException(status_code=403, detail="Missing 'manage' access on the destination folder")
 
 
 def _register(actor: audit.Actor, filename: str, note: str | None, **kwargs) -> dict:
@@ -230,7 +250,7 @@ def _register(actor: audit.Actor, filename: str, note: str | None, **kwargs) -> 
         label=created["name"], org_id=created["org_id"],
         summary=f'Registered template "{created["name"]}" (.{created["template_ext"]})',
         details={"version": 1, "sha256": version["sha256"], "size_bytes": version["size_bytes"],
-                 "original_filename": filename or None, "note": note, "code": created["code"]},
+                 "original_filename": filename or None, "note": note, "code": created["code"], "folder_id": created["folder_id"]},
     )
     return created
 
@@ -285,6 +305,26 @@ def list_accessible_reports(context: AuthContext = Depends(get_current_user)) ->
     rows = report_store.list_reports(org_id=None if context.is_superuser else context.org_id)
     visible: list[dict] = []
     with db.SessionLocal() as session:
+        paths: dict[str | None, list[dict]] = {}
+
+        def folder_path(folder_id: str | None) -> list[dict]:
+            """The folders `folder_id` sits in, outermost first, that the caller may see. Folder grants flow
+            downward, so what's visible is a tail of the chain; a hidden ancestor's name is never returned."""
+            if folder_id is None:
+                return []
+            if folder_id not in paths:
+                chain = []
+                for fid in reversed(_folder_ancestor_chain(session, folder_id)):
+                    folder = session.get(db.Folder, fid)
+                    if folder is not None and can_view_folder_contents(session, context, fid):
+                        chain.append({"id": folder.id, "name": folder.name})
+                paths[folder_id] = chain
+            return paths[folder_id]
+
+        shortcuts_by_report: dict[str, list[dict]] = {}
+        for sc in session.execute(select(db.ReportShortcut)).scalars():
+            shortcuts_by_report.setdefault(sc.report_id, []).append({"id": sc.id, "folder_id": sc.folder_id})
+
         for row in rows:
             level = "manage" if context.is_superuser else _report_access_level(session, context, row["report_id"])
             if level is None:
@@ -299,10 +339,67 @@ def list_accessible_reports(context: AuthContext = Depends(get_current_user)) ->
                     "version_label": row["version_label"],
                     "updated_at": row["updated_at"],
                     "access_level": level,
+                    "folder_path": folder_path(row.get("folder_id")),
+                    # Only for a report the caller can already open, and only in folders they may open: a
+                    # shortcut adds a place to find a report, never a way to reach one.
+                    "shortcuts": [
+                        {"id": sc["id"], "folder_path": folder_path(sc["folder_id"])}
+                        for sc in shortcuts_by_report.get(row["report_id"], [])
+                        if can_view_folder_contents(session, context, sc["folder_id"])
+                    ],
                 }
             )
     visible.sort(key=lambda r: (r["name"].lower(), r["report_id"]))
     return visible
+
+
+def _shortcut_out(sc: db.ReportShortcut) -> dict:
+    return {"id": sc.id, "report_id": sc.report_id, "folder_id": sc.folder_id, "created_at": sc.created_at}
+
+
+@router.get(
+    "/shortcuts",
+    summary="Shortcuts in folders the caller may open, for reports they hold access to",
+    response_model=list[ShortcutOut],
+)
+def list_shortcuts(context: AuthContext = Depends(get_current_user)) -> list[dict]:
+    """What the Resources screen needs to draw a folder's shortcuts. Same rule as the Reports listing: a
+    shortcut is shown only when the caller can open the original *and* the folder it is in."""
+    with db.SessionLocal() as session:
+        out = []
+        for sc in session.execute(select(db.ReportShortcut)).scalars():
+            if not can_view_folder_contents(session, context, sc.folder_id):
+                continue
+            if not context.is_superuser and _report_access_level(session, context, sc.report_id) is None:
+                continue
+            out.append(_shortcut_out(sc))
+        return out
+
+
+@router.delete("/shortcuts/{shortcut_id}", status_code=204, summary="Remove a shortcut (the original is untouched)")
+def delete_shortcut(shortcut_id: str, request: Request, context: AuthContext = Depends(get_current_user)) -> None:
+    """Allowed to whoever manages the report, or whoever manages the folder the shortcut sits in -- either may
+    take a link out of their own space. Never deletes or moves the report itself."""
+    with db.SessionLocal() as session:
+        sc = session.get(db.ReportShortcut, shortcut_id)
+        if sc is None:
+            raise HTTPException(status_code=404, detail="Shortcut not found")
+        allowed = (
+            context.is_superuser
+            or context.has_permission("report:manage")
+            or has_report_access(session, context, sc.report_id, "manage")
+            or can_manage_folder_contents(session, context, sc.folder_id)
+        )
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Missing 'manage' access on this report or on the folder")
+        folder = session.get(db.Folder, sc.folder_id)
+        report_id, folder_id, folder_name = sc.report_id, sc.folder_id, folder.name if folder else sc.folder_id
+        session.delete(sc)
+        session.commit()
+    audit.record(
+        audit.Actor.of(context, request), "report.shortcut_delete", "report", report_id,
+        summary=f'Removed the shortcut to this report from folder "{folder_name}"', details={"folder_id": folder_id},
+    )
 
 
 @router.get(
@@ -325,6 +422,48 @@ def get_report(report_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Report not found")
 
 
+@router.get("/{report_id}/shortcuts", summary="Where else a report is listed", response_model=list[ShortcutOut])
+def list_report_shortcuts(report_id: str, context: AuthContext = Depends(require_report_permission("manage"))) -> list[dict]:
+    with db.SessionLocal() as session:
+        rows = session.execute(select(db.ReportShortcut).where(db.ReportShortcut.report_id == report_id)).scalars().all()
+        return [_shortcut_out(sc) for sc in rows]
+
+
+@router.post("/{report_id}/shortcuts", summary="List a report in another folder, with its own permissions", response_model=ShortcutOut)
+def create_shortcut(
+    report_id: str, body: ShortcutCreate, request: Request, context: AuthContext = Depends(require_report_permission("manage"))
+) -> dict:
+    """A shortcut is a second place to find the report -- not a copy and not a new permission. Opening it opens the
+    original, so it needs nothing the original doesn't, and granting access to the folder it sits in does not
+    grant the report. Creating one needs `manage` on the report and `manage` on the destination folder."""
+    try:
+        report = report_store.get_report(report_id)
+    except report_store.ReportNotFoundError:
+        raise HTTPException(status_code=404, detail="Report not found")
+    _check_destination_folder(context, body.folder_id, report["org_id"])
+    if report["folder_id"] == body.folder_id:
+        raise HTTPException(status_code=400, detail="The report is already filed in that folder")
+    with db.SessionLocal() as session:
+        exists = session.execute(
+            select(db.ReportShortcut.id).where(db.ReportShortcut.report_id == report_id, db.ReportShortcut.folder_id == body.folder_id)
+        ).scalar_one_or_none()
+        if exists:
+            raise HTTPException(status_code=409, detail="There is already a shortcut to this report in that folder")
+        folder = session.get(db.Folder, body.folder_id)
+        sc = db.ReportShortcut(
+            report_id=report_id, folder_id=body.folder_id, created_by=context.user.id if context.user else None,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        session.add(sc)
+        session.commit()
+        out = _shortcut_out(sc)
+    audit.record(
+        audit.Actor.of(context, request), "report.shortcut_create", "report", report_id, label=report["name"], org_id=report["org_id"],
+        summary=f'Listed "{report["name"]}" in folder "{folder.name}" (shortcut)', details={"folder_id": body.folder_id},
+    )
+    return out
+
+
 @router.patch(
     "/{report_id}",
     summary="Update a report's name/description, or move it between Resources folders",
@@ -339,11 +478,18 @@ def update_report(
     file a report into a folder they can't otherwise touch.
     """
     folder_id_set = "folder_id" in body.model_fields_set
-    if folder_id_set and body.folder_id is not None and not context.is_superuser:
-        if not context.has_permission("folder:manage"):
-            with db.SessionLocal() as session:
-                if not has_folder_access(session, context, body.folder_id, "manage"):
-                    raise HTTPException(status_code=403, detail="Missing 'manage' access on the destination folder")
+    if folder_id_set and body.folder_id is not None:
+        try:
+            report_org = report_store.get_report(report_id)["org_id"]
+        except report_store.ReportNotFoundError:
+            raise HTTPException(status_code=404, detail="Report not found")
+        _check_destination_folder(context, body.folder_id, report_org)
+        # Filing the report where one of its own shortcuts already is makes that shortcut redundant.
+        with db.SessionLocal() as session:
+            session.execute(
+                sa_delete(db.ReportShortcut).where(db.ReportShortcut.report_id == report_id, db.ReportShortcut.folder_id == body.folder_id)
+            )
+            session.commit()
 
     try:
         before = report_store.get_report(report_id)

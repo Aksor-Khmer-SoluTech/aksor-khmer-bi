@@ -16,8 +16,10 @@ services:
     tty: true
     stdin_open: true
     working_dir: /app/aksor-khmer-bi
-    # No systemd in a container, so start the inner daemon here and keep the container alive.
-    command: ["sh", "-c", "dockerd >/var/log/dockerd.log 2>&1 & exec sleep infinity"]
+    # No systemd in a container, so start the inner daemon here and keep the container alive. The pid/socket files
+    # are removed first: after the container is stopped and started again they are still there (the container's
+    # filesystem survives), and dockerd refuses to start with "process with PID 7 is still running".
+    command: ["sh", "-c", "rm -f /var/run/docker.pid /var/run/docker.sock; dockerd >/var/log/dockerd.log 2>&1 & exec sleep infinity"]
     volumes:
       - ../..:/app/aksor-khmer-bi
       - dind:/var/lib/docker   # overlay can't nest on the container's own overlay filesystem

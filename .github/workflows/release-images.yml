@@ -2,7 +2,7 @@ name: Release images
 
 # Pushing a version tag (git tag v1.0.2 && git push origin v1.0.2) builds the images and publishes them to
 # GitHub Container Registry as ghcr.io/<owner>/aksor-khmer-bi-{engine,portal,jdbc-worker}:<version>.
-# Servers then deploy them with AKSOR_VERSION=<version> ./deployment.sh up --from-registry -- no build, no Node.
+# Servers then deploy them with AKSOR_VERSION=<version> ./deployment.sh up -- no build, no Node.
 # After the first publish, set each package to Public (GitHub -> Packages -> package settings) so pulls need no login.
 on:
   push:
@@ -13,7 +13,12 @@ permissions:
   packages: write
 
 jobs:
+  # A tag never publishes images for a commit whose tests fail: the whole CI workflow runs first.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -47,4 +52,7 @@ jobs:
           file: ${{ matrix.file }}
           platforms: linux/amd64
           push: true
+          # Build provenance and a software bill of materials, attached to each image in the registry.
+          provenance: true
+          sbom: true
           tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}

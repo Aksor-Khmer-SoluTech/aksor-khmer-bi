@@ -73,6 +73,18 @@ export interface AccessibleReport {
   version_label: string | null;
   updated_at: string;
   access_level: ReportAccessLevel;
+  /** The Resources folders it is filed in, outermost first -- only those the viewer may open. */
+  folder_path: { id: string; name: string }[];
+  /** Other folders it is listed in -- links to this report, carrying its access and no more. */
+  shortcuts: { id: string; folder_path: { id: string; name: string }[] }[];
+}
+
+/** A report listed in a second folder (see api/app/db/folders.py's ReportShortcut). */
+export interface ReportShortcut {
+  id: string;
+  report_id: string;
+  folder_id: string;
+  created_at: string;
 }
 
 // --- Filter parameters, data source, and the end-user run form ------------
@@ -609,6 +621,8 @@ export interface Folder {
   parent_folder_id: string | null;
   name: string;
   description: string | null;
+  /** From the folder list: whether the viewer may file reports into it. */
+  can_manage?: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -892,4 +906,6 @@ export interface MyDashboard {
   last_run_at: string | null;
   recent: MyRun[];
   top_reports: { report_id: string; name: string | null; runs: number }[];
+  /** The last 30 UTC days, oldest first, zero-filled. */
+  daily: { date: string; runs: number; failed: number }[];
 }

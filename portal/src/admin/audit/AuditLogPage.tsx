@@ -20,7 +20,7 @@ const PAGE_SIZE = 50;
 // finds every user.* change) -- this list is only the autocomplete.
 const KNOWN_ACTIONS = [
   "report.create", "report.update", "report.file_replace", "report.template_download", "report.data_config_update", "report.run", "report.run_failed",
-  "report.terms_config_update", "report.access_grant", "report.access_revoke", "report.delete",
+  "report.terms_config_update", "report.access_grant", "report.access_revoke", "report.delete", "report.shortcut_create", "report.shortcut_delete",
   "user.create", "user.update", "user.password_reset", "user.password_change", "user.totp_reset", "user.totp_enable",
   "user.totp_disable", "user.role_grant", "user.role_revoke", "user.permission_grant", "user.permission_revoke",
   "role.create", "role.permissions_update", "role.delete", "organization.create",

@@ -4,6 +4,7 @@ import { api, ApiError } from "../api";
 import { onDialogCancel, useDialogRef } from "../hooks";
 import { checkCode, isCodeError, suggestCode } from "../reportCode";
 import type { AuthInfo, ImageResource, ParsedTemplate, ReportMeta, ResourceBinding, StylesheetResource } from "../types";
+import FolderPicker from "./FolderPicker";
 import ReportCodeField from "./ReportCodeField";
 
 import ModalClose from "./ModalClose";
@@ -157,6 +158,7 @@ export default function RegisterDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [code, setCode] = useState("");
+  const [folderId, setFolderId] = useState<string | null>(null);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -283,7 +285,7 @@ export default function RegisterDialog({
     setError(null);
     setCodeError(null);
     try {
-      const report = await api.createReport(name, description, file, isHtml ? resourceMap : undefined, code);
+      const report = await api.createReport(name, description, file, isHtml ? resourceMap : undefined, code, folderId);
       onCreated(report);
       onClose();
     } catch (err) {
@@ -317,6 +319,8 @@ export default function RegisterDialog({
           </span>
           <input type="text" required maxLength={NAME_MAX} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
+
+        <FolderPicker value={folderId} onChange={setFolderId} />
 
         <ReportCodeField
           value={code}

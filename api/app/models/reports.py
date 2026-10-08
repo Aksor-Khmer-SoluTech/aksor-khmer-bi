@@ -260,6 +260,30 @@ class BatchLimits(BaseModel):
     seconds_per_record: dict[str, float]
 
 
+class FolderRef(BaseModel):
+    id: str
+    name: str
+
+
+class ShortcutCreate(BaseModel):
+    folder_id: str = Field(..., description="The folder to list the report in as well")
+
+
+class ShortcutOut(BaseModel):
+    id: str
+    report_id: str
+    folder_id: str
+    created_at: str
+
+
+class ShortcutPlace(BaseModel):
+    """Where else an accessible report is listed: the folders (outermost first, only those the caller may open)
+    ending at the one that holds the shortcut."""
+
+    id: str
+    folder_path: list[FolderRef]
+
+
 class AccessibleReport(BaseModel):
     """One row of GET /reports/accessible -- the portal's end-user
     "Reports" page. Deliberately leaner than ReportMeta: no sample_context,
@@ -277,6 +301,16 @@ class AccessibleReport(BaseModel):
     updated_at: str
     access_level: Literal["view", "render", "manage"] = Field(
         ..., description="The highest level the caller holds on this report -- via a global report:* permission, a report grant, or a folder grant"
+    )
+    folder_path: list[FolderRef] = Field(
+        default_factory=list,
+        description="The report's Resources folders, outermost first -- only those the caller may see, so a folder they "
+        "can't open never has its name revealed here. Empty: the report sits at the root, or in a folder hidden from them",
+    )
+    shortcuts: list[ShortcutPlace] = Field(
+        default_factory=list,
+        description="Other folders the report is listed in. A shortcut carries the original's access and no more: "
+        "it only appears for someone who already has access to the report, in folders they may open",
     )
 
 

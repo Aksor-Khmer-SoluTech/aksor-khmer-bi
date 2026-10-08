@@ -51,6 +51,7 @@ size-capped.
 """
 from __future__ import annotations
 
+import calendar
 import copy
 import json
 import logging
@@ -59,6 +60,7 @@ import re
 from datetime import date, datetime, time, timezone
 from typing import Any, Callable
 from urllib.parse import quote
+from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -87,6 +89,13 @@ _DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$")
 # moment the report is run" -- see resolve_default.
 NOW_EXPRESSION = "now()"
 _NOW_TYPES = {"date", "datetime", "time"}
+# ...and these mean the first / last day of the month the report is run in. A
+# time has no day, so they only apply to date and datetime (a datetime reads
+# 00:00 on the first day and 23:59 on the last).
+FIRST_DAY_EXPRESSION = "firstDayOfMonth()"
+LAST_DAY_EXPRESSION = "lastDayOfMonth()"
+_MONTH_EXPRESSIONS = {FIRST_DAY_EXPRESSION, LAST_DAY_EXPRESSION}
+_MONTH_TYPES = {"date", "datetime"}
 # What a connection is called in a report's config: same shape as a report code.
 CONNECTION_NAME_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 MAX_CONNECTION_NAME_LENGTH = 64
@@ -157,7 +166,8 @@ def validate_data_config(
 
 def _validate_default(name: str, type_: str, raw: Any) -> str | None:
     """A free-text parameter's default: a literal of the parameter's type, or
-    `now()` on a date/datetime/time one. Blank means no default."""
+    `now()` on a date/datetime/time one, or `firstDayOfMonth()` /
+    `lastDayOfMonth()` on a date/datetime one. Blank means no default."""
     if raw is None:
         return None
     default = str(raw).strip()
@@ -169,9 +179,15 @@ def _validate_default(name: str, type_: str, raw: Any) -> str | None:
         if type_ not in _NOW_TYPES:
             raise DataConfigError(f"{name!r} is {type_} input, so it can't default to now() -- that only works for date, datetime and time")
         return NOW_EXPRESSION
+    compact = re.sub(r"\s+", "", default).lower()
+    for expression in _MONTH_EXPRESSIONS:
+        if compact in (expression.lower(), expression.lower().removesuffix("()")):
+            if type_ not in _MONTH_TYPES:
+                raise DataConfigError(f"{name!r} is {type_} input, so it can't default to {expression} -- that only works for date and datetime")
+            return expression
     if not _value_is_real(default, type_):
         example = {"number": "12.5", "date": "2026-09-30", "datetime": "2026-09-30T08:00", "time": "08:00"}[type_]
-        raise DataConfigError(f"The default value for {name!r} isn't a valid {type_} -- write it like {example}" + (", or use now()" if type_ in _NOW_TYPES else ""))
+        raise DataConfigError(f"The default value for {name!r} isn't a valid {type_} -- write it like {example}" + (", or use now()" if type_ in _NOW_TYPES else "") + (", firstDayOfMonth() or lastDayOfMonth()" if type_ in _MONTH_TYPES else ""))
     return default
 
 
@@ -645,14 +661,24 @@ def _report_timezone():
 def resolve_default(definition: dict, now: datetime | None = None) -> str | None:
     """A parameter's default as the value a run would use: its literal, or --
     for `now()` on a date/datetime/time parameter -- the current date, time or
-    both, in the shape the matching browser control submits. None = no default."""
+    both, in the shape the matching browser control submits. `firstDayOfMonth()`
+    and `lastDayOfMonth()` give that day of the current month. None = no default."""
     default = definition.get("default_value")
     if default is None or default == "":
         return None
-    if default != NOW_EXPRESSION:
+    if default not in (NOW_EXPRESSION, *_MONTH_EXPRESSIONS):
         return default
     moment = now or datetime.now(_report_timezone())
     type_ = definition.get("type", "text")
+    if default in _MONTH_EXPRESSIONS:
+        if type_ not in _MONTH_TYPES:
+            return None
+        if default == FIRST_DAY_EXPRESSION:
+            day, clock = 1, "00:00"
+        else:
+            day, clock = calendar.monthrange(moment.year, moment.month)[1], "23:59"
+        stamp = f"{moment.year:04d}-{moment.month:02d}-{day:02d}"
+        return stamp if type_ == "date" else f"{stamp}T{clock}"
     if type_ == "date":
         return moment.strftime("%Y-%m-%d")
     if type_ == "time":
@@ -724,8 +750,26 @@ def _make_client() -> httpx.Client:
     return httpx.Client(timeout=TIMEOUT_SECONDS, follow_redirects=False)
 
 
-def _render_value(value: Any, env: Environment, params: dict[str, str]) -> Any:
+def _body_escaper(headers: dict[str, str] | None) -> Callable[[str], str]:
+    """How a filter value is made safe inside a *raw string* request body, by the
+    body's declared Content-Type: a JSON string, XML text or a urlencoded form
+    value can't then break out of its slot and add structure (a `"`, a `<`, an
+    `&`). A structured (dict/list) body needs none -- it is serialised whole. A
+    body of any other type is sent as the plain text it is."""
+    content_type = next((v for k, v in (headers or {}).items() if k.lower() == "content-type"), "").lower()
+    if "json" in content_type:
+        return lambda v: json.dumps(v, ensure_ascii=False)[1:-1]
+    if "xml" in content_type or "html" in content_type:
+        return lambda v: xml_escape(v, {'"': "&quot;", "'": "&apos;"})
+    if "x-www-form-urlencoded" in content_type:
+        return lambda v: quote(v, safe="")
+    return lambda v: v
+
+
+def _render_value(value: Any, env: Environment, params: dict[str, str], raw_escape: Callable[[str], str] | None = None) -> Any:
     if isinstance(value, str):
+        if raw_escape is not None:
+            return env.from_string(value).render(**{k: raw_escape(v) for k, v in params.items()})
         return env.from_string(value).render(**params)
     if isinstance(value, dict):
         return {k: _render_value(v, env, params) for k, v in value.items()}
@@ -774,7 +818,8 @@ def fetch_report_data(data_source: dict, params: dict[str, str], types: dict[str
     # (they land inside JSON string values, which is structure-safe).
     try:
         url = env.from_string(data_source["url"]).render(**{k: quote(v, safe="") for k, v in params.items()})
-        body = _render_value(data_source.get("body_template"), env, params)
+        template = data_source.get("body_template")
+        body = _render_value(template, env, params, _body_escaper(data_source.get("headers")) if isinstance(template, str) else None)
     except UndefinedError as exc:
         # Saved config is validated against the parameters, but the two are
         # edited separately, so a filter can be renamed away from under it.

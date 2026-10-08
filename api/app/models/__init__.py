@@ -4,7 +4,7 @@ Every name is re-exported here so every existing `from ..models import X`
 import across the routers keeps working unchanged -- this split only
 reorganizes where each class *lives*, not how callers reach it.
 """
-from .analytics import JobsSummary, MyDashboard, MyRun, MyTopReport, ReportRenderStats, SecurityActivityItem
+from .analytics import JobsSummary, MyDashboard, MyDay, MyRun, MyTopReport, ReportRenderStats, SecurityActivityItem
 from .reports import VersionUpdate
 from .audit import AuditEventOut, AuditPage, ChangelogEntry, ReportChangelog, ReportVersionOut
 from .auth import AuthEventOut, AuthVerifyOut, LoginRequest, SessionOut, TokenOut
@@ -84,6 +84,8 @@ from .reports import (
     ReportParameter,
     ReportSchema,
     ReportUpdate,
+    ShortcutCreate,
+    ShortcutOut,
     ResourceBinding,
     RunForm,
     RunFormParameter,
@@ -167,6 +169,7 @@ __all__ = [
     "ReportMeta",
     "ReportParameter",
     "MyDashboard",
+    "MyDay",
     "MyRun",
     "MyTopReport",
     "ReportRenderStats",
@@ -174,6 +177,8 @@ __all__ = [
     "ReportVersionOut",
     "VersionUpdate",
     "ReportUpdate",
+    "ShortcutCreate",
+    "ShortcutOut",
     "RestConnectionConfig",
     "ResourceBinding",
     "RunForm",

@@ -350,7 +350,8 @@
   position: absolute;
   bottom: calc(100% + 8px);
   left: 50%;
-  transform: translate(-50%, 4px);
+  /* --tip-shift is set by tooltips.ts when the centred pill would run off the window's edge. */
+  transform: translate(calc(-50% + var(--tip-shift, 0px)), 4px);
   background: var(--text);
   color: var(--bg);
   font-size: 0.7rem;
@@ -370,7 +371,13 @@
 [data-tip]:hover::after,
 [data-tip]:focus-visible::after {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translate(calc(-50% + var(--tip-shift, 0px)), 0);
+}
+
+/* No room above the control (it's at the top of the window): show the pill beneath it. */
+[data-tip][data-tip-below]::after {
+  bottom: auto;
+  top: calc(100% + 8px);
 }
 
 .empty-state .link-btn {
@@ -4057,4 +4064,494 @@ textarea[readonly] {
 
 .star-btn.starred {
   color: #d99a1c;
+}
+
+/* ---- home dashboard ---------------------------------------------------------
+   A 12-column grid of cards the person can reorder (HomePage.tsx, homeLayout.ts).
+   Everything is built from the existing tokens, so the accent, dark mode and
+   density settings carry through. */
+
+.home-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+  padding: 22px 26px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(120% 140% at 0% 0%, var(--accent-soft) 0%, transparent 60%),
+    var(--bg-raised);
+  box-shadow: var(--shadow-card);
+}
+
+.home-hero .page-title,
+.home-hero .page-subtitle {
+  margin-bottom: 0;
+}
+
+.home-eyebrow {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.home-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 18px;
+  align-items: stretch;
+}
+
+.home-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 18px 20px 20px;
+  min-width: 0;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+  will-change: transform;
+}
+
+.home-card:hover {
+  border-color: var(--border);
+}
+
+/* The card left behind in the grid while its twin follows the pointer. */
+.home-card.placeholder {
+  opacity: 0.45;
+  border-style: dashed;
+  border-color: var(--accent-border);
+  box-shadow: none;
+  background: var(--accent-soft);
+}
+
+.home-card.placeholder > * {
+  visibility: hidden;
+}
+
+/* The card in the DragOverlay: lifted, slightly larger, always grabbing. */
+.home-card.overlay {
+  cursor: grabbing;
+  box-shadow: var(--shadow-pop);
+  border-color: var(--accent-border);
+  transform: scale(1.015);
+  transform-origin: center;
+}
+
+.home-card.overlay .home-grip {
+  opacity: 1;
+  cursor: grabbing;
+}
+
+.span-12 { grid-column: span 12; }
+.span-8 { grid-column: span 8; }
+.span-6 { grid-column: span 6; }
+.span-4 { grid-column: span 4; }
+
+@media (max-width: 960px) {
+  .span-8, .span-6, .span-4 { grid-column: span 12; }
+}
+
+.home-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.home-card-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  flex: none;
+}
+
+.home-card-title {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.home-grip {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.home-card:hover .home-grip,
+.home-grip:focus-visible {
+  opacity: 1;
+}
+
+.home-grip:hover {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+@media (hover: none) {
+  .home-grip { opacity: 1; }
+}
+
+.home-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.home-kpi {
+  padding: 14px 16px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--bg-raised), var(--bg-panel));
+}
+
+.home-kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.home-kpi.danger .stat-number,
+.home-kpi.danger svg {
+  color: var(--danger);
+}
+
+.home-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 28px;
+  margin-top: 10px;
+}
+
+.home-spark span {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.home-spark span.on {
+  background: var(--accent);
+}
+
+.home-kpi.danger .home-spark span.on {
+  background: var(--danger);
+}
+
+.home-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 180px;
+  padding-top: 4px;
+  background: repeating-linear-gradient(to top, transparent 0, transparent calc(25% - 1px), var(--border-soft) calc(25% - 1px), var(--border-soft) 25%);
+}
+
+.home-bar {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.home-bar:hover {
+  filter: brightness(1.12);
+}
+
+.home-bar .ok { background: var(--accent); min-height: 0; }
+.home-bar .fail { background: var(--danger); }
+.home-bar .ok, .home-bar .fail { display: block; }
+
+.home-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.home-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-shortcut {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.home-line {
+  padding: 9px 0;
+}
+
+.home-line + .home-line,
+.home-run-row + .home-run-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.home-run-row {
+  padding: 9px 0;
+}
+
+.home-share {
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.home-share span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-card, .home-grip { transition: none; }
+}
+
+/* ---- reports: tree view ------------------------------------------------------
+   Folders nest with a guide line down the left of each level; a folder's body
+   collapses by animating its grid row from 1fr to 0fr (no measured heights). */
+
+.rtree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rtree-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.rtree-folder:hover:not(:disabled) {
+  background: var(--bg-panel);
+}
+
+.rtree-folder:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.rtree-folder svg:not(.rtree-chevron) {
+  color: var(--accent-strong);
+  flex: none;
+}
+
+.rtree-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.rtree-node.open > .rtree-folder .rtree-chevron {
+  transform: rotate(90deg);
+}
+
+.rtree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rtree-count {
+  flex: none;
+  min-width: 22px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.rtree-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.rtree-node.open > .rtree-body {
+  grid-template-rows: 1fr;
+}
+
+.rtree-children {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 20px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+
+.rtree-node.open > .rtree-body > .rtree-children {
+  padding-top: 6px;
+  padding-bottom: 2px;
+}
+
+.rtree-leaf .list-row {
+  padding: 10px 14px;
+}
+
+.rtree-divider {
+  margin: 14px 4px 4px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rtree-body, .rtree-chevron { transition: none; }
+}
+
+/* A report listed in a second folder: a quiet chip saying where the original lives. */
+.shortcut-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-row-title {
+  flex-wrap: wrap;
+}
+
+.shortcuts-field {
+  margin-top: 4px;
+}
+
+/* Preview tab: Live run / Sample data, and the report's filters laid out in a responsive grid. */
+/* Preview: the mode switch and the run buttons share one row, the buttons right after the switch. */
+.preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* The Preview buttons keep their own width (`.row` would stretch each to fill the line). */
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.preview-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px 18px;
+  margin-bottom: 14px;
+}
+
+.shortcut-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shortcut-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+}
+
+.shortcut-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.shortcut-add {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.shortcut-add label {
+  flex: 1;
+  margin: 0;
 }

@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
 import { has } from "../admin/sections";
 import { FolderIcon, ImageIcon, TemplatesIcon } from "../admin/icons";
-import type { AuthInfo, Folder, ImageResource, ReportMeta } from "../types";
+import type { AuthInfo, Folder, ImageResource, ReportMeta, ReportShortcut } from "../types";
 import FolderGrantsDialog from "./FolderGrantsDialog";
 import ResourceTree from "./ResourceTree";
 import ResourceContentPane from "./ResourceContentPane";
@@ -31,6 +31,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
   const [folders, setFolders] = useState<Folder[] | null>(null);
   const [reports, setReports] = useState<ReportMeta[] | null>(null);
   const [images, setImages] = useState<ImageResource[] | null>(null);
+  const [shortcuts, setShortcuts] = useState<ReportShortcut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -49,11 +50,12 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
   const canManageRoot = has(auth, "folder:manage") || auth.isSuperuser;
 
   function load() {
-    Promise.all([api.folders.list(), api.listReports(), api.images.list()])
-      .then(([f, r, i]) => {
+    Promise.all([api.folders.list(), api.listReports(), api.images.list(), api.listShortcuts().catch(() => [])])
+      .then(([f, r, i, s]) => {
         setFolders(f);
         setReports(r);
         setImages(i);
+        setShortcuts(s);
       })
       .catch(() => setError("Couldn't load Resources — is the API reachable?"));
   }
@@ -76,6 +78,23 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
 
   const reportsInFolder = (reports ?? []).filter((r) => r.folder_id === selectedFolderId);
   const imagesInFolder = (images ?? []).filter((i) => i.folder_id === selectedFolderId);
+  // A shortcut is a link to a report filed somewhere else, so it shows the original's details.
+  const shortcutsInFolder = shortcuts
+    .filter((s) => s.folder_id === selectedFolderId)
+    .flatMap((s) => {
+      const report = (reports ?? []).find((r) => r.report_id === s.report_id);
+      return report ? [{ shortcut: s, report }] : [];
+    });
+
+  async function removeShortcut(id: string) {
+    setMoveError(null);
+    try {
+      await api.deleteShortcut(id);
+      setShortcuts((prev) => prev.filter((s) => s.id !== id));
+    } catch (err) {
+      setMoveError(err instanceof ApiError ? err.message : "Couldn't remove the shortcut");
+    }
+  }
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
@@ -217,6 +236,8 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
             folder={selectedFolder}
             reports={reportsInFolder}
             images={imagesInFolder}
+            shortcuts={shortcutsInFolder}
+            onRemoveShortcut={removeShortcut}
             canManage={canManageSelected}
             orgId={auth.orgId ?? "root"}
             onImageUploaded={(img) => setImages((prev) => [...(prev ?? []), img])}
