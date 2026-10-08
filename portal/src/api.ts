@@ -22,6 +22,10 @@ import type {
   DeploymentTerms,
   EffectivePermissions,
   Folder,
+  FontBlock,
+  FontResource,
+  InstalledFont,
+  TemplateFont,
   ReportShortcut,
   Grant,
   ImageResource,
@@ -549,6 +553,11 @@ export const api = {
 
   getSchema(id: string): Promise<ReportSchema> {
     return getJSON(`/reports/${id}/schema`);
+  },
+
+  /** The fonts a template names, and whether the server has each one. */
+  getReportFonts(id: string): Promise<TemplateFont[]> {
+    return getJSON(`/reports/${id}/fonts`);
   },
 
   createReport(
@@ -1259,6 +1268,37 @@ export const api = {
     },
     delete(id: string): Promise<void> {
       return del(`/folders/${id}`, "Delete failed");
+    },
+  },
+
+  // --- Fonts: server-wide, added without redeploying (api/app/routers/fonts.py) ---
+  fonts: {
+    list(): Promise<FontResource[]> {
+      return getJSON("/fonts");
+    },
+    installed(): Promise<InstalledFont[]> {
+      return getJSON("/fonts/installed");
+    },
+    upload(file: File, note: string): Promise<FontResource> {
+      const form = new FormData();
+      form.set("file", file);
+      if (note.trim()) form.set("note", note.trim());
+      return apiFetch("/fonts", { method: "POST", body: form }).then((r) => asJson<FontResource>(r));
+    },
+    coverage(id: string): Promise<FontBlock[]> {
+      return getJSON(`/fonts/${id}/coverage`);
+    },
+    delete(id: string, force = false): Promise<void> {
+      return del(`/fonts/${id}${force ? "?force=true" : ""}`, "Delete failed");
+    },
+    // Like images: the token is a header this app attaches, so the preview fetches the bytes itself.
+    async fileBlob(id: string): Promise<Blob> {
+      const resp = await apiFetch(`/fonts/${id}/file`);
+      if (!resp.ok) {
+        const body: ApiErrorBody = await resp.json().catch(() => ({}));
+        throw new ApiError(resp.status, body.detail || `Couldn't load the font (${resp.status})`);
+      }
+      return resp.blob();
     },
   },
 

@@ -22,6 +22,7 @@ from .routers import (
     connections,
     example_lookups,
     folders,
+    fonts,
     grants,
     images,
     jdbc,
@@ -135,6 +136,7 @@ app.include_router(audit.router)
 app.include_router(protected_term_sets.router)
 app.include_router(secrets.router)
 app.include_router(jdbc.router)
+app.include_router(fonts.router)
 
 
 @app.get("/api/v1/health", tags=["health"], summary="Liveness check")

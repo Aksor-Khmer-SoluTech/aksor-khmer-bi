@@ -54,7 +54,7 @@ BACKUP_KEEP="${BACKUP_KEEP:-14}"
 # tar, gzip and chown, so the Postgres image -- already on this machine once the stack is up -- will do.
 BACKUP_HELPER_IMAGE="${BACKUP_HELPER_IMAGE:-postgres:16-alpine}"
 # Everything the api writes outside the database (all bind-mounted in docker-compose.yml).
-DATA_DIRS=(data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/jdbc_drivers)
+DATA_DIRS=(data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/jdbc_drivers data/font_resources)
 
 c_red=$'\033[31m'; c_grn=$'\033[32m'; c_ylw=$'\033[33m'; c_off=$'\033[0m'
 [ -t 1 ] || { c_red=; c_grn=; c_ylw=; c_off=; }

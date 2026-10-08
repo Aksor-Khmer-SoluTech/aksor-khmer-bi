@@ -308,6 +308,27 @@ compose -f docker-compose.yml -f docker-compose.ldap-dev.yml up -d openldap`
 then `./scripts/seed-ldap-dev.sh` — see that compose file's header
 comment for the seeded test users/groups.
 
+### Fonts (`/api/v1/fonts`)
+
+Fonts added at runtime, for the whole server (not per organization). Adding and removing need `font:manage`
+(system administrators by default); listing, reading and previewing need that or `report:manage`.
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/api/v1/fonts` | the added fonts, each with identity, version, Khmer/Latin coverage, layout-table flag, license, warnings and `used_by` (the templates that name its family) |
+| POST | `/api/v1/fonts` | add one (`multipart/form-data`: `file` = a `.ttf`/`.otf`, optional `note`); `400` for anything that isn't a usable font, `409` for the same file or the same family + style twice; warnings in the body |
+| GET | `/api/v1/fonts/{id}`, `/file`, `/coverage` | one font; its bytes (for previewing); which characters it has, block by block |
+| GET | `/api/v1/fonts/installed` | every family the server can draw with, `uploaded` or `system` |
+| DELETE | `/api/v1/fonts/{id}` | remove it — `409` while a template names it, unless `?force=true` |
+| GET | `/api/v1/reports/{id}/fonts` | the fonts a template names, each `uploaded`, `installed`, `substituted` or `missing` |
+
+Files live in `data/font_resources/<id>.ttf|otf` (mounted into `api` and, read-only, `worker`; back it up with `data/`).
+`DOC_ENGINE_FONT_DIRS` points the renderers at that folder: LibreOffice gets the fonts per conversion (linked into its
+throw-away profile), WeasyPrint as inlined `@font-face` rules, charts through matplotlib — so an upload applies to the
+next render, with no restart. Uploads are checked by their own signature and read with fontTools (pure Python), capped by
+`FONT_MAX_MB` (default 20). **Note:** LibreOffice for macOS ignores a profile's `user/fonts`, so on a Mac development
+machine install fonts for `.docx` in `~/Library/Fonts`; the Docker image (Linux) is unaffected.
+
 ### Resources: folder tree, images (`/api/v1/folders`, `/api/v1/images`)
 
 A JasperReports-Server-style repository: nested folders hold report

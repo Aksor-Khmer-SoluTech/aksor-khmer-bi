@@ -909,3 +909,54 @@ export interface MyDashboard {
   /** The last 30 UTC days, oldest first, zero-filled. */
   daily: { date: string; runs: number; failed: number }[];
 }
+
+// --- Fonts (Resources > Fonts) -- see api/app/routers/fonts.py ---------------
+
+/** A font added at runtime: installed for the whole server, drawn by every rendering path. */
+export interface FontResource {
+  id: string;
+  family: string;
+  subfamily: string;
+  full_name: string;
+  postscript_name: string;
+  version: string;
+  weight: number;
+  italic: boolean;
+  glyph_count: number;
+  khmer_coverage: number;
+  latin_coverage: number;
+  has_layout_tables: boolean;
+  copyright: string;
+  license: string;
+  license_url: string;
+  embedding: string;
+  note: string;
+  filename: string;
+  file_ext: "ttf" | "otf";
+  sha256: string;
+  size_bytes: number;
+  created_at: string;
+  used_by: string[];
+  warnings: string[];
+  shadows_installed: boolean;
+}
+
+export interface InstalledFont {
+  family: string;
+  source: "uploaded" | "system";
+}
+
+export interface FontBlock {
+  name: string;
+  start: number;
+  end: number;
+  present: number[];
+  missing: number[];
+}
+
+/** A font a template names, and whether the server has it. */
+export interface TemplateFont {
+  name: string;
+  status: "uploaded" | "installed" | "substituted" | "missing";
+  resolved_to: string | null;
+}

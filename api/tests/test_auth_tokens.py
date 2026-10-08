@@ -450,6 +450,15 @@ def test_sign_in_attempts_are_throttled_per_account_and_per_address(http, make_l
 # --- the schema check at startup ---------------------------------------------------------------------
 
 
+def _head_revision() -> str:
+    """The newest migration -- read from the migrations folder, so adding one doesn't break these tests."""
+    from alembic.script import ScriptDirectory
+
+    from app import schema_check
+
+    return ScriptDirectory(str(schema_check._MIGRATIONS)).get_current_head()
+
+
 def test_a_database_on_a_squashed_away_migration_is_called_out_with_the_fix(tmp_path, monkeypatch, caplog):
     import logging
 
@@ -465,7 +474,7 @@ def test_a_database_on_a_squashed_away_migration_is_called_out_with_the_fix(tmp_
 
     with caplog.at_level(logging.ERROR, logger="aksor_khmer_bi.schema"):
         message = schema_check.check_schema_version()
-    assert "0004_jdbc_drivers" in message and "stamp --purge 0002_report_shortcuts" in message
+    assert "0004_jdbc_drivers" in message and f"stamp --purge {_head_revision()}" in message
     assert any("squashed" in record.message for record in caplog.records)
 
 
@@ -481,7 +490,7 @@ def test_a_current_or_alembic_less_database_is_left_alone(tmp_path, monkeypatch)
     engine = create_engine(f"sqlite:///{tmp_path / 'ok.db'}")
     with engine.begin() as conn:
         conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-        conn.execute(text("INSERT INTO alembic_version VALUES ('0002_report_shortcuts')"))
+        conn.execute(text(f"INSERT INTO alembic_version VALUES ('{_head_revision()}')"))
     monkeypatch.setattr(db, "engine", engine)
     assert schema_check.check_schema_version() is None
 

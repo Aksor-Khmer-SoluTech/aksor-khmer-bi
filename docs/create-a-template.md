@@ -559,6 +559,32 @@ Every `href`/`src` must be exactly one `resource('…')` call; anything else (a 
 URL, a relative path) is rejected at registration. At register time you map each name to
 an uploaded resource. Rendering never touches the network.
 
+### 6.5 Fonts
+
+A template **names** its fonts; it doesn't carry them (the sample `.docx` files hold no font data). Whatever the
+server has installed is what the PDF is drawn with — so a font the server lacks is replaced by another, and line
+breaks, widths and the page count change. Check before you rely on a font:
+
+- **See what a template names:** the template's **Placeholders** tab ends with *Fonts it names*, each marked
+  **Installed**, **Added** (under Resources → Fonts), **Substituted** (not installed, but a metric-compatible font
+  such as Liberation Serif stands in for "Times New Roman", so the layout holds) or **Missing** (no match: the
+  renderer picks a default and the layout can change).
+- **Add a font without redeploying:** **Admin → Resources → Fonts → Add font** (a `.ttf` or `.otf`; needs the
+  `font:manage` permission, which system administrators have). It is installed for the **whole server**: the next render of
+  *every* organization's templates that name the font's family uses it — LibreOffice for `.docx`, WeasyPrint for
+  `.html`, and charts — with no restart. A template names it by the **family** shown in the list (`Noto Sans Khmer`),
+  exactly as Word shows it.
+- **Verify it first.** Opening a font shows who made it and which version, how much of the Khmer block it covers,
+  whether it has the layout tables Khmer needs (GSUB/GPOS), what its license says (and whether the license forbids
+  embedding it in PDFs), a sample you can type into, and **every character it has**, drawn with the font itself. Two files can't both be the
+  same family and style, so replacing a font means removing the old one first (Aksor warns if templates still name
+  it). A font whose family the server already has is accepted with a warning — which of the two a render uses is up to the
+  operating system, so check the result, or give it its own family name.
+- **Charts** use the Khmer font plus DejaVu; a chart spec may name another with `"font": "Noto Sans Khmer"`.
+
+Exact files matter: two versions of "the same" font can lay a Khmer paragraph out differently (different glyphs and
+line metrics). Keep the version your layouts were designed with, and note where it came from in the *Note* box.
+
 ---
 
 ## 7. Use cases

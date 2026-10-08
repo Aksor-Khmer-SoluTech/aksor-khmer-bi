@@ -28,7 +28,7 @@ const KNOWN_ACTIONS = [
   "ldap_config.mapping_remove", "protected_term_set.create", "protected_term_set.update", "protected_term_set.delete",
   "deployment_terms.change", "job.create", "job.update", "job.delete",
   "folder.create", "folder.update", "folder.move", "folder.delete", "folder.access_grant", "folder.access_revoke",
-  "image.upload", "image.delete", "stylesheet.upload", "stylesheet.delete",
+  "font.upload", "font.delete", "image.upload", "image.delete", "stylesheet.upload", "stylesheet.delete",
 ];
 
 const startOfDay = (d: string) => (d ? new Date(`${d}T00:00:00`).toISOString() : undefined);

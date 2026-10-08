@@ -4555,3 +4555,265 @@ textarea[readonly] {
   flex: 1;
   margin: 0;
 }
+
+/* ---- Resources > Fonts ------------------------------------------------------ */
+
+.fonts-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.fonts-panel .panel > .spread {
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.fonts-panel .panel > .spread > .fonts-upload {
+  margin-left: auto;
+}
+
+.fonts-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex: none;
+}
+
+.fonts-note {
+  width: 300px;
+  max-width: 100%;
+  font-size: 0.82rem;
+}
+
+.fonts-row {
+  cursor: pointer;
+}
+
+.fonts-row.selected,
+.fonts-row.selected:hover {
+  background: var(--accent-soft);
+}
+
+.fonts-warn-icon {
+  margin-left: 6px;
+  color: var(--highlight-strong, var(--danger));
+  vertical-align: -2px;
+}
+
+.fonts-warnings {
+  margin: 8px 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fonts-warnings li {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.fonts-warnings svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.fonts-coverage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fonts-coverage-bar {
+  width: 64px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.fonts-coverage-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--success);
+}
+
+.fonts-coverage.ok .fonts-coverage-bar > span {
+  background: var(--highlight);
+}
+
+.fonts-coverage.low .fonts-coverage-bar > span {
+  background: var(--danger);
+}
+
+.fonts-installed summary {
+  cursor: pointer;
+}
+
+.fonts-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.fonts-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-panel);
+  font-size: 0.8rem;
+}
+
+.font-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  margin: 14px 0 6px;
+}
+
+.font-detail-h {
+  margin: 18px 0 8px;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.font-detail-grid .font-detail-h {
+  margin-top: 0;
+}
+
+.font-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.font-facts dt {
+  color: var(--text-dim);
+}
+
+.font-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.font-used-by {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.font-sample-input {
+  width: 100%;
+  resize: vertical;
+}
+
+.font-specimen {
+  margin-top: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 4px 14px;
+}
+
+.font-specimen-line {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.font-specimen-line + .font-specimen-line {
+  border-top: 1px solid var(--border-soft);
+}
+
+.font-block {
+  margin-bottom: 14px;
+}
+
+.font-block-head {
+  margin-bottom: 6px;
+}
+
+.font-glyphs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 4px;
+}
+
+.font-glyph {
+  display: grid;
+  place-items: center;
+  height: 44px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  line-height: 1;
+}
+
+.font-glyph.missing {
+  background: repeating-linear-gradient(135deg, var(--bg-panel), var(--bg-panel) 4px, transparent 4px, transparent 8px);
+  color: var(--text-faint);
+  border-style: dashed;
+}
+
+/* The Placeholders tab's "Fonts it names": a section inside the same panel. */
+.template-fonts-section {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.template-fonts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-fonts li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.template-font-name {
+  font-weight: 500;
+}
+
+.font-status {
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+}
+
+.font-status-uploaded,
+.font-status-installed {
+  background: var(--success-soft);
+  color: var(--success-strong);
+}
+
+.font-status-substituted {
+  background: var(--highlight-soft);
+  color: var(--highlight-strong);
+}
+
+.font-status-missing {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}

@@ -71,6 +71,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   holding LDAP syntax can only ever be a name.
 
 ### Added
+- **Fonts under Resources, like JasperReports Server's font extensions** (Resources → **Fonts**; migration
+  `0003_font_resources` — run `alembic upgrade head`). A developer with the new `font:manage` permission (system
+  administrators) uploads a `.ttf` / `.otf` and the **next render** of every template that names its family uses it — in
+  LibreOffice (`.docx`), WeasyPrint (`.html`) and charts — with **no restart or redeploy**; the files live in
+  `data/font_resources` (mounted into `api` and `worker`, included in `./deployment.sh backup`; run `mkdir -p
+  data/font_resources` on an existing install). Each font can be **verified before use**: family and style to name, version,
+  Khmer and Latin coverage, whether it has the GSUB/GPOS layout tables Khmer needs, its license (and whether it forbids
+  embedding), a sample you can type into, every character it has drawn with the font itself, and which templates name it.
+  Uploads are checked by their file signature and read with fontTools (pure Python); the same file, or two files claiming
+  one family + style, are refused; removing a font a template names needs `force`. A template's **Placeholders** tab now
+  ends with *Fonts it names* — each Installed / Added / Substituted (a metric-compatible stand-in) / Missing — so a layout
+  that would change is visible before a PDF is printed. A chart spec may name its own `"font"`. API: `/api/v1/fonts`,
+  `GET /api/v1/reports/{id}/fonts`; audited as `font.upload|delete`. (LibreOffice for macOS ignores a profile's
+  `user/fonts`: on a Mac development machine install `.docx` fonts in `~/Library/Fonts`.)
 - **Reports: tree, grid and list, tree first** — the layout switch reads Tree · Grid · List and opens on the tree until
   someone picks another (a stored grid/list choice is kept). Templates stays a flat grid/list catalogue.
 - **Template page: a Shortcuts tab** (was a block at the bottom of Overview), explaining the why — one report used by

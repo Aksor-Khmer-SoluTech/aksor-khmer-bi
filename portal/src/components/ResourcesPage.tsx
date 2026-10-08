@@ -14,6 +14,7 @@ import { FolderIcon, ImageIcon, TemplatesIcon } from "../admin/icons";
 import type { AuthInfo, Folder, ImageResource, ReportMeta, ReportShortcut } from "../types";
 import FolderGrantsDialog from "./FolderGrantsDialog";
 import ResourceTree from "./ResourceTree";
+import FontsPanel from "./FontsPanel";
 import ResourceContentPane from "./ResourceContentPane";
 import { CardGridSkeleton, TreeSkeleton } from "./Skeletons";
 
@@ -48,6 +49,11 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const canManageRoot = has(auth, "folder:manage") || auth.isSuperuser;
+  // Fonts are server-wide, so they sit beside the folder library rather than inside a folder. Anyone who manages
+  // reports may look (to check a template's fonts); adding and removing needs font:manage.
+  const canManageFonts = has(auth, "font:manage") || auth.isSuperuser;
+  const canSeeFonts = canManageFonts || has(auth, "report:manage");
+  const [section, setSection] = useState<"library" | "fonts">("library");
 
   function load() {
     Promise.all([api.folders.list(), api.listReports(), api.images.list(), api.listShortcuts().catch(() => [])])
@@ -206,6 +212,32 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
     );
   }
 
+  const sectionSwitch = canSeeFonts && (
+    <div className="segmented" role="group" aria-label="Resources section">
+      <button type="button" className={`segmented-btn${section === "library" ? " active" : ""}`} onClick={() => setSection("library")}>
+        Library
+      </button>
+      <button type="button" className={`segmented-btn${section === "fonts" ? " active" : ""}`} onClick={() => setSection("fonts")}>
+        Fonts
+      </button>
+    </div>
+  );
+
+  if (section === "fonts" && canSeeFonts) {
+    return (
+      <div className="resources-page">
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">Resources</h1>
+            <p className="page-subtitle">Fonts added for the whole server — check them here before a template depends on them.</p>
+          </div>
+          {sectionSwitch}
+        </div>
+        <FontsPanel canManage={canManageFonts} />
+      </div>
+    );
+  }
+
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveDrag(null)}>
       <div className="resources-page">
@@ -214,6 +246,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
             <h1 className="page-title">Resources</h1>
             <p className="page-subtitle">Organize report templates and images into folders — drag items between them.</p>
           </div>
+          {sectionSwitch}
         </div>
 
         {moveError && <p className="alert alert-error">{moveError}</p>}

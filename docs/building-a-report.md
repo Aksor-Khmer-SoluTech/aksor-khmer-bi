@@ -147,6 +147,8 @@ chart text (a date, "Q1", a plain English word) is routed through a
 font-fallback list (`[Khmer OS Siemreap, DejaVu Sans]`) instead of one
 font — confirmed empirically (rendered a chart with both scripts mixed
 in the same title before relying on it, not assumed from the fix alone).
+A chart spec can name another font with `"font": "Noto Sans Khmer"` — a font installed on the server or added under
+Resources → Fonts; the Khmer font and DejaVu stay behind it for any glyph it lacks.
 Chart title/label text is **not** run through Khmer segmentation (see
 below) — chart text is short and non-wrapping, so there's nothing for a
 ZWSP break point to do there, and segmenting the spec's `"chart"` value

@@ -32,8 +32,11 @@ import tempfile
 from pathlib import Path
 
 from jinja2 import Environment
-from weasyprint import HTML
+from weasyprint import CSS, HTML
+from weasyprint.text.fonts import FontConfiguration
 from weasyprint.urls import URLFetcher
+
+from .. import fonts
 
 _USER_TEMPLATE_FETCHER = URLFetcher(allowed_protocols={"data"}, fail_on_errors=True)
 
@@ -52,7 +55,16 @@ def render_pdf(context: dict, template_path: str | Path) -> bytes:
     html = _render_html(context, template_path)
     with tempfile.TemporaryDirectory() as tmp:
         out_path = Path(tmp) / "report.pdf"
-        HTML(string=html, base_url=None, url_fetcher=_USER_TEMPLATE_FETCHER).write_pdf(str(out_path))
+        # Fonts added at runtime (Resources > Fonts) that this HTML names, inlined as data: URLs -- the only kind of
+        # URL the template's fetcher may load.
+        face_css = fonts.font_face_css(html)
+        font_config = FontConfiguration()
+        stylesheets = (
+            [CSS(string=face_css, font_config=font_config, url_fetcher=_USER_TEMPLATE_FETCHER)] if face_css else None
+        )
+        HTML(string=html, base_url=None, url_fetcher=_USER_TEMPLATE_FETCHER).write_pdf(
+            str(out_path), stylesheets=stylesheets, font_config=font_config
+        )
         return out_path.read_bytes()
 
 

@@ -38,6 +38,7 @@ matplotlib.use("Agg")  # headless — no display server; safe in a container/CLI
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 
+from . import fonts
 from .config import TEMPLATES_DIR
 
 CHART_TYPES = {"bar", "line", "pie"}
@@ -48,7 +49,7 @@ _FONT_PATH = TEMPLATES_DIR / "fonts" / "KhmerOSSiemreap.ttf"
 _khmer_font_name: str | None = None
 
 
-def _font_family() -> list[str]:
+def _font_family(requested: object = None) -> list[str]:
     """KhmerOSSiemreap.ttf has no Latin glyphs at all (verified directly
     against its cmap — A-Z/a-z are simply absent, only Khmer + digits are
     covered). Word/LibreOffice paper over this invisibly via OS-level
@@ -64,6 +65,16 @@ def _font_family() -> list[str]:
     if _khmer_font_name is None:
         fm.fontManager.addfont(str(_FONT_PATH))
         _khmer_font_name = fm.FontProperties(fname=str(_FONT_PATH)).get_name()
+    # A chart spec may name another font ("font": "Noto Sans Khmer") -- one installed on the server or added under
+    # Resources > Fonts. Tried first; the Khmer font and DejaVu stay behind it for any glyph it lacks.
+    fonts.register_with_matplotlib()
+    family = fonts.safe_family(requested)
+    if family:
+        try:
+            fm.findfont(fm.FontProperties(family=family), fallback_to_default=False)
+            return [family, _khmer_font_name, "DejaVu Sans"]
+        except ValueError:
+            pass  # not installed: fall through to the default pair rather than failing the whole report
     return [_khmer_font_name, "DejaVu Sans"]
 
 
@@ -92,7 +103,7 @@ def render_chart_png(spec: dict) -> bytes:
 
     # Scoped to this call (rc_context), not a global plt.rcParams mutation
     # — avoids leaking font state across concurrent render calls.
-    with matplotlib.rc_context({"font.family": _font_family()}):
+    with matplotlib.rc_context({"font.family": _font_family(spec.get("font"))}):
         fig, ax = plt.subplots(figsize=(width_mm / 25.4, height_mm / 25.4))
 
         if chart_type == "bar":

@@ -273,7 +273,7 @@ The app stores templates, credentials' encryption key, images and logs on disk. 
 they belong to you, not to root:
 
 ```bash
-mkdir -p data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/logs data/jdbc_drivers
+mkdir -p data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/logs data/jdbc_drivers data/font_resources
 ```
 
 **Back up `data/secrets/` together with the database** — without its key, saved credentials and users' 2FA secrets can't be decrypted. (It also holds the sign-in signing key; losing that only signs everyone out.)
@@ -390,7 +390,7 @@ delete the database / queue.
 ```bash
 mkdir -p backups
 docker compose -p aksor-db -f docker-compose.db.yml exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' | gzip > backups/aksor-$(date +%Y%m%d-%H%M).sql.gz
-sudo tar -czf backups/aksor-files-$(date +%Y%m%d-%H%M).tar.gz data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/jdbc_drivers
+sudo tar -czf backups/aksor-files-$(date +%Y%m%d-%H%M).tar.gz data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/jdbc_drivers data/font_resources
 ```
 
 Keep the two files together — the encryption key in `data/secrets` and the database belong to each other. (`sudo` because the containers write `data/` as root, and the key inside `data/secrets` is mode 600; `./deployment.sh backup` handles that for you.)
@@ -828,9 +828,10 @@ paragraph breaks and justifies differently — measured, not assumed) — this s
 system-wide to find them by name during conversion; WeasyPrint doesn't
 need this since it loads font files directly via `@font-face`. If you
 register your own template (via `/api/v1/reports`) that references a
-font by name and that font isn't one of the two bundled ones, install it
-the same way in a derived image, or the docx→pdf/png path will silently
-substitute a fallback font.
+font by name and that font isn't one of the two bundled ones, add it under
+**Admin → Resources → Fonts** (no rebuild or restart — see
+[create-a-template.md](create-a-template.md#65-fonts)); otherwise the docx→pdf/png
+path substitutes a fallback font. (Fonts installed in a derived image still work too.)
 
 #### Volumes — what's mounted and why
 
@@ -842,6 +843,7 @@ substitute a fallback font.
 | `./api/khmer_protected_terms.exclude.d` | same, `:ro` | Directory form of the second row |
 | `./data/report_templates` | `/app/data/report_templates`, read-write | Templates registered via `/api/v1/reports` — deliberately outside `api/`'s own directory (runtime data, not code), same reasoning as `api`/`portal` being separate services. Without this mount, uploads are lost on `docker compose down` / container recreate, since they'd otherwise only live in the container's writable layer |
 | `./data/image_resources`, `./data/stylesheet_resources`, `./data/avatars` | `/app/data/…`, read-write (`api`; the first two also `worker`) | The Resources library (images and stylesheets that html templates and docx image fields render from) and user avatars. These were **not mounted before** and were lost whenever the container was recreated — mounted now; back them up with the templates (`./deployment.sh backup` does) |
+| `./data/font_resources` | `/app/data/font_resources`, read-write (`api`) and read-only (`worker`) | Fonts added under **Resources → Fonts** — server-wide, used from the next render with no restart. Back it up with the templates (`./deployment.sh backup` does). |
 | `pgdata` (named volume, not a bind mount) | `/var/lib/postgresql/data` on the `postgres` service | Report metadata (see above) — a named volume rather than a host path since there's no reason to browse/edit Postgres's on-disk files directly the way you would a `.txt` exception list |
 
 The first two are read-only bind mounts specifically so editing either
@@ -880,6 +882,7 @@ sane defaults), the mount just lets you override them live.
 | `REDIS_PASSWORD` | No (recommended; `init` generates one) | Makes Redis (the job queue) require a password, so only the app can use it; the app builds its `REDIS_URL` from it. Letters and digits only. Empty = Redis open to every container on `aksor-network`. Ignored when `REDIS_URL` is set. Read by the `redis` stack and by `api`, `scheduler` and `worker`. |
 | `ALLOW_WEAK_PASSWORDS` | No | Shell variable for `deployment.sh`, not a `.env` setting: `ALLOW_WEAK_PASSWORDS=1 ./deployment.sh up` lets a guessable `PORTAL_PASSWORD` through on a throwaway machine. |
 | `BACKUP_HELPER_IMAGE` | No (default `postgres:16-alpine`) | Shell variable for `deployment.sh backup` / `restore`: the image of the throwaway container that archives `data/` as root. Any image with `tar` works. |
+| `FONT_MAX_MB` | No (default `20`) | The largest font file Resources → Fonts accepts. Set on the `api` service. |
 | `LOG_LEVEL` | No | Root logging level for `api` and `scheduler` — `DEBUG`, `INFO` (default), `WARNING`/`WARN`, or `ERROR`. Set `DEBUG` to see per-request/job chatter; tracebacks logged via `_log.exception(...)` print at `ERROR` and above regardless. See `api/app/logging_config.py` |
 | `LOG_DIR` | No | Directory for rotating log files, relative to the process's cwd (default `logs`, i.e. `api/logs` locally or `/app/api/logs` in the container — `docker-compose.yml` bind-mounts that to `./data/logs` on the host for both `api` and `scheduler`) |
 | `LOG_MAX_BYTES` | No | Max size of one log file before it rolls to the next sequence number for the same date (default 25MB, i.e. `api-2026-09-15.log` → `api-2026-09-15.1.log`) — see `api/app/logging_config.py` |

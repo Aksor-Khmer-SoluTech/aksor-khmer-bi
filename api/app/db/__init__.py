@@ -35,6 +35,7 @@ from .secrets import Secret
 from .auth_events import AuthEvent
 from .auth_sessions import AuthSession
 from .deployment_terms import DeploymentProtectedTerms
+from .fonts import FontResource
 from .folders import Folder, FolderAccessGrant, ImageResource, ReportShortcut, StylesheetResource
 from .jobs import Job, JobRun
 from .ldap import LdapConfig, LdapGroupRoleMapping
@@ -69,6 +70,7 @@ __all__ = [
     "Secret",
     "DeploymentProtectedTerms",
     "Folder",
+    "FontResource",
     "ReportShortcut",
     "FolderAccessGrant",
     "ImageResource",

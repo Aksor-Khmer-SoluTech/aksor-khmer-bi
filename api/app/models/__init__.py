@@ -19,6 +19,7 @@ from .connections import (
     JdbcConnectionConfig,
     RestConnectionConfig,
 )
+from .fonts import FontOut, InstalledFont, TemplateFont
 from .jdbc import JdbcDriverOut, JdbcEngineOut
 from .secrets import (
     SecretCreate,
@@ -112,6 +113,9 @@ __all__ = [
     "ConnectionTestResult",
     "ConnectionUpdate",
     "JdbcConnectionConfig",
+    "FontOut",
+    "InstalledFont",
+    "TemplateFont",
     "JdbcDriverOut",
     "JdbcEngineOut",
     "AccessibleReport",

@@ -17,7 +17,7 @@ from pathlib import Path
 from docx.shared import Mm
 from docxtpl import DocxTemplate, InlineImage
 
-from .. import charts, images
+from .. import charts, fonts, images
 from ..config import SOFFICE_BIN
 
 
@@ -124,6 +124,9 @@ def _convert(docx_bytes: bytes, target_format: str) -> bytes:
         docx_path = tmp_path / "report.docx"
         docx_path.write_bytes(docx_bytes)
         profile_dir = tmp_path / "lo_profile"
+        # Fonts added at runtime (Resources > Fonts) go into this conversion's own profile: LibreOffice reads
+        # <profile>/user/fonts when it starts, and it is started afresh for every conversion.
+        fonts.install_into_profile(profile_dir)
 
         result = subprocess.run(
             [

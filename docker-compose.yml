@@ -117,6 +117,9 @@ services:
       - ./data/secrets:/app/data/secrets:z
       # Uploaded JDBC driver .jar files (app/jdbc_drivers.py); `jdbc-worker` mounts the same folder read-only.
       - ./data/jdbc_drivers:/app/data/jdbc_drivers:z
+      # Fonts added under Resources > Fonts: LibreOffice, WeasyPrint and the chart renderer read them at the next
+      # render, with no restart (doc_engine/fonts.py). `worker` mounts the same folder, read-only.
+      - ./data/font_resources:/app/data/font_resources:z
       # Uploaded images/stylesheets (Resources library; html templates and docx image
       # fields render from these) and user avatars -- same reasoning as the templates:
       # without a mount they vanish when the container is recreated.
@@ -221,6 +224,7 @@ services:
       - ./data/report_templates:/app/data/report_templates:z
       - ./data/image_resources:/app/data/image_resources:z
       - ./data/stylesheet_resources:/app/data/stylesheet_resources:z
+      - ./data/font_resources:/app/data/font_resources:ro,z
       # Jobs that call a data source decrypt Secrets (app/secret_store.py) with the same key `api` uses.
       - ./data/secrets:/app/data/secrets:ro,z
 

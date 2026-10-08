@@ -19,6 +19,7 @@ data/jdbc_drivers/
 data/avatars/
 data/image_resources/
 data/stylesheet_resources/
+data/font_resources/
 *.db
 *.db-journal
 *.db-wal

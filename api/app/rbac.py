@@ -60,6 +60,7 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     ("connection:manage", "Create/update/delete reusable data connections (base URL, headers, authentication) that reports fetch their data and choice lists from"),
     ("secret:manage", "Create/rotate/revoke/delete named credentials (a connection's or data source's token or password) stored encrypted in the database"),
     ("driver:manage", "Upload, download and delete JDBC driver .jar files -- code the JDBC driver service runs, so granted separately from connection:manage"),
+    ("font:manage", "Add and remove fonts under Resources > Fonts -- installed for the whole server, so every organization's documents are drawn with them"),
 )
 
 # name -> set of permission codes. ROLE_ADMINISTRATOR is handled specially

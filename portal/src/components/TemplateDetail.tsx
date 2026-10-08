@@ -15,6 +15,7 @@ import {
   type ReportMeta,
   type ReportParameter,
   type ReportSchema,
+  type TemplateFont,
   type RunForm,
   type Role,
   type User,
@@ -312,7 +313,49 @@ function OverviewTab({
   );
 }
 
-function PlaceholdersTab({ schema }: { schema: ReportSchema | null }) {
+const FONT_STATUS: Record<TemplateFont["status"], { label: string; hint: string }> = {
+  uploaded: { label: "Added", hint: "Added under Resources > Fonts" },
+  installed: { label: "Installed", hint: "Installed on the server" },
+  substituted: { label: "Substituted", hint: "The server doesn't have it, but a metric-compatible font stands in (same character widths), so the layout holds" },
+  missing: { label: "Missing", hint: "The server doesn't have it and has no matching stand-in: the renderer picks a default, so line breaks and widths can change" },
+};
+
+/** The fonts the template file names, each marked with what the server will really draw with. A font that is
+ * substituted or missing changes line breaks and widths -- better to learn that here than from a printed PDF. */
+function TemplateFonts({ reportId }: { reportId: string }) {
+  const [fonts, setFonts] = useState<TemplateFont[] | null>(null);
+  useEffect(() => {
+    api.getReportFonts(reportId).then(setFonts).catch(() => setFonts([]));
+  }, [reportId]);
+  if (fonts === null || fonts.length === 0) return null;
+  const problems = fonts.filter((f) => f.status === "substituted" || f.status === "missing").length;
+  return (
+    <section className="template-fonts-section">
+      <h2 className="panel-title">Fonts it names</h2>
+      <p className="panel-subtitle">
+        What the template asks for, and what the server will draw with.
+        {problems > 0 && (
+          <>
+            {" "}
+            <strong>{problems} {problems === 1 ? "is" : "are"} not on the server</strong> — add {problems === 1 ? "it" : "them"} under{" "}
+            <a href="#/resources">Resources → Fonts</a> to keep the layout as designed.
+          </>
+        )}
+      </p>
+      <ul className="template-fonts">
+        {fonts.map((f) => (
+          <li key={f.name}>
+            <span className="template-font-name">{f.name}</span>
+            <span className={`font-status font-status-${f.status}`} title={FONT_STATUS[f.status].hint}>{FONT_STATUS[f.status].label}</span>
+            {f.status === "substituted" && f.resolved_to && <span className="muted">→ drawn as {f.resolved_to}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function PlaceholdersTab({ schema, reportId }: { schema: ReportSchema | null; reportId: string }) {
   if (!schema) return <p className="muted">Detecting placeholders…</p>;
   return (
     <div className="panel">
@@ -331,6 +374,7 @@ function PlaceholdersTab({ schema }: { schema: ReportSchema | null }) {
           ))}
         </div>
       )}
+      <TemplateFonts reportId={reportId} />
     </div>
   );
 }
@@ -1122,7 +1166,7 @@ export default function TemplateDetail({
               onOpenHistory={() => onTabChange(tabSlug("history"))}
             />}
           {tab === "history" && <HistoryTab report={report} changelog={changelog} error={changelogError} onReload={loadChangelog} onChanged={() => { loadChangelog(); api.getReport(reportId).then(setReport).catch(() => {}); }} />}
-          {tab === "placeholders" && <PlaceholdersTab schema={schema} />}
+          {tab === "placeholders" && <PlaceholdersTab schema={schema} reportId={report.report_id} />}
           {tab === "parameters" && (
             <ParametersTab
               report={report}

@@ -47,7 +47,7 @@ from sqlalchemy import delete as sa_delete
 from doc_engine import ConversionError
 from doc_engine import render as doc_render
 
-from .. import audit, batch_limits, clients, connections, db, rbac, render_errors, report_data, report_ref, report_split, report_store, secrets, template_fields
+from .. import audit, batch_limits, font_catalog, clients, connections, db, rbac, render_errors, report_data, report_ref, report_split, report_store, secrets, template_fields
 from ..auth import ensure_org_scope, get_current_user, optional_auth_context, require_permission, require_report_permission
 from ..auth_events import client_ip
 from ..context_media import ImageResolutionError, resolve_image_refs
@@ -72,6 +72,7 @@ from ..models import (
     RunRequest,
     ShortcutCreate,
     ShortcutOut,
+    TemplateFont,
 )
 from ..protected_terms_config import ProtectedTermsConfigError, resolve_protected_terms, validate_protected_terms_config
 from ..rbac import AuthContext, _folder_ancestor_chain, can_manage_folder_contents, can_view_folder_contents, effective_parameter_limits, has_folder_access, has_report_access
@@ -1547,6 +1548,26 @@ def _authorize_client_embed_run(meta: dict, body: EmbedRunRequest, request: Requ
         )
     clients.touch(identity)
     return f"client:{identity.client_id}"
+
+
+@router.get(
+    "/{report_id}/fonts",
+    summary="The fonts this template names, and whether the server has each one",
+    response_model=list[TemplateFont],
+)
+def get_report_fonts(report_id: str) -> list[dict]:
+    """A template that names a font the server doesn't have is drawn in a substitute, and the layout changes (line
+    breaks, widths, page count). This lists what the template names -- read from the file itself -- with each
+    font's status: `uploaded` (Resources > Fonts), `installed` (on the server), `substituted` (the font that will
+    stand in is given) or `missing`. Public like `/schema`: it only reads the template."""
+    try:
+        meta = report_store.get_report(report_id)
+        template_path = report_store.get_template_path(report_id)
+    except report_store.ReportNotFoundError:
+        raise HTTPException(status_code=404, detail="Report not found")
+    with db.SessionLocal() as session:
+        uploaded = {row.family for row in session.scalars(select(db.FontResource))}
+    return [font_catalog.status_of(name, uploaded) for name in font_catalog.fonts_named_by(template_path, meta["template_ext"])]
 
 
 @router.get(
