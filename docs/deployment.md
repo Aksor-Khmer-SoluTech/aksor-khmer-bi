@@ -124,9 +124,9 @@ which step it was.
 | 4 *(optional)* | `docker-compose.yml` `--profile jdbc` | `aksor-app` | `jdbc-worker` — only for Oracle / SQL Server / Db2 drivers |
 
 **Where the app's images come from.** `docker-compose.yml` has no build instructions: each app service runs a
-prebuilt, version-pinned image from GitHub Container Registry, so nothing is compiled on your server.
+prebuilt, version-pinned image from Docker Hub, so nothing is compiled on your server.
 
-| Service | Image (`$AKSOR_IMAGE_PREFIX` = `ghcr.io/aksor-khmer-solutech/aksor-khmer-bi`) |
+| Service | Image (`$AKSOR_IMAGE_PREFIX` = `aksorkhmerbi/aksor-khmer-bi`) |
 |---|---|
 | `api`, `scheduler`, `worker` | `$AKSOR_IMAGE_PREFIX-engine:$AKSOR_VERSION` (one image, three commands) |
 | `portal` | `$AKSOR_IMAGE_PREFIX-portal:$AKSOR_VERSION` |
@@ -137,7 +137,7 @@ prebuilt, version-pinned image from GitHub Container Registry, so nothing is com
 | You set | `AKSOR_VERSION` in `.env` — a released version | nothing extra |
 | Command | `./deployment.sh up` / `update` | `./deployment.sh up --build` / `update --build` |
 | Compose files | `docker-compose.yml` | `docker-compose.yml` + `docker-compose.build.yml` |
-| Needs | Docker and access to `ghcr.io` | internet for Debian, Python and npm packages, ~10 GB of disk, several minutes |
+| Needs | Docker and access to Docker Hub | internet for Debian, Python and npm packages, ~10 GB of disk, several minutes |
 | Choose it for | every normal deployment and update | a fork, local changes, or an unreleased commit |
 
 They share one Docker network, `aksor-network`, which is how the app finds `postgres` and `redis` by name.
@@ -213,7 +213,7 @@ Everything you do afterwards:
 | stop everything | `./deployment.sh down` — your data is kept |
 | operate one stack alone | `./deployment.sh app status`, `./deployment.sh db logs`, `./deployment.sh redis restart`, … |
 | use uploaded JDBC drivers (Oracle, SQL Server…) | set `JDBC_WORKER_TOKEN` in `.env` ([Step 4](#step-4-optional--jdbc-driver-service)), then `./deployment.sh app --profile jdbc up -d --build jdbc-worker api` |
-| deploy prebuilt images (no build, no Node/npm on the server) | in `.env` set `AKSOR_IMAGE_PREFIX=ghcr.io/aksor-khmer-solutech/aksor-khmer-bi` and `AKSOR_VERSION=<released version>`, then `./deployment.sh up` (first time) or `update` (upgrade) — this is the default. Releases are published by pushing a `v*` git tag. |
+| deploy prebuilt images (no build, no Node/npm on the server) | in `.env` set `AKSOR_IMAGE_PREFIX=aksorkhmerbi/aksor-khmer-bi` and `AKSOR_VERSION=<released version>`, then `./deployment.sh up` (first time) or `update` (upgrade) — this is the default. Releases are published with `./deployment.sh publish <version>`. |
 | see every command | `./deployment.sh help` |
 
 A command that fails stops with a one-line `error:` that says what to fix. `./deployment.sh init` never overwrites an
@@ -600,27 +600,19 @@ choose their own at first sign-in, and an admin can reset any local user's
 password later from the same screen (a generated temporary password is
 shown once, and the user must replace it on their next sign-in).
 
-#### Publishing images to GitHub Container Registry
+#### Publishing images to Docker Hub
 
 Three images are published: `<prefix>-engine` (the API; also runs `scheduler` and `worker`), `<prefix>-portal`
 and `<prefix>-jdbc-worker` (only used with the `jdbc` profile). The prefix is
-`ghcr.io/aksor-khmer-solutech/aksor-khmer-bi`.
+`aksorkhmerbi/aksor-khmer-bi`.
 
-**The normal way — push a version tag.** The workflow `.github/workflows/release-images.yml` builds the images on
-GitHub and publishes them:
+Images are published by hand with `./deployment.sh publish`, from a machine with internet, logged in with
+`docker login` as an account that can push to `aksorkhmerbi`. Publish a commit CI has passed on:
 ```bash
-git tag v1.0.2 && git push origin v1.0.2      # publishes ...-engine:1.0.2, ...-portal:1.0.2, ...-jdbc-worker:1.0.2
+./deployment.sh publish 1.0.2      # publishes ...-engine:1.0.2, ...-portal:1.0.2, ...-jdbc-worker:1.0.2
 ```
-It publishes only a commit **CI has already passed** on (a seconds-long check, not a re-run of the tests — if CI is still running it waits; if CI failed it stops with the reason), then builds the three images in parallel with a layer cache kept between releases, so a release takes minutes. Tag a commit CI is green on.
-The first time, open each package on GitHub (your organization → Packages → the package → *Package settings*) and
-set its visibility to **Public**, so servers can pull without logging in. Public packages have no storage or
-bandwidth charge.
-
-**By hand** (from a machine with internet, logged in with `docker login ghcr.io` using a token that has the
-`write:packages` scope):
-```bash
-AKSOR_IMAGE_PREFIX=ghcr.io/aksor-khmer-solutech/aksor-khmer-bi ./deployment.sh publish 1.0.2
-```
+It uses `AKSOR_IMAGE_PREFIX` from `.env` (or the environment); add `--latest` to tag `latest` as well. The first
+push creates each repository; keep them **Public** on Docker Hub so servers can pull without logging in.
 The platform defaults to **`linux/amd64`** because most servers are Intel/AMD even when you build on an
 Apple-silicon Mac — an arm64 image would die on them with `exec format error`. For both, set
 `PLATFORMS=linux/amd64,linux/arm64` (the api image is large — LibreOffice — so the arm64 half builds slowly
@@ -632,8 +624,8 @@ Read `CHANGELOG.md` for every version up to the one you want first:
 AKSOR_VERSION=1.0.2 ./deployment.sh up        # first time
 AKSOR_VERSION=1.0.3 ./deployment.sh update    # upgrade: backup, pull, recreate, migrate
 ```
-Put `AKSOR_IMAGE_PREFIX` and `AKSOR_VERSION` in `.env` to make them stick. A private package needs
-`docker login ghcr.io` on the server too.
+Put `AKSOR_IMAGE_PREFIX` and `AKSOR_VERSION` in `.env` to make them stick. A private repository needs
+`docker login` on the server too.
 
 Notes:
 - **Pin a version** (`1.0.1`) in `.env` rather than relying on `latest`, so a restart can never silently pick up a

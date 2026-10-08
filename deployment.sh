@@ -19,8 +19,7 @@
 #                                     postgres are left alone
 #   ./deployment.sh publish <version> [--latest]
 #                                     build engine, portal and jdbc-worker for PLATFORMS (default linux/amd64) and push
-#                                     to the registry named by AKSOR_IMAGE_PREFIX (GHCR: ghcr.io/<owner>/aksor-khmer-bi)
-#                                     -- normally done by pushing a v* git tag (.github/workflows/release-images.yml)
+#                                     to the registry named by AKSOR_IMAGE_PREFIX (Docker Hub: aksorkhmerbi/aksor-khmer-bi)
 #   ./deployment.sh doctor [build]    check this machine (docker, compose, ports, disk; with `build`, also whether a
 #                                     container can reach what the build downloads); `up` runs it for you
 #   ./deployment.sh down              stop the app, then postgres, then redis (volumes and data are kept)
@@ -476,14 +475,14 @@ image_version() { echo "${AKSOR_VERSION:-$(env_value AKSOR_VERSION)}"; }
 require_registry_images() {
   case "$(image_prefix)" in
     */*) ;;
-    *) die "no images to pull: set AKSOR_IMAGE_PREFIX (e.g. ghcr.io/aksor-khmer-solutech/aksor-khmer-bi) and AKSOR_VERSION in .env -- see .env.example. To build from the source instead: add --build" ;;
+    *) die "no images to pull: set AKSOR_IMAGE_PREFIX (e.g. aksorkhmerbi/aksor-khmer-bi) and AKSOR_VERSION in .env -- see .env.example. To build from the source instead: add --build" ;;
   esac
   [ -n "$(image_version)" ] || die "set AKSOR_VERSION in .env to the released version you want (read CHANGELOG.md first). To build from the source instead: add --build"
 }
 
 pull_app_images() {
   info "pulling app images ($(image_prefix)-{engine,portal}:$(image_version))"
-  app pull || die "couldn't pull the images -- is version $(image_version) published (a git tag v$(image_version) pushes it), and is the package public or are you logged in (docker login ghcr.io)? Or add --build to build from the source"
+  app pull || die "couldn't pull the images -- is version $(image_version) published (./deployment.sh publish $(image_version) pushes it), and is the repository public or are you logged in (docker login)? Or add --build to build from the source"
 }
 
 cmd_publish() {

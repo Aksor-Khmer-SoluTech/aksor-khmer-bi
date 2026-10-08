@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **Prebuilt images now come from Docker Hub** — `aksorkhmerbi/aksor-khmer-bi-engine`, `-portal` and
+  `-jdbc-worker` — instead of GitHub Container Registry. The default `AKSOR_IMAGE_PREFIX` (compose files,
+  `.env.example`) is now `aksorkhmerbi/aksor-khmer-bi`. **Upgrade note:** an existing `.env` that still says
+  `AKSOR_IMAGE_PREFIX=ghcr.io/aksor-khmer-solutech/aksor-khmer-bi` keeps pulling from GHCR until you change it.
+- **The GitHub release workflow is removed** (`.github/workflows/release-images.yml`); pushing a `v*` tag no longer
+  publishes images. Publish with `./deployment.sh publish <version>` (after `docker login`). GitHub Actions now only
+  runs the tests (`ci.yml`).
 - **`DEPLOYMENT.md` is merged into `docs/deployment.md`.** The root file's install how-to (get Docker and the code, quick
   deployment, step by step, running it daily, customizing, troubleshooting) is now the **Install it** half of
   `docs/deployment.md`, with the reference sections after it, so there is one deployment guide (also the one shown in
