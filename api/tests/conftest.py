@@ -1,4 +1,5 @@
 import base64
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -69,6 +70,18 @@ def portal_auth_env(monkeypatch):
     """
     monkeypatch.setenv("PORTAL_USERNAME", TEST_USERNAME)
     monkeypatch.setenv("PORTAL_PASSWORD", TEST_PASSWORD)
+
+
+@pytest.fixture(autouse=True)
+def pinned_totp_clock(monkeypatch):
+    """Freeze the clock the 2FA check uses at the middle of the current 30s step. Tests derive codes for
+    "the current/previous/next step" and the server verifies them a few ms later; on a real clock a step
+    boundary landing in between makes that code fall outside the accepted window (a rare CI-only failure).
+    Tests must read the step from `totp.now()`, never `time.time()`."""
+    from app import totp
+
+    pinned = int(time.time()) // 30 * 30 + 15
+    monkeypatch.setattr(totp, "now", lambda: pinned)
 
 
 @pytest.fixture

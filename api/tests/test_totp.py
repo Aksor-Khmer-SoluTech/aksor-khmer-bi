@@ -1,5 +1,4 @@
 import base64
-import time
 
 import pyotp
 from fastapi.testclient import TestClient
@@ -20,7 +19,7 @@ def _code_at_step(secret: str, step: int) -> str:
 
 
 def _current_step() -> int:
-    return int(time.time()) // 30
+    return totp.now() // 30
 
 
 def _bearer(username: str, password: str, code: str) -> dict:

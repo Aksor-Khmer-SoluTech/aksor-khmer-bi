@@ -48,6 +48,12 @@ _WINDOW_STEPS = 1  # +/- one 30s step of clock drift tolerated, same as most aut
 ISSUER = os.environ.get("TOTP_ISSUER", "Aksor Khmer BI")
 
 
+def now() -> int:
+    """Seconds since the epoch, as the code check sees it. A seam so tests can pin the clock to the middle of a
+    30s step -- otherwise a test that computes a code and the server that checks it can straddle a step boundary."""
+    return int(time.time())
+
+
 def generate_secret() -> str:
     return pyotp.random_base32()
 
@@ -116,7 +122,7 @@ def verify_totp_code(secret: str, code: str, last_used_step: int | None) -> int 
         _log.error("A stored two-factor secret can't be read (%s) -- an administrator must reset that account's 2FA", exc)
         return None
     totp = pyotp.TOTP(secret)
-    current_step = int(time.time()) // _STEP_SECONDS
+    current_step = now() // _STEP_SECONDS
     for step in range(current_step - _WINDOW_STEPS, current_step + _WINDOW_STEPS + 1):
         if last_used_step is not None and step <= last_used_step:
             continue

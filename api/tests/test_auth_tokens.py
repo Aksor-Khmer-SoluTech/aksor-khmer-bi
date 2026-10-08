@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app import auth_tokens, db
+from app import auth_tokens, db, totp
 from app.main import app
 from app.rbac import ROOT_ORG_ID
 
@@ -147,7 +147,7 @@ def test_the_break_glass_login_works_and_stops_with_its_configuration(http, monk
 
 def _enable_2fa(client, headers):
     secret = client.post("/api/v1/users/me/totp/enroll", headers=headers).json()["secret"]
-    step = int(time.time()) // 30
+    step = totp.now() // 30
     confirm = client.post("/api/v1/users/me/totp/confirm", json={"code": pyotp.TOTP(secret).at((step - 1) * 30)}, headers=headers)
     assert confirm.status_code == 200
     return secret, step
