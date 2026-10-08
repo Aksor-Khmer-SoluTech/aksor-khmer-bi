@@ -1,19 +1,15 @@
 """POST /reports/{id}/embed-run: an anonymous embed asking for a report by
-parameters, authorized by a signed ticket (app/embed_tickets.py).
+parameters, authorized by an API client's id + secret (app/clients.py).
 
 The property everything here protects: the report's data source is only ever
-called for a request that carries a genuine, current ticket, issued for *this*
-report and *exactly these* parameters -- and never on the strength of anything
-the embed's visitor typed. So most tests assert two things: the answer, and
-that the data source was (or wasn't) called.
+called for a request that carries valid client credentials for a client an
+admin granted *this* report -- and never on the strength of anything the
+embed's visitor typed. So most tests assert two things: the answer, and that
+the data source was (or wasn't) called.
 
 Nothing here sends an Authorization header: an embed has no account.
 """
-import base64
-import hashlib
-import hmac
 import json
-import time
 from dataclasses import dataclass, field
 from io import BytesIO
 
@@ -23,13 +19,12 @@ from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app import clients, db, embed_tickets, report_data
+from app import clients, db, report_data
 from app.routers.reports import _report_headers
 from app.main import app
 
 client = TestClient(app)
 
-SECRET = "test-embed-secret-at-least-32-characters-long"
 TOKEN_ENV = "ERP_TEST_TOKEN"
 PARAMS = {"p_from": "2026-08-01", "p_to": "2026-08-31", "p_signed": "Sok Sophea"}
 
@@ -44,21 +39,6 @@ DATA_SOURCE = {
     "headers": {"X-Client-Id": "aksor-khmer-bi"},
     "auth": {"type": "bearer", "token_env": TOKEN_ENV},
 }
-
-
-def _b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def ticket(params=None, *, report="sales", sub="tester", secret=SECRET, exp_in=120, **extra) -> str:
-    now = int(time.time())
-    payload = {
-        "iss": "partner-api", "aud": "aksor-embed", "sub": sub, "iat": now, "exp": now + exp_in,
-        "report": report, "params": PARAMS if params is None else params, **extra,
-    }
-    head = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    body = _b64(json.dumps(payload).encode())
-    return f"{head}.{body}.{_b64(hmac.new(secret.encode(), f'{head}.{body}'.encode(), hashlib.sha256).digest())}"
 
 
 @dataclass
@@ -83,11 +63,6 @@ def erp(monkeypatch) -> FakeErp:
     )
     monkeypatch.setenv(TOKEN_ENV, "erp-secret-token")
     return fake
-
-
-@pytest.fixture(autouse=True)
-def secret(monkeypatch):
-    monkeypatch.setenv(embed_tickets.ENV_VAR, SECRET)
 
 
 @pytest.fixture
@@ -128,11 +103,18 @@ def _denials() -> list:
         return list(session.scalars(select(db.AccessDeniedEvent)))
 
 
+@pytest.fixture
+def granted(report, auth_headers) -> dict:
+    """Credentials of a client the admin granted the `sales` report."""
+    secret, _ = make_client(auth_headers, [report])
+    return creds(secret)
+
+
 # --- the happy path ---------------------------------------------------------
 
 
-def test_a_ticketed_run_fetches_the_data_server_side_and_renders(report, erp):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(), "format": "docx"})
+def test_a_granted_run_fetches_the_data_server_side_and_renders(report, erp, granted):
+    resp = embed_run("sales", {"parameters": PARAMS, "format": "docx", **granted})
     assert resp.status_code == 200, resp.text
     assert _text(resp.content) == "Sales 2026-08-01 to 2026-08-31: 1200 at Phnom Penh, signed Sok Sophea"
 
@@ -144,132 +126,63 @@ def test_a_ticketed_run_fetches_the_data_server_side_and_renders(report, erp):
     assert call.headers["X-Client-Id"] == "aksor-khmer-bi"
 
 
-def test_by_report_id_as_well_as_by_code(report, erp):
-    assert embed_run(report, {"parameters": PARAMS, "ticket": ticket()}).status_code == 200  # ref in the URL: an id
-    assert embed_run("sales", {"parameters": PARAMS, "ticket": ticket(report=report)}).status_code == 200  # claim: an id
-
-
-def test_defaults_to_pdf_and_honours_part(report, erp):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(), "part": 1})
+def test_defaults_to_pdf_and_honours_part(report, erp, granted):
+    resp = embed_run("sales", {"parameters": PARAMS, "part": 1, **granted})
     assert resp.status_code == 200 and resp.headers["content-type"] == "application/pdf"
-    assert embed_run("sales", {"parameters": PARAMS, "ticket": ticket(), "part": 9}).status_code == 400
+    assert embed_run("sales", {"parameters": PARAMS, "part": 9, **granted}).status_code == 400
 
 
-# --- no ticket, no data ------------------------------------------------------
+# --- no credentials, no data -------------------------------------------------
 
 
-def test_a_run_with_neither_a_ticket_nor_client_credentials_is_refused(report, erp):
+def test_a_run_without_client_credentials_is_refused(report, erp):
     resp = embed_run("sales", {"parameters": PARAMS})
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "This report can only be run with a signed ticket or API client credentials"
+    assert resp.json()["detail"] == "This report can only be run with API client credentials"
     assert erp.calls == []
     assert _denials() == []  # anyone can send these: logged, not written to the security feed
 
 
-@pytest.mark.parametrize("bad", ["", "garbage", "a.b.c", "x" * 9000])
-def test_a_ticket_that_isnt_one_is_refused_without_touching_the_data_source(report, erp, bad):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": bad})
-    assert resp.status_code in (401, 422)
-    assert erp.calls == []
-
-
-def test_a_ticket_signed_with_another_secret_is_refused(report, erp):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(secret="another-secret-that-is-also-32-chars-long!!")})
-    assert resp.status_code == 401 and resp.json()["detail"] == "Invalid ticket"
-    assert erp.calls == []
-
-
-def test_an_expired_ticket_is_refused_and_says_so(report, erp):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(exp_in=-3600)})
-    assert resp.status_code == 401 and "expired" in resp.json()["detail"]
-    assert erp.calls == []
-
-
-def test_a_server_with_no_secret_refuses_everything_rather_than_trusting_anything(report, erp, monkeypatch):
-    monkeypatch.delenv(embed_tickets.ENV_VAR)
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket()})
-    assert resp.status_code == 503 and embed_tickets.ENV_VAR in resp.json()["detail"]
-    assert erp.calls == []
-
-
 def test_rejections_of_anonymous_callers_are_logged_not_written_to_the_security_feed(report, erp):
-    # Anyone can send a bad ticket; a database row per attempt would let them grow the table.
+    # Anyone can send bad credentials; a database row per attempt would let them grow the table.
     for _ in range(3):
-        embed_run("sales", {"parameters": PARAMS, "ticket": "garbage"})
+        embed_run("sales", {"parameters": PARAMS, **creds("garbage", client_id="nobody-here")})
     assert _denials() == []
-
-
-def test_an_unknown_report_is_a_404_before_anything_else(erp):
-    assert embed_run("nope", {"parameters": PARAMS, "ticket": ticket()}).status_code == 404
     assert erp.calls == []
 
 
-# --- a genuine ticket can't be bent to another request -----------------------
-
-
-def test_the_parameters_must_be_exactly_those_the_ticket_was_issued_for(report, erp):
-    tampered = {**PARAMS, "p_from": "1999-01-01"}
-    resp = embed_run("sales", {"parameters": tampered, "ticket": ticket()})
-    assert resp.status_code == 403
+def test_an_unknown_report_is_a_404_before_anything_else(erp, granted):
+    assert embed_run("nope", {"parameters": PARAMS, **granted}).status_code == 404
     assert erp.calls == []
 
 
-@pytest.mark.parametrize(
-    "body_params",
-    [
-        {k: v for k, v in PARAMS.items() if k != "p_signed"},  # one fewer
-        {**PARAMS, "p_extra": "x"},  # one more
-    ],
-)
-def test_dropping_or_adding_a_parameter_is_not_the_same_request(report, erp, body_params):
-    assert embed_run("sales", {"parameters": body_params, "ticket": ticket()}).status_code == 403
-    assert erp.calls == []
+# --- the parameters are still validated ----------------------------------------
 
 
-def test_a_ticket_for_one_report_does_not_run_another(report, erp):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(report="payroll")})
-    assert resp.status_code == 403 and "different report" in resp.json()["detail"]
-    assert erp.calls == []
-
-
-def test_a_genuine_ticket_used_wrongly_is_recorded_in_the_security_feed(report, erp):
-    embed_run("sales", {"parameters": {**PARAMS, "p_from": "1999-01-01"}, "ticket": ticket(sub="sok.sophea")})
-    embed_run("sales", {"parameters": PARAMS, "ticket": ticket(report="payroll", sub="sok.sophea")})
-    events = _denials()
-    assert [e.permission_code for e in events] == ["report:embed-run", "report:embed-run"]
-    assert {e.username for e in events} == {"ticket:sok.sophea"}
-    assert {e.resource for e in events} == {report}
-
-
-# --- what the ticket doesn't excuse ------------------------------------------
-
-
-def test_the_parameters_are_still_validated_against_the_reports_definitions(report, erp):
-    bad = {**PARAMS, "p_from": "not-a-date"}
-    resp = embed_run("sales", {"parameters": bad, "ticket": ticket(bad)})  # signed, but not a valid date
+def test_the_parameters_are_still_validated_against_the_reports_definitions(report, erp, granted):
+    resp = embed_run("sales", {"parameters": {**PARAMS, "p_from": "not-a-date"}, **granted})
     assert resp.status_code == 400
     assert erp.calls == []
 
-    unknown = {**PARAMS, "p_extra": "x"}
-    resp = embed_run("sales", {"parameters": unknown, "ticket": ticket(unknown)})
+    resp = embed_run("sales", {"parameters": {**PARAMS, "p_extra": "x"}, **granted})
     assert resp.status_code == 400 and "p_extra" in resp.json()["detail"]
     assert erp.calls == []
 
 
-def test_a_format_the_template_cant_produce_is_refused(report, erp):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(), "format": "xlsx"})
+def test_a_format_the_template_cant_produce_is_refused(report, erp, granted):
+    resp = embed_run("sales", {"parameters": PARAMS, "format": "xlsx", **granted})
     assert resp.status_code == 400
     assert erp.calls == []
 
 
-def test_a_failing_data_source_is_a_readable_502_not_a_crash(report, erp):
+def test_a_failing_data_source_is_a_readable_502_not_a_crash(report, erp, granted):
     erp.status = 500
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket()})
+    resp = embed_run("sales", {"parameters": PARAMS, **granted})
     assert resp.status_code == 502 and "data source" in resp.json()["detail"]
 
 
-def test_the_data_source_credentials_are_never_in_the_response(report, erp):
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(), "format": "docx"})
+def test_the_data_source_credentials_are_never_in_the_response(report, erp, granted):
+    resp = embed_run("sales", {"parameters": PARAMS, "format": "docx", **granted})
     assert b"erp-secret-token" not in resp.content
     assert "erp-secret-token" not in json.dumps(dict(resp.headers))
 
@@ -286,13 +199,9 @@ def test_run_and_render_are_unchanged_by_the_shared_helper(report, erp, auth_hea
 def test_a_run_says_which_report_and_template_type_it_rendered(report, erp, auth_headers):
     # So the embed page can start from parameters alone, with no lookup of the report first.
     secret, _ = make_client(auth_headers, [report])
-    for body in (
-        {"parameters": PARAMS, "ticket": ticket(), "format": "docx"},
-        {"parameters": PARAMS, "format": "docx", **creds(secret)},
-    ):
-        resp = embed_run("sales", body)
-        assert resp.status_code == 200
-        assert resp.headers["X-Report-Name"] == "Sales" and resp.headers["X-Report-Ext"] == "docx"
+    resp = embed_run("sales", {"parameters": PARAMS, "format": "docx", **creds(secret)})
+    assert resp.status_code == 200
+    assert resp.headers["X-Report-Name"] == "Sales" and resp.headers["X-Report-Ext"] == "docx"
 
 
 def test_a_khmer_report_name_travels_percent_encoded():
@@ -431,13 +340,6 @@ def test_the_client_id_and_secret_go_together(report, extra):
     assert embed_run("sales", {"parameters": PARAMS, **extra}).status_code == 422
 
 
-def test_a_ticket_and_client_credentials_are_not_accepted_together(report, erp, auth_headers):
-    secret, _ = make_client(auth_headers, [report])
-    resp = embed_run("sales", {"parameters": PARAMS, "ticket": ticket(), **creds(secret)})
-    assert resp.status_code == 422
-    assert erp.calls == []
-
-
 def test_a_client_of_another_organization_cannot_run_the_report(report, erp, auth_headers):
     with db.SessionLocal() as session:
         org = db.Organization(id="acme", name="Acme", is_active=True, created_at="2026-01-01T00:00:00+00:00")
@@ -477,8 +379,7 @@ def test_the_secret_is_not_echoed_in_any_response(report, erp, auth_headers):
 
 
 def test_a_parameter_the_embed_leaves_out_takes_its_default(report, erp, auth_headers):
-    """The ticket pins exactly the parameters the embedder sent; a filter it didn't send is
-    filled from the report's own default, after the ticket has been checked."""
+    """A filter the embedder leaves out is filled from the report's own default."""
     definitions = [dict(d) for d in DEFINITIONS]
     definitions[2]["default_value"] = "H.E"
     cfg = client.put(
@@ -486,12 +387,13 @@ def test_a_parameter_the_embed_leaves_out_takes_its_default(report, erp, auth_he
     )
     assert cfg.status_code == 200, cfg.text
 
+    secret, _ = make_client(auth_headers, [report])
     params = {"p_from": "2026-08-01", "p_to": "2026-08-31"}
-    resp = embed_run("sales", {"parameters": params, "ticket": ticket(params), "format": "docx"})
+    resp = embed_run("sales", {"parameters": params, "format": "docx", **creds(secret)})
     assert resp.status_code == 200, resp.text
     assert _text(resp.content) == "Sales 2026-08-01 to 2026-08-31: 1200 at Phnom Penh, signed H.E"
 
     # Sent as an empty string it stays empty -- the embedder said "none".
     blank = {**params, "p_signed": ""}
-    resp = embed_run("sales", {"parameters": blank, "ticket": ticket(blank), "format": "docx"})
+    resp = embed_run("sales", {"parameters": blank, "format": "docx", **creds(secret)})
     assert _text(resp.content) == "Sales 2026-08-01 to 2026-08-31: 1200 at Phnom Penh, signed "

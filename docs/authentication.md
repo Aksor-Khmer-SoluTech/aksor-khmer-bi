@@ -9,7 +9,7 @@ How people and programs prove who they are, how a sign-in lasts, and how it ends
 |---|---|---|
 | **A person in the portal** | Signs in at `POST /api/v1/auth/login`. Gets an **access token** (a JWT, 15 minutes) kept in memory, and a **refresh token** in an `HttpOnly` cookie that quietly renews it. | A working day, or weeks with "Keep me signed in"; ends sooner on sign-out, password change or an admin disabling the account |
 | **A script that manages Aksor** (create users, register templates…) | Either signs in the same way and uses the access token, or sends HTTP Basic (`curl -u user:password`) | Token: 15 minutes, renewable. Basic: each call stands alone |
-| **An embedded report viewer** | A signed **run ticket** (a short-lived JWT the embedding app mints), or an **API client** id and secret | Minutes; see [Embedding](building-a-report.md) |
+| **An embedded report viewer** | An **API client** id and secret (an admin grants it specific reports) | Until the secret is rotated or the client is disabled; see [Embedding](building-a-report.md) |
 | **Anyone, to read or render** | Nothing — `GET /reports`, `POST /reports/{id}/render` stay open by design | — |
 
 The break-glass login (`PORTAL_USERNAME` / `PORTAL_PASSWORD`) and LDAP/Active Directory users go through the

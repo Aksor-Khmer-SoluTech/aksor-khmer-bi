@@ -1,7 +1,7 @@
 """Local-development convenience: fill the process environment from api/.env.
 
 A bare `uvicorn app.main:app --reload` does not read api/.env -- only Docker Compose does --
-so settings kept there (EMBED_TICKET_SECRET, PARTNER_API_KEY, LOG_LEVEL...)
+so settings kept there (PARTNER_API_KEY, LOG_LEVEL...)
 silently stayed unset, and `--reload` never fixed that because a reloaded worker inherits the
 launching shell's environment. Importing the `app` package now loads the file first, before any
 module reads its settings, so a reload picks changes up too.

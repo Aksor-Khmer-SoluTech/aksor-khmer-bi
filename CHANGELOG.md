@@ -10,6 +10,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/deployment.md`, with the reference sections after it, so there is one deployment guide (also the one shown in
   the portal). `deployment.sh` and the compose-file comments point there.
 
+### Changed
+- **The sibling project's name is gone from the repository** (comments, docs, changelog, test fixtures — now
+  `partner-web` / `partner-api` / `partner.test`).
+
+### Removed
+- **Embed tickets** (`app/embed_tickets.py`, the `ticket` field of `embed-run`, `EMBED_TICKET_SECRET`): a second way to
+  authorize an embedded run, signed by the host's backend with a shared secret. API clients (a client id + secret an admin
+  grants specific reports, managed at runtime) already cover running a report by parameters, so the shared-secret path
+  was a second thing to configure, deploy and keep secure that nothing used. **`embed-run` now takes API client
+  credentials only** (`401` otherwise); a client of the old ticket flow switches to a client. The docs now say plainly where
+  the secret should live: call `embed-run` from the host's *server*, because a secret posted by browser JavaScript can be
+  read by anyone who opens that page.
+
 ### Fixed
 - **Deployment hardening** (`deployment.sh`, `.env.example`, `.dockerignore`):
   - `.env.example` no longer ships `POSTGRES_PASSWORD=Pleasechangeit` / `PORTAL_PASSWORD=admin` (its comments always said

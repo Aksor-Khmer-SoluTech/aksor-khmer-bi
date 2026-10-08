@@ -47,7 +47,7 @@ from sqlalchemy import delete as sa_delete
 from doc_engine import ConversionError
 from doc_engine import render as doc_render
 
-from .. import audit, batch_limits, clients, connections, db, embed_tickets, rbac, render_errors, report_data, report_ref, report_split, report_store, secrets, template_fields
+from .. import audit, batch_limits, clients, connections, db, rbac, render_errors, report_data, report_ref, report_split, report_store, secrets, template_fields
 from ..auth import ensure_org_scope, get_current_user, optional_auth_context, require_permission, require_report_permission
 from ..auth_events import client_ip
 from ..context_media import ImageResolutionError, resolve_image_refs
@@ -1353,7 +1353,7 @@ def _fetch_and_render(
     selected: list[str] | None = None,
 ) -> StreamingResponse:
     """The last two steps of a parameterised run, shared by /run (a signed-in
-    user) and /embed-run (a ticket-holder): call the report's data source with
+    user) and /embed-run (an API client): call the report's data source with
     the already-validated `params`, then render. Whoever is allowed to ask has
     been decided before this point."""
     started = time.monotonic()
@@ -1442,7 +1442,7 @@ def _report_headers(meta: dict) -> dict[str, str]:
 
 @router.post(
     "/{report_id}/embed-run",
-    summary="Run a report by parameters for an embedder -- with a signed ticket or an API client's credentials",
+    summary="Run a report by parameters for an embedder -- with an API client's credentials",
     response_class=StreamingResponse,
     responses={200: {"content": {"application/pdf": {}, "application/zip": {}}}},
 )
@@ -1453,15 +1453,12 @@ def embed_run_report(report_id: str, body: EmbedRunRequest, request: Request) ->
     Anonymous like `/render` -- the embedder's visitors have no account here --
     but where `/render` only formats what the caller supplied, this fetches
     from the report's data source using its stored credentials. So who may ask
-    is decided before anything is fetched, one of two ways -- and a request
-    with neither is refused:
-
-    * a **ticket** (app/embed_tickets.py): signed by the embedder's backend
-      after it checked its own signed-in user, and bound to this report and
-      these exact parameters; or
-    * an **API client** (app/clients.py): a client id + secret an admin created
-      and granted this report -- allowed or revoked at runtime, with no
-      deployment change; rate-limited per client.
+    is decided before anything is fetched, and a request without valid
+    credentials is refused: an **API client** (app/clients.py) -- a client id +
+    secret an admin created and granted this report, allowed or revoked at
+    runtime with no deployment change, rate-limited per client. Call this from
+    the embedder's *server* where you can: a secret posted by browser
+    JavaScript can be read by anyone who opens that page.
 
     Order matters: authorize -> then resolve/validate the parameters -> only
     then call the data source.
@@ -1471,17 +1468,14 @@ def embed_run_report(report_id: str, body: EmbedRunRequest, request: Request) ->
     except report_store.ReportNotFoundError:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    if body.ticket is not None:
-        who = _authorize_ticketed_embed_run(meta, body, request)
-        triggered_by = "embed"
-    elif body.client_id is not None:
+    if body.client_id is not None:
         who = _authorize_client_embed_run(meta, body, request)
         triggered_by = "embed-client"
     else:
         # Log only: anyone can send these, so a security-feed row per attempt
         # would let an anonymous caller grow that table without limit.
-        _log.warning("Embed run rejected: report_id=%r ip=%s reason=no ticket or client credentials", meta["report_id"], client_ip(request))
-        raise HTTPException(status_code=401, detail="This report can only be run with a signed ticket or API client credentials")
+        _log.warning("Embed run rejected: report_id=%r ip=%s reason=no client credentials", meta["report_id"], client_ip(request))
+        raise HTTPException(status_code=401, detail="This report can only be run with API client credentials")
 
     if body.format not in _ALLOWED_FORMATS[meta["template_ext"]]:
         raise HTTPException(
@@ -1495,9 +1489,8 @@ def embed_run_report(report_id: str, body: EmbedRunRequest, request: Request) ->
         )
     except report_data.DataSourceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    # No per-user limits to apply: there's no user here, and the values were
-    # authorized by whoever signed the ticket (which pinned them), or -- for an
-    # opted-in report -- are only what the parameter definitions themselves allow.
+    # No per-user limits to apply: there's no user here, so the values are only
+    # what the parameter definitions themselves allow.
     unrestricted = {d["name"]: None for d in definitions}
     try:
         params = report_data.resolve_run_parameters(definitions, unrestricted, body.parameters)
@@ -1554,39 +1547,6 @@ def _authorize_client_embed_run(meta: dict, body: EmbedRunRequest, request: Requ
         )
     clients.touch(identity)
     return f"client:{identity.client_id}"
-
-
-def _authorize_ticketed_embed_run(meta: dict, body: EmbedRunRequest, request: Request) -> str:
-    """Verify the ticket -> check it is for this report and these exact values.
-    Returns who to log the run against."""
-    try:
-        claims = embed_tickets.verify(body.ticket)
-    except embed_tickets.TicketError as exc:
-        # Log only: anyone can send these, so a security-feed row per attempt
-        # would let an anonymous caller grow that table without limit.
-        _log.warning("Embed run rejected: report_id=%r ip=%s reason=%s", meta["report_id"], client_ip(request), exc)
-        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
-
-    # From here the ticket is genuine: a mismatch is its holder asking for
-    # something it wasn't issued for, which the security feed should show.
-    def deny(reason: str) -> HTTPException:
-        _log.warning("Embed run denied: ticket sub=%r report_id=%r reason=%s", claims["sub"], meta["report_id"], reason)
-        record_access_denied(
-            username=f"ticket:{claims['sub']}",
-            org_id=meta["org_id"],
-            user_id=None,
-            permission_code="report:embed-run",
-            resource=meta["report_id"],
-            ip_address=client_ip(request),
-            reason=reason,
-        )
-        return HTTPException(status_code=403, detail=reason)
-
-    if claims["report"] not in (meta["report_id"], meta.get("code")):
-        raise deny("This ticket is for a different report")
-    if claims["params"] != body.parameters:
-        raise deny("These parameters aren't the ones this ticket was issued for")
-    return f"ticket sub={claims['sub']!r}"
 
 
 @router.get(

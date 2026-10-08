@@ -477,32 +477,16 @@ are always ISO (`2026-09-30`, `08:30`, `2026-09-30T08:30`).
 *host page* supplies — Aksor only formats it. A report with a **data source** is different:
 "run it for these parameters" makes Aksor's *server* fetch data using the report's stored
 credentials, so anyone who could ask would be reading that data with no login. So Aksor decides
-who may ask, one of two ways: an **API client** an admin granted the report ([below](#running-a-report-as-an-api-client-client-id--secret)
--- the simplest, and the one to reach for first), or a short-lived **ticket** signed by the host's own
-backend (this section). A request with neither is refused (`401`), for every report.
+who may ask: an **API client** an admin granted the report ([below](#running-a-report-as-an-api-client-client-id--secret)).
+A request without valid client credentials is refused (`401`), for every report. (There is deliberately no setting
+that lets a report run with no credential at all.)
 
-With a ticket, the host's own backend says who may ask:
-
-1. The host's backend checks its signed-in user, validates the parameters, and signs an HS256
-   JWT with the secret it shares with Aksor (`EMBED_TICKET_SECRET`): `iss` = `partner-api`,
-   `aud` = `aksor-embed`, `sub` = the user, `iat`/`exp` (at most 15 minutes apart), `report` = the
-   report's code or id, and `params` = the `{name: value}` strings it approves.
-2. The host page posts the parameters *and* the ticket to the embed frame — no data:
-
-   ```js
-   frame.contentWindow.postMessage(
-     { source: "aksor-report-viewer", type: "render", parameters: { … }, ticket: "<jwt>" },
-     "https://your-portal");
-   ```
-3. The frame calls `POST /api/v1/reports/{id}/embed-run` with `{parameters, ticket, format, part}`.
-   Aksor verifies the signature, issuer, audience and expiry, that the ticket is for *this* report,
-   and that `parameters` equal the ticket's `params` exactly — then fetches the data and renders.
-   A ticket can't be reused for another report or other values, and with none nothing is fetched.
-
-Only HS256 is accepted, and a server with no `EMBED_TICKET_SECRET` answers `503`. A rejected
-ticket is `401`; a genuine one used for the wrong report or parameters is `403` and is recorded in
-the security feed (as `report:embed-run`). The ticket carries no per-user limits — Aksor has no
-user here — so whatever the signer approved in `params` is what runs.
+**Where the secret lives matters.** A client's secret is a password for every report it was granted. Best: the
+host's own **server** calls `POST /api/v1/reports/{id}/embed-run` (with `client_id` + `client_secret`) and hands the
+rendered file to its user, so the secret never reaches a browser. If the host page posts the credentials to the
+embed frame from browser JavaScript (as below), anyone who can open that page can read them and run **any granted
+report with any filters** — so grant such a client only reports that every visitor of that page may see, and rotate
+its secret if it is ever exposed.
 
 Codes are 3–64 lowercase letters, digits and single hyphens, unique across the deployment,
 and — once an organization has used one — reserved to that organization. Changing or

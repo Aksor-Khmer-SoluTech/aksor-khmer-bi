@@ -243,10 +243,8 @@ async function renderResult(resp: Response, fallbackName: string, format: Render
 
 const embedRunsInFlight = new Map<string, Promise<RenderResult>>();
 
-/** What authorizes an embedded run: a signed ticket, an API client's id + secret (an admin
- * granted it this report). One of the two is required. */
+/** What authorizes an embedded run: an API client's id + secret (an admin granted it this report). */
 export interface EmbedAuth {
-  ticket?: string;
   clientId?: string;
   clientSecret?: string;
 }
@@ -264,7 +262,6 @@ async function requestEmbedRun(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       parameters,
-      ...(auth.ticket ? { ticket: auth.ticket } : {}),
       ...(auth.clientId && auth.clientSecret ? { client_id: auth.clientId, client_secret: auth.clientSecret } : {}),
       format,
       ...(part ? { part } : {}),
@@ -517,8 +514,7 @@ export const api = {
   },
 
   /** Run a report for an embedded viewer: just the parameter values, plus what
-   * authorizes them -- a signed ticket (api/app/embed_tickets.py) or an API
-   * client's id + secret (api/app/clients.py); one of the two is required. The server
+   * authorizes them -- an API client's id + secret (api/app/clients.py). The server
    * fetches the data itself. `ref` is the report's code or id -- Aksor resolves
    * either (api/app/report_ref.py). Deliberately a plain fetch, not apiFetch: an
    * embed is anonymous, so it must neither send this origin's console login

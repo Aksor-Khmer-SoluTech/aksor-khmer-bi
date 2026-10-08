@@ -39,8 +39,8 @@ services:
       start_period: 60s
     env_file:
       # Every variable in .env reaches the container (docker-compose `environment:`
-      # below wins on a clash), so optional settings -- EMBED_TICKET_SECRET,
-      # REPORT_TIMEZONE, the render limits... -- need no edit here. See .env.example.
+      # below wins on a clash), so optional settings -- REPORT_TIMEZONE,
+      # the render limits... -- need no edit here. See .env.example.
       - path: .env
         required: false
     environment:
@@ -174,8 +174,8 @@ services:
         condition: service_healthy
     env_file:
       # Every variable in .env reaches the container (docker-compose `environment:`
-      # below wins on a clash), so optional settings -- EMBED_TICKET_SECRET,
-      # REPORT_TIMEZONE, the render limits... -- need no edit here. See .env.example.
+      # below wins on a clash), so optional settings -- REPORT_TIMEZONE,
+      # the render limits... -- need no edit here. See .env.example.
       - path: .env
         required: false
     environment:
@@ -203,8 +203,8 @@ services:
         condition: service_healthy
     env_file:
       # Every variable in .env reaches the container (docker-compose `environment:`
-      # below wins on a clash), so optional settings -- EMBED_TICKET_SECRET,
-      # REPORT_TIMEZONE, the render limits... -- need no edit here. See .env.example.
+      # below wins on a clash), so optional settings -- REPORT_TIMEZONE,
+      # the render limits... -- need no edit here. See .env.example.
       - path: .env
         required: false
     environment:

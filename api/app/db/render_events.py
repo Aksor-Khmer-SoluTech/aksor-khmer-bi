@@ -28,6 +28,6 @@ class RenderEvent(Base):
     backend: Mapped[str | None] = mapped_column(String, nullable=True)  # "libreoffice" | "weasyprint"
     status: Mapped[str] = mapped_column(String, nullable=False)  # "success" | "error"
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # null on error
-    triggered_by: Mapped[str] = mapped_column(String, nullable=False)  # "public" (/render, /render/batch) | "run" | "embed" (/embed-run, a signed ticket)
+    triggered_by: Mapped[str] = mapped_column(String, nullable=False)  # "public" (/render, /render/batch) | "run" | "embed" (/embed-run, from before API clients; older rows) | "embed-client" (/embed-run, an API client)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # only set for triggered_by="run"
     created_at: Mapped[str] = mapped_column(String, nullable=False)

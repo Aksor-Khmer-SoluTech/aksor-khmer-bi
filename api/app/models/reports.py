@@ -230,24 +230,17 @@ class RunRequest(BaseModel):
 
 class EmbedRunRequest(RunRequest):
     """POST /reports/{id}/embed-run -- what an embedded viewer posts: the report's
-    parameter values (the same ones /run takes) plus what authorizes them, one of:
+    parameter values (the same ones /run takes) plus what authorizes them: an
+    API client's `client_id` + `client_secret` (app/clients.py), which must have
+    been granted this report. Otherwise the request is refused."""
 
-    * a signed `ticket` for exactly these values (app/embed_tickets.py);
-    * an API client's `client_id` + `client_secret` (app/clients.py), which
-      must have been granted this report.
-
-    Otherwise the request is refused."""
-
-    ticket: str | None = Field(None, min_length=1, max_length=8192)
     client_id: str | None = Field(None, min_length=1, max_length=64)
     client_secret: str | None = Field(None, min_length=1, max_length=256)
 
     @model_validator(mode="after")
-    def _one_way_to_authorize(self) -> "EmbedRunRequest":
+    def _both_or_neither(self) -> "EmbedRunRequest":
         if (self.client_id is None) != (self.client_secret is None):
             raise ValueError("client_id and client_secret go together")
-        if self.client_id is not None and self.ticket is not None:
-            raise ValueError("Send a ticket or client credentials, not both")
         return self
 
 

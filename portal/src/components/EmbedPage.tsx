@@ -24,15 +24,13 @@ interface ContextMessage {
 }
 
 /** The other way in: no data at all, just the report's parameter values --
- * with a signed ticket authorizing exactly them (api/app/embed_tickets.py) or an
- * API client's id + secret an admin granted the report (api/app/clients.py).
+ * with an API client's id + secret an admin granted the report (api/app/clients.py).
  * The server fetches the data itself, so the host page never handles it -- and what it posts is small and
  * readable. */
 interface ParametersMessage {
   source: typeof SOURCE;
   type: "render";
   parameters: Record<string, string>;
-  ticket?: string;
   clientId?: string;
   clientSecret?: string;
 }
@@ -49,7 +47,6 @@ function isInboundMessage(data: unknown): data is InboundMessage {
     return (
       isPlainObject(data.parameters) &&
       Object.values(data.parameters).every((v) => typeof v === "string") &&
-      (data.ticket === undefined || typeof data.ticket === "string") &&
       (data.clientId === undefined) === (data.clientSecret === undefined) &&
       (data.clientId === undefined || (typeof data.clientId === "string" && typeof data.clientSecret === "string"))
     );
@@ -95,13 +92,13 @@ function postToParent(message: Record<string, unknown>) {
  *     for a copy-pasteable snippet of both.
  * A report with a server-side data source can be driven by parameters
  * instead of data: `postMessage({ source, type: "render", parameters: {...},
- * ticket })`, where `ticket` is a short-lived token the embedder's own
- * backend signed for exactly those parameters (api/app/embed_tickets.py) --
- * or `clientId` + `clientSecret` instead, an API client an admin granted this
- * report (api/app/clients.py). This frame then asks POST /reports/{id}/embed-run,
+ * clientId, clientSecret })`, an API client an admin granted this report
+ * (api/app/clients.py). This frame then asks POST /reports/{id}/embed-run,
  * and the *server* fetches the data -- the host page never handles it, and
- * without a genuine ticket or client nothing is fetched (unlike the two ways
- * above, which only format data the caller already holds).
+ * without a valid client nothing is fetched (unlike the two ways above, which
+ * only format data the caller already holds). Note the secret passes through
+ * the host page's JavaScript, so anyone who can open that page can read it:
+ * grant such a client only the reports every visitor of that page may see.
  *
  * If none has supplied anything yet, this falls back to the report's
  * own saved sample context (Preview tab > "Save as sample") so a
@@ -112,8 +109,8 @@ export default function EmbedPage({ reportId }: { reportId: string }) {
   const [report, setReport] = useState<ReportMeta | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [contextData, setContextData] = useState<Record<string, unknown> | null>(null);
-  // Set instead of contextData when the host posts parameters (and, usually, a
-  // ticket). `id` counts runs, so a new one re-renders in place rather than remounting.
+  // Set instead of contextData when the host posts parameters (and
+  // an API client's credentials). `id` counts runs, so a new one re-renders in place rather than remounting.
   const [paramRun, setParamRun] = useState<{ parameters: Record<string, string>; auth: EmbedAuth; id: number } | null>(null);
 
   // Query params live inside the hash (`#/embed/<id>?a=b`), not in
@@ -202,7 +199,7 @@ export default function EmbedPage({ reportId }: { reportId: string }) {
       setLoadError(null);
       const message = event.data;
       if ("parameters" in message) {
-        const auth: EmbedAuth = { ticket: message.ticket, clientId: message.clientId, clientSecret: message.clientSecret };
+        const auth: EmbedAuth = { clientId: message.clientId, clientSecret: message.clientSecret };
         setParamRun((previous) => ({ parameters: message.parameters, auth, id: (previous?.id ?? 0) + 1 }));
       } else {
         setParamRun(null);
@@ -237,9 +234,8 @@ export default function EmbedPage({ reportId }: { reportId: string }) {
           Waiting for data to render <strong>{report?.name ?? reportId}</strong> against — pass it as this URL's{" "}
           <span className="mono">?context=</span> parameter, or postMessage{" "}
           <span className="mono">{`{ source: "${SOURCE}", type: "render", context: {...} }`}</span> to this frame
-          (or, for a report with a data source, <span className="mono">parameters</span>, plus a signed{" "}
-          <span className="mono">ticket</span> or an API client's <span className="mono">clientId</span> +{" "}
-          <span className="mono">clientSecret</span>).
+          (or, for a report with a data source, <span className="mono">parameters</span>, plus an API client's{" "}
+          <span className="mono">clientId</span> + <span className="mono">clientSecret</span>).
         </p>
       </div>
     );

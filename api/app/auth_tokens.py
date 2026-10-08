@@ -27,8 +27,7 @@ Only the SHA-256 of a refresh token is stored, so a copy of the database can't b
 Signing key: `JWT_SECRET` (32+ characters) if set -- the choice for several API replicas, which must all
 share it -- otherwise a random key generated into data/secrets/jwt.key on first use (0600, gitignored,
 never in the image; docker-compose.yml mounts data/secrets). Changing or losing it signs everyone out and
-nothing else. The same HS256-only rule as app/embed_tickets.py applies: the token header's `alg` is never
-trusted to choose another algorithm.
+nothing else. HS256 is the only algorithm accepted: the token header's `alg` is never trusted to choose another one.
 
 HTTP Basic (a username and password on every call) is still accepted for scripts -- see
 app/auth.py -- unless AUTH_ALLOW_BASIC is turned off.
