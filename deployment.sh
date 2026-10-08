@@ -69,10 +69,10 @@ db()    { docker compose -p "$DB_PROJECT"    -f "$DB_FILE"    "$@"; }
 # status...) still work: a placeholder satisfies the compose file's required AKSOR_VERSION.
 APP_BUILD=0
 app() {
-  local files=(-f "$APP_FILE") ver; ver="$(image_version)"
-  if [ "$APP_BUILD" = 1 ]; then files+=(-f "$APP_BUILD_FILE"); [ -n "$ver" ] || ver=local; fi
-  [ -n "$ver" ] || ver=unset
-  AKSOR_VERSION="$ver" docker compose -p "$APP_PROJECT" "${files[@]}" "$@"
+  local compose_files=(-f "$APP_FILE") ver; ver="$(image_version)"
+  if [ "$APP_BUILD" = 1 ]; then compose_files+=(-f "$APP_BUILD_FILE"); [ -n "$ver" ] || ver="local"; fi
+  [ -n "$ver" ] || ver="unset"
+  AKSOR_VERSION="$ver" docker compose -p "$APP_PROJECT" "${compose_files[@]}" "$@"
 }
 
 # Redis first, then Postgres, each waiting until healthy (the app needs both).

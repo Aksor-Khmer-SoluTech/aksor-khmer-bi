@@ -35,3 +35,18 @@ specs
 .idea
 .vscode
 tmp
+
+# The patterns above without a leading **/ only match at the top of the build context; these catch the same
+# leftovers inside api/, packages/ and portal/ (a developer's api/.pytest_cache and __pycache__ were being copied
+# into the image, with their test names and Python-version-specific bytecode).
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/*.egg-info
+**/.DS_Store
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/htmlcov
+**/.venv
