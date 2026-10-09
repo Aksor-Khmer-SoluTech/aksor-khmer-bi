@@ -45,13 +45,17 @@ services:
       # api's own entrypoint (api/Dockerfile) runs `alembic upgrade head`
       # against this before starting uvicorn, so the schema is always
       # current on container start — no separate manual migration step.
-      # Change the password via POSTGRES_PASSWORD, not just here, so both
-      # services agree.
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aksor:${POSTGRES_PASSWORD:-aksor}@postgres:5432/aksor_khmer_bi}
-      # app/celery_app.py -- used to *enqueue* a manually/API-triggered
-      # job run (POST /api/v1/jobs/{id}/run). `scheduler` and `worker`
-      # below are the ones that actually consume this broker.
-      REDIS_URL: ${REDIS_URL:-redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0}
+      # The database and Redis are reached by name on aksor-network. The app builds their addresses from these
+      # parts (app/service_urls.py), escaping the passwords, so POSTGRES_PASSWORD / REDIS_PASSWORD may contain any
+      # character. DATABASE_URL / REDIS_URL in .env, when set, point at your own servers instead.
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aksor}
+      # Redis is used to *enqueue* a manually/API-triggered job run (POST /api/v1/jobs/{id}/run); `scheduler` and
+      # `worker` below are the ones that consume it.
+      REDIS_URL: ${REDIS_URL:-}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       # Each _FILE variable takes os.pathsep-separated paths, so point
       # either one at several mounted files if you need more than one
       # inject/exclude source. The _DIR variables below are the scalable
@@ -180,8 +184,13 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aksor:${POSTGRES_PASSWORD:-aksor}@postgres:5432/aksor_khmer_bi}
-      REDIS_URL: ${REDIS_URL:-redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0}
+      # Addresses built by the app from these parts (app/service_urls.py) -- see `api` above.
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aksor}
+      REDIS_URL: ${REDIS_URL:-}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       # .env also holds the break-glass login; this service has no use for it.
       PORTAL_USERNAME: ""
       PORTAL_PASSWORD: ""
@@ -209,8 +218,13 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aksor:${POSTGRES_PASSWORD:-aksor}@postgres:5432/aksor_khmer_bi}
-      REDIS_URL: ${REDIS_URL:-redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0}
+      # Addresses built by the app from these parts (app/service_urls.py) -- see `api` above.
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aksor}
+      REDIS_URL: ${REDIS_URL:-}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       # .env also holds the break-glass login; this service has no use for it.
       PORTAL_USERNAME: ""
       PORTAL_PASSWORD: ""

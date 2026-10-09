@@ -18,7 +18,6 @@ plain `docker run redis` with no other configuration.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 
 from celery import Celery
@@ -26,8 +25,9 @@ from celery import Celery
 from . import db
 from .db import Job, JobRun
 from .job_executors import PermanentJobError, RetryableJobError, execute
+from .service_urls import redis_url
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = redis_url()  # REDIS_URL if set, else built from REDIS_HOST / REDIS_PASSWORD -- app/service_urls.py
 
 _log = logging.getLogger("aksor_khmer_bi.celery")
 

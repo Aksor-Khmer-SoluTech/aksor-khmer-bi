@@ -238,7 +238,7 @@ PORTAL_PASSWORD=<a long random password>
 CORS_ALLOWED_ORIGINS=http://localhost:8080
 ```
 
-Make passwords with `openssl rand -hex 16` (letters and digits only: `POSTGRES_PASSWORD` is placed inside a database URL, where `@ : / # %` would break it). `./deployment.sh up` refuses a guessable `PORTAL_PASSWORD` — under 8 characters, or `admin`, `password`, `changeme`… — because it is the full administrator login. `CORS_ALLOWED_ORIGINS` is **exactly what you type in the
+Make passwords with `openssl rand -hex 16`, or use your own — any characters work; wrap a value that contains `$` in single quotes (`POSTGRES_PASSWORD='pa$$word'`), because Compose reads an unquoted `$` as a variable. `./deployment.sh up` refuses a guessable `PORTAL_PASSWORD` — under 8 characters, or `admin`, `password`, `changeme`… — because it is the full administrator login. `CORS_ALLOWED_ORIGINS` is **exactly what you type in the
 browser** to open the portal — `http://localhost:8080` on your own machine, or
 `https://reports.example.com` on a server. If it's wrong, the login silently fails.
 
@@ -842,10 +842,10 @@ sane defaults), the mount just lets you override them live.
 | `AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE` / `AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE` | No | Extra Khmer terms this deployment has observed ICU mis-splitting, on top of the shared package's built-ins — see [`protected-terms-guide.md`](protected-terms-guide.md) |
 | `AKSOR_KHMER_OCR_PROTECTED_TERMS_DIR` / `AKSOR_KHMER_OCR_EXCLUDED_TERMS_DIR` | No | Directory form of the row above — every `*.txt` file inside is merged in |
 | `DATABASE_URL` | No | Report metadata database connection string — `docker-compose.yml` sets this to the `postgres` service automatically; unset falls back to a local SQLite file (`api/aksor_khmer_bi.db`). See `api/app/db.py` |
-| `POSTGRES_PASSWORD` | For the `postgres` service | Password for both the `postgres` service and `api`'s `DATABASE_URL` — change it in one place, `docker-compose.yml` threads it to both |
+| `POSTGRES_PASSWORD` | For the `postgres` service | Password for both the `postgres` service and the app's database connection — change it in one place, `docker-compose.yml` passes it to both. Any characters (quote a value containing `$`) |
 | `REDIS_URL` | No | Celery broker/result-backend connection string for `api` (enqueue only), `scheduler`, and `worker` — unset falls back to `redis://localhost:6379/0`. See `api/app/celery_app.py` |
 | `SCHEDULER_RECONCILE_INTERVAL_SECONDS` | No | How often `scheduler` polls the `jobs` table for create/edit/pause/delete (default 15) — see `api/app/scheduler.py` |
-| `REDIS_PASSWORD` | No (recommended; `init` generates one) | Makes Redis (the job queue) require a password, so only the app can use it; the app builds its `REDIS_URL` from it. Letters and digits only. Empty = Redis open to every container on `aksor-network`. Ignored when `REDIS_URL` is set. Read by the `redis` stack and by `api`, `scheduler` and `worker`. |
+| `REDIS_PASSWORD` | No (recommended; `init` generates one) | Makes Redis (the job queue) require a password, so only the app can use it; the app builds its `REDIS_URL` from it. Any characters (quote a value containing `$`). Empty = Redis open to every container on `aksor-network`. Ignored when `REDIS_URL` is set. Read by the `redis` stack and by `api`, `scheduler` and `worker`. |
 | `ALLOW_WEAK_PASSWORDS` | No | Shell variable for `deployment.sh`, not a `.env` setting: `ALLOW_WEAK_PASSWORDS=1 ./deployment.sh up` lets a guessable `PORTAL_PASSWORD` through on a throwaway machine. |
 | `BACKUP_HELPER_IMAGE` | No (default `postgres:16-alpine`) | Shell variable for `deployment.sh backup` / `restore`: the image of the throwaway container that archives `data/` as root. Any image with `tar` works. |
 | `FONT_MAX_MB` | No (default `20`) | The largest font file Resources → Fonts accepts. Set on the `api` service. |

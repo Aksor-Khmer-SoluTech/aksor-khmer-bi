@@ -13,17 +13,17 @@ from alembic import context
 # itself and for tests, without requiring `api` to be pip-installed.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.db import Base  # noqa: E402
+from app.db import DATABASE_URL, Base  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Same DATABASE_URL env var app/db.py reads -- overrides alembic.ini's
-# static placeholder so `alembic upgrade head` targets whatever database
-# the API itself is actually configured against (see docker-compose.yml).
-if os.environ.get("DATABASE_URL"):
-    config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+# The same database the API itself uses (app/service_urls.py: DATABASE_URL, or built from POSTGRES_*) -- overrides
+# alembic.ini's static placeholder. `%` is doubled because Alembic's config parser treats it as interpolation, and an
+# escaped password is full of them (`p@ss` -> `p%40ss`).
+if os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_HOST"):
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

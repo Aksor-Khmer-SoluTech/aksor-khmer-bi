@@ -187,13 +187,17 @@ preflight() {
   fi
   # Postgres isn't published on a host port, and an existing database keeps the password it was created with,
   # so this one warns instead of refusing.
-  # The password is placed inside DATABASE_URL (docker-compose.yml), where `@ : / # % ?` would be read as URL syntax.
-  if [ -z "$(env_value DATABASE_URL)" ] && printf '%s' "$(env_value POSTGRES_PASSWORD)" | grep -q '[^A-Za-z0-9._~-]'; then
-    die "POSTGRES_PASSWORD in .env contains a character that breaks the database URL (use letters, digits and . _ ~ - only, e.g. openssl rand -hex 16). A database that already exists needs: ALTER USER aksor PASSWORD '<new>' first"
-  fi
-  if [ -z "$(env_value REDIS_URL)" ] && printf '%s' "$(env_value REDIS_PASSWORD)" | grep -q '[^A-Za-z0-9._~-]'; then
-    die "REDIS_PASSWORD in .env contains a character that breaks the Redis URL (use letters and digits, e.g. openssl rand -hex 16)"
-  fi
+  # Passwords may contain any character: the app escapes them when it builds the database and Redis addresses
+  # (api/app/service_urls.py). The one trap is .env itself, where Compose reads `$` as the start of a variable unless
+  # the value is in single quotes -- `p$ss` would silently become `p`.
+  local key line
+  for key in POSTGRES_PASSWORD REDIS_PASSWORD PORTAL_PASSWORD; do
+    line="$(sed -n "s/^$key=//p" .env 2>/dev/null | tail -n1 | tr -d '\r')"
+    case "$line" in
+      "'"*) ;;
+      *'$'*) die "$key in .env contains \$ -- wrap the value in single quotes so it is read literally, e.g. $key='your\$password'" ;;
+    esac
+  done
   if is_guessable "$(env_value POSTGRES_PASSWORD)"; then
     warn "POSTGRES_PASSWORD is empty or guessable (the compose default is 'aksor') -- fine for a throwaway machine, not for a server anyone else can reach"
   fi

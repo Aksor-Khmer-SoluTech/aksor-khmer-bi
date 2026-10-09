@@ -27,6 +27,7 @@ upgrade and read this file first.
 - **Installation** — `deployment.sh` installs, updates, backs up and restores with Docker Compose, using released
   images for Intel/AMD and ARM. All data lives in one folder, `data/` (the database in `data/postgres`); an install
   that still keeps the database in the older `aksor-khmer-bi_pgdata` Docker volume is moved there automatically.
+  Passwords in `.env` may contain any character (wrap a value containing `$` in single quotes).
 
 ### Known limitations
 - HTTPS is not built in: put a reverse proxy in front of the portal and the API.

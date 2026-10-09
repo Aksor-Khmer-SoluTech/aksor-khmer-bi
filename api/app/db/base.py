@@ -3,13 +3,15 @@ package, plus `_gen_id` -- the one id-generation scheme every table uses.
 """
 from __future__ import annotations
 
-import os
 import uuid
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./aksor_khmer_bi.db")
+from ..service_urls import database_url
+
+# DATABASE_URL if set, else built from POSTGRES_* (the Docker install), else a local SQLite file -- app/service_urls.py.
+DATABASE_URL = database_url()
 
 # SQLite's default driver refuses to share a connection across threads;
 # FastAPI's threadpool-backed sync routes need that, and a Session's
