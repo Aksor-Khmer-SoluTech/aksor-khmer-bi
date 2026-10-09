@@ -17,8 +17,12 @@
 #                                     after `git pull`: back up, pull the images docker-compose.yml now names, recreate
 #                                     the app (migrations run at api start); redis and postgres are left alone
 #   ./deployment.sh doctor            check this machine (docker, compose, CPU, ports, disk); `up` runs it for you
+#   ./deployment.sh set-db-password   give the existing database the POSTGRES_PASSWORD now in .env
+#   ./deployment.sh cleanup [--dry-run] [--yes]
+#                                     remove old Aksor images (versions docker-compose.yml no longer uses) -- asks first
 #   ./deployment.sh down              stop the app, then postgres, then redis (volumes and data are kept)
-#   ./deployment.sh restart [redis|db|app]
+#   ./deployment.sh restart [redis|db|app]   or   restart api portal ...   (any of api, portal, scheduler, worker,
+#                                     jdbc-worker). Restarts as-is: after editing .env, run `up` instead
 #   ./deployment.sh status
 #   ./deployment.sh logs [service...] follow logs (default: api)
 #   ./deployment.sh backup            pg_dump + templates, resources, avatars, JDBC drivers, secrets key -> ./backups/
@@ -130,8 +134,8 @@ check_db_password() {
   docker run --rm --pull=never --network "$NETWORK" -e PGPASSWORD="$pw" postgres:16-alpine \
       psql -h postgres -U aksor -d aksor_khmer_bi -tAc 'select 1' >/dev/null 2>&1 && return 0
   die "Postgres refuses POSTGRES_PASSWORD from .env: this database was created with a different password, and it keeps that one.
-       Either put the original password back in .env, or give the database the one in .env:
-         docker compose -p $DB_PROJECT -f $DB_FILE exec -T postgres psql -U aksor -d aksor_khmer_bi -c \"ALTER USER aksor PASSWORD '<the password in .env>'\"
+       Either put the original password back in .env, or give the database the one in .env (any characters are safe):
+         ./deployment.sh set-db-password
        (on a throwaway machine you can instead delete the database: ./deployment.sh down, then sudo rm -rf $PG_DIR -- that erases every report and user)"
 }
 
@@ -213,6 +217,29 @@ preflight() {
   if [ -z "$(env_value CORS_ALLOWED_ORIGINS)" ]; then
     warn "CORS_ALLOWED_ORIGINS is unset (defaults to http://localhost:8080) -- set it to the portal's public URL"
   fi
+  # Changing API_PORT / PORTAL_PORT moves the services, but the browser still goes where config.js and
+  # CORS_ALLOWED_ORIGINS say -- a portal that can't reach its API ("connection refused"), or can but isn't allowed to
+  # sign in. When config.js names the API as plain http://HOST:PORT (localhost, an IP, a name on the local network),
+  # the right values are certain: the API on API_PORT, and the portal at http://HOST:PORTAL_PORT. Addresses without a
+  # port (a domain behind a reverse proxy) are left to the warning above.
+  local api_port portal_port cfg_url cfg_host cfg_port origin cors
+  api_port="$(env_value API_PORT | grep . || echo 8000)"
+  portal_port="$(env_value PORTAL_PORT | grep . || echo 8080)"
+  cfg_url="$(sed -n 's/^ *window\.PORTAL_API_BASE_URL *= *"\(.*\)".*/\1/p' "$cfg" | tail -n1)"
+  case "$cfg_url" in
+    http://*:[0-9]*)
+      cfg_host="${cfg_url#http://}"; cfg_host="${cfg_host%%/*}"; cfg_port="${cfg_host##*:}"; cfg_host="${cfg_host%:*}"
+      [ "$cfg_port" = "$api_port" ] || die "the portal will look for the API at $cfg_url, but API_PORT is $api_port.
+       In $cfg set:  window.PORTAL_API_BASE_URL = \"http://$cfg_host:$api_port\";"
+      origin="http://$cfg_host:$portal_port"
+      cors="$(env_value CORS_ALLOWED_ORIGINS)"
+      case ",${cors:-http://localhost:8080}," in
+        *",$origin,"*|*",$origin/,"*|*", $origin,"*) ;;
+        *) die "people will open the portal at $origin, but CORS_ALLOWED_ORIGINS (${cors:-unset = http://localhost:8080}) doesn't include it, so sign-in would fail.
+       In .env set:  CORS_ALLOWED_ORIGINS=$origin
+       (and open the portal at exactly that address -- not localhost if the API is set to $cfg_host)" ;;
+      esac ;;
+  esac
 }
 
 # Checks the machine before anything starts, so a problem shows up in seconds with a fix.
@@ -254,6 +281,70 @@ cmd_doctor() {
   [ "$fails" -eq 0 ] && info "all good" || return 1
 }
 
+# Give the existing database the POSTGRES_PASSWORD now in .env -- a database keeps the password it was created with.
+# The value reaches psql as a variable (:'pw' quotes it as a string literal), never through a shell or an SQL string,
+# so any character is safe: quotes, $, !, @ ...
+cmd_set_db_password() {
+  require_docker
+  [ -z "$(env_value DATABASE_URL)" ] || die "DATABASE_URL is set in .env -- that database isn't run by this installer; change its password there"
+  local pw; pw="$(env_value POSTGRES_PASSWORD)"
+  [ -n "$pw" ] || die "set POSTGRES_PASSWORD in .env first"
+  ensure_network
+  move_old_pg_volume
+  info "starting postgres"
+  db up -d --wait
+  info "setting the database password to POSTGRES_PASSWORD from .env"
+  printf '%s\n' "ALTER USER aksor PASSWORD :'pw';" \
+    | db exec -T -e AKSOR_NEW_PW="$pw" postgres sh -c 'psql -q -v ON_ERROR_STOP=1 -U aksor -d aksor_khmer_bi -v pw="$AKSOR_NEW_PW"' \
+    || die "couldn't change the database password (see the message above)"
+  check_db_password
+  info "done -- the database now uses the password in .env. Start the app: ./deployment.sh up"
+}
+
+# Remove the Aksor images the current docker-compose.yml no longer names -- the versions each `update` leaves behind
+# (the engine image is large: LibreOffice). Only aksorkhmerbi/aksor-khmer-bi-* images; never one docker-compose.yml
+# names (running or not), never Postgres/Redis or another project's. Lists them and asks first.
+cmd_cleanup() {
+  local yes=0 dry=0 a
+  for a in "$@"; do
+    case "$a" in
+      --yes|-y) yes=1 ;;
+      --dry-run) dry=1 ;;
+      *) die "usage: cleanup [--dry-run] [--yes]" ;;
+    esac
+  done
+  require_docker
+  local keep; keep="$(app --profile jdbc config --images 2>/dev/null | sort -u)"
+  [ -n "$keep" ] || die "couldn't read the images docker-compose.yml uses -- nothing removed"
+  local old=() ref
+  while IFS= read -r ref; do
+    case "$ref" in
+      aksorkhmerbi/aksor-khmer-bi-*:*) ;;
+      *) continue ;;
+    esac
+    case "$ref" in *":<none>") continue ;; esac
+    printf '%s\n' "$keep" | grep -qxF -- "$ref" || old+=("$ref")
+  done <<EOF
+$(docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | sort -u)
+EOF
+  if [ ${#old[@]} -eq 0 ]; then
+    info "nothing to remove -- the only Aksor images here are the ones docker-compose.yml uses"
+    return 0
+  fi
+  info "Aksor images docker-compose.yml no longer uses:"
+  printf '      %s\n' "${old[@]}"
+  [ "$dry" = 0 ] || { info "dry run: nothing removed"; return 0; }
+  if [ "$yes" != 1 ]; then
+    [ -t 0 ] || die "not a terminal -- run ./deployment.sh cleanup --yes to remove them"
+    local answer; printf 'Remove them? [y/N] '; read -r answer
+    case "$answer" in y|Y|yes|YES) ;; *) info "nothing removed"; return 0 ;; esac
+  fi
+  for ref in "${old[@]}"; do
+    if docker image rm "$ref" >/dev/null 2>&1; then info "removed $ref"; else warn "kept $ref -- a container still uses it"; fi
+  done
+  info "done (docker system df shows Docker's disk use)"
+}
+
 cmd_init() {
   require_docker
   ensure_network
@@ -280,7 +371,7 @@ cmd_init() {
   set_env PORTAL_PASSWORD "$portal_pass"
   info "wrote .env from .env.example (mode 600)"
   printf '    portal login:  admin / %s\n' "$portal_pass"
-  warn "that password is only shown here; it is saved in .env. Set CORS_ALLOWED_ORIGINS before exposing the portal."
+  warn "that one-time password is only shown here (it is also in .env): at the first sign-in you choose your own. Set CORS_ALLOWED_ORIGINS before exposing the portal."
 }
 
 cmd_up() {
@@ -316,14 +407,26 @@ cmd_down() {
   redis down
 }
 
+# Restart running containers as they are. A restart does NOT re-read .env or the compose files -- `up` does that
+# (and recreates only what changed), so after editing settings use ./deployment.sh up instead.
 cmd_restart() {
   require_docker
-  case "${1:-all}" in
+  [ $# -gt 0 ] || set -- all
+  case "$1" in
     all)   redis restart; db restart; app restart ;;   # dependencies first, so the app doesn't lose them mid-restart
     app)   app restart ;;
     db)    db restart ;;
     redis) redis restart ;;
-    *) die "restart [redis|db|app]" ;;
+    *)
+      local svc
+      for svc in "$@"; do
+        case "$svc" in
+          api|portal|scheduler|worker|jdbc-worker) ;;
+          *) die "usage: restart [all|app|db|redis] or restart <service>... with services api, portal, scheduler, worker, jdbc-worker" ;;
+        esac
+      done
+      info "restarting $*"
+      app restart "$@" ;;
   esac
 }
 
@@ -494,6 +597,8 @@ main() {
     restore) cmd_restore "$@" ;;
     update)  cmd_update "$@" ;;
     doctor)  cmd_doctor ;;
+    set-db-password) cmd_set_db_password "$@" ;;
+    cleanup) cmd_cleanup "$@" ;;
     redis)   require_docker; ensure_network; redis "${@:-ps}" ;;
     db)      require_docker; ensure_network; db "${@:-ps}" ;;
     app)     require_docker; ensure_network; app "${@:-ps}" ;;

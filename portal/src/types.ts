@@ -392,6 +392,9 @@ export interface AuthInfo {
   /** The account must choose a new password before anything else works --
    * App.tsx shows ForcePasswordChange instead of the console. */
   mustChangePassword: boolean;
+  /** The built-in admin from .env while no administrator account exists: its password was generated at install
+   * time, and ForcePasswordChange runs the first-run setup (api.setupAdmin) instead of a password change. */
+  setupRequired: boolean;
 }
 
 // --- Organizations, users, roles, permissions, grants -------------------

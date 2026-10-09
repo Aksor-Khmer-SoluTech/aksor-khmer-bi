@@ -7,7 +7,7 @@ reorganizes where each class *lives*, not how callers reach it.
 from .analytics import JobsSummary, MyDashboard, MyDay, MyRun, MyTopReport, ReportRenderStats, SecurityActivityItem
 from .reports import VersionUpdate
 from .audit import AuditEventOut, AuditPage, ChangelogEntry, ReportChangelog, ReportVersionOut
-from .auth import AuthEventOut, AuthVerifyOut, LoginRequest, SessionOut, TokenOut
+from .auth import AuthEventOut, AuthVerifyOut, LoginRequest, SessionOut, SetupAdminRequest, TokenOut
 from .connections import (
     ConnectionCreate,
     ConnectionOut,
@@ -131,6 +131,7 @@ __all__ = [
     "AuthEventOut",
     "AuthVerifyOut",
     "LoginRequest",
+    "SetupAdminRequest",
     "SessionOut",
     "TokenOut",
     "DiskUsage",

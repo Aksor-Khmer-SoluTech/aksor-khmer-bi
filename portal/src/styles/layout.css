@@ -120,6 +120,21 @@
   color: var(--text);
 }
 
+/* A link styled as a menu entry (e.g. "Create your own account"). */
+a.account-item {
+  text-decoration: none;
+}
+
+/* The built-in admin's explanation, above its menu entries. */
+.account-panel-hint {
+  margin: 0 0 6px;
+  padding: 2px 10px 6px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-faint);
+  max-width: 260px;
+}
+
 .account-item.active {
   color: var(--accent-strong);
   background: var(--accent-soft);

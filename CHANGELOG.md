@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-10-09
+
+### Changed
+- **The generated admin password is one-time.** At the first sign-in with `PORTAL_USERNAME` / `PORTAL_PASSWORD`
+  (while no administrator account exists) the portal asks you to choose your own password, which creates a real
+  administrator account with that name — profile, two-factor and sessions included — and the generated password stops
+  working for it. **Upgrade note:** on an install that already has an administrator account nothing changes, except
+  that the `.env` password no longer signs in for a name that also exists as a database account; use a different
+  `PORTAL_USERNAME` as the emergency key.
+
+### Fixed
+- A wrong password on the sign-in screen no longer makes the browser open its own login dialog.
+- The account menu explains the built-in admin account instead of showing an empty Profile page.
+
+### Added
+- `./deployment.sh set-db-password` gives an existing database the `POSTGRES_PASSWORD` now in `.env` (any characters
+  are safe); `./deployment.sh restart api portal …` restarts single services; `up` stops early, with the fix, when
+  `API_PORT` / `PORTAL_PORT` don't match the portal's API address or `CORS_ALLOWED_ORIGINS`; `./deployment.sh cleanup`
+  removes the old Aksor image versions an update leaves behind (asks first).
+
 ## [1.0.0-beta.1] - 2026-10-09
 
 First public beta. Settings, the API and the database schema may still change before 1.0.0: back up before every

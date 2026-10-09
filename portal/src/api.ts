@@ -335,6 +335,7 @@ interface AuthVerifyResponse {
   is_superuser: boolean;
   permissions: string[];
   must_change_password?: boolean;
+  setup_required?: boolean;
 }
 
 function toAuthInfo(body: AuthVerifyResponse): AuthInfo {
@@ -345,6 +346,7 @@ function toAuthInfo(body: AuthVerifyResponse): AuthInfo {
     isSuperuser: body.is_superuser,
     permissions: body.permissions,
     mustChangePassword: body.must_change_password ?? false,
+    setupRequired: body.setup_required ?? false,
   };
 }
 
@@ -416,6 +418,22 @@ export const api = {
     await fetch(API + "/auth/logout", { method: "POST", credentials: "include", headers }).catch(() => {});
     dropSession();
     authChannel?.postMessage("signed-out");
+  },
+
+  /** First-run setup: turn the install-time PORTAL_PASSWORD sign-in into your own administrator account (same user
+   * name, this password). The answer is a new session for that account, adopted here like a sign-in. */
+  async setupAdmin(newPassword: string): Promise<AuthInfo> {
+    const resp = await apiFetch("/auth/setup-admin", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+    if (!resp.ok) {
+      const body: ApiErrorBody = await resp.json().catch(() => ({}));
+      throw new ApiError(resp.status, typeof body.detail === "string" ? body.detail : `Setup failed (HTTP ${resp.status}).`);
+    }
+    return adopt(await resp.json());
   },
 
   // Settings > Active Sessions: the places this account is signed in, each one revocable.

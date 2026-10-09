@@ -15,7 +15,7 @@ services:
     # One image for api, scheduler and worker (same code, different command). Every app service runs a released
     # image from Docker Hub, pinned to the version written here -- nothing is built on the server. A release updates
     # these tags (each image can move on its own); get them with `git pull`, then `./deployment.sh update`.
-    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0-beta.1
+    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0-beta.2
     restart: unless-stopped
     logging: *default-logging
     ports:
@@ -140,7 +140,7 @@ services:
   # memory/CPU/processes. Nothing is published to the host.
   jdbc-worker:
     profiles: ["jdbc"]
-    image: aksorkhmerbi/aksor-khmer-bi-jdbc-worker:1.0.0-beta.1
+    image: aksorkhmerbi/aksor-khmer-bi-jdbc-worker:1.0.0-beta.2
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -169,7 +169,7 @@ services:
   # more than one replica would make every cron trigger fire once per
   # replica, not once total. Scale `worker` instead for more throughput.
   scheduler:
-    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0-beta.1
+    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0-beta.2
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["python", "-m", "app.scheduler"]
     restart: unless-stopped
@@ -203,7 +203,7 @@ services:
   # retry/backoff (app/celery_app.py's run_job task). Horizontally
   # scalable: `docker compose up --scale worker=3`.
   worker:
-    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0-beta.1
+    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0-beta.2
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
     restart: unless-stopped
@@ -246,7 +246,7 @@ services:
   # this container, so there's no network dependency between the two at
   # the container level — only in the browser loading the page.
   portal:
-    image: aksorkhmerbi/aksor-khmer-bi-portal:1.0.0-beta.1
+    image: aksorkhmerbi/aksor-khmer-bi-portal:1.0.0-beta.2
     restart: unless-stopped
     logging: *default-logging
     ports:

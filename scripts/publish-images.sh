@@ -73,6 +73,27 @@ for item in "${plan[@]}"; do
   IFS=: read -r name _ version <<<"$item"
   printf '      %s-%s:%s\n' "$prefix" "$name" "$version"
 done
+# The version the API (/docs) and the portal (footer, About) report must be the tag being published -- otherwise users
+# see one version while running another.
+app_version() {
+  case "$1" in
+    engine) sed -n 's/^    version="\(.*\)",$/\1/p' api/app/main.py | head -n1 ;;
+    portal) sed -n 's/^  "version": "\(.*\)",$/\1/p' portal/package.json | head -n1 ;;
+  esac
+}
+mismatch=0
+for item in "${plan[@]}"; do
+  IFS=: read -r name _ version <<<"$item"
+  case "$name" in engine|portal) ;; *) continue ;; esac
+  have="$(app_version "$name")"
+  if [ "$have" != "$version" ]; then
+    printf '\033[31merror:\033[0m %s reports version %s but you are publishing %s -- set it in %s first\n' \
+      "$name" "${have:-?}" "$version" "$([ "$name" = engine ] && echo 'api/app/main.py (version=...)' || echo 'portal/package.json and package-lock.json')" >&2
+    mismatch=1
+  fi
+done
+[ "$mismatch" = 0 ] || exit 1
+
 [ "$dry" = 0 ] || { info "dry run: nothing built"; exit 0; }
 
 command -v docker >/dev/null || die "docker is not installed"

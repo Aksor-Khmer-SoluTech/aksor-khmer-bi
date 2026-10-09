@@ -12,8 +12,18 @@ class AuthVerifyOut(BaseModel):
     must_change_password: bool = Field(
         False,
         description="True when this account has to pick a new password first -- every other endpoint answers "
-        "403 PASSWORD_CHANGE_REQUIRED until PATCH /users/me changes it. Always false for a break-glass superuser.",
+        "403 PASSWORD_CHANGE_REQUIRED until PATCH /users/me changes it -- or, with setup_required, until POST "
+        "/auth/setup-admin finishes the first-run setup.",
     )
+    setup_required: bool = Field(
+        False,
+        description="True for the break-glass login from .env while no administrator account exists yet: its password "
+        "was generated at install time, and POST /auth/setup-admin turns it into your own administrator account.",
+    )
+
+
+class SetupAdminRequest(BaseModel):
+    new_password: str = Field(..., description="Your own password for the administrator account the setup creates")
 
 
 class LoginRequest(BaseModel):

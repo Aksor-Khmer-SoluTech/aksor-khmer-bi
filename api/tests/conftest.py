@@ -70,6 +70,11 @@ def portal_auth_env(monkeypatch):
     """
     monkeypatch.setenv("PORTAL_USERNAME", TEST_USERNAME)
     monkeypatch.setenv("PORTAL_PASSWORD", TEST_PASSWORD)
+    # Most tests act as that break-glass superuser on an empty database -- the state the first-run setup gate is for.
+    # Off by default here; tests/test_first_run_setup.py turns it back on.
+    from app import auth
+
+    monkeypatch.setattr(auth, "FIRST_RUN_SETUP", False)
 
 
 @pytest.fixture(autouse=True)

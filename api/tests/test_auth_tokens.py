@@ -82,6 +82,18 @@ def test_login_returns_an_access_token_and_sets_an_httponly_refresh_cookie(http,
     assert "max-age" not in cookie and "secure" not in cookie  # a session cookie, over plain http
 
 
+def test_a_wrong_password_on_login_does_not_make_the_browser_pop_up_its_own_dialog(http, make_local_user):
+    # `WWW-Authenticate: Basic` on a 401 makes browsers show their native login prompt over the portal's form.
+    make_local_user("alice", "pw-alice-1", ())
+    for username, password in (("alice", "wrong-password"), ("nobody", "whatever")):
+        resp = _login(http, username, password, expect=401)
+        assert "www-authenticate" not in {k.lower() for k in resp.headers}
+        assert resp.json()["detail"] == "Invalid credentials"
+    # Scripts that send HTTP Basic themselves still get the challenge they expect.
+    basic = http.get("/api/v1/auth/verify", auth=("alice", "wrong-password"))
+    assert basic.status_code == 401 and basic.headers["www-authenticate"] == "Basic"
+
+
 def test_remember_keeps_the_cookie_beyond_the_browser_and_the_session_for_longer(http, make_local_user):
     make_local_user("alice", "pw-alice-1", ())
     resp = _login(http, "alice", "pw-alice-1", remember=True)

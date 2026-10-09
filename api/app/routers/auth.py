@@ -32,13 +32,15 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from sqlalchemy import select
 
 from .. import audit, auth_tokens, db, totp
-from ..auth import context_for_session, get_current_user, get_current_user_allowing_password_change, resolve_auth_context
+from ..auth import context_for_session, get_current_user, get_current_user_allowing_password_change, resolve_auth_context, setup_required
 from ..auth_events import client_ip, parse_user_agent, record_login_failure, record_login_success
-from ..models import AuthVerifyOut, LoginRequest, SessionOut, TokenOut
+from ..models import AuthVerifyOut, LoginRequest, SessionOut, SetupAdminRequest, TokenOut
 from ..rate_limit import RateLimiter
-from ..rbac import AuthContext
+from ..rbac import ROOT_ORG_ID, SYSTEM_ADMIN_ROLE_NAME, AuthContext, find_user_for_login, get_effective_permissions, system_admin_exists
+from ..security import check_password_policy, hash_password
 
 _log = logging.getLogger("aksor_khmer_bi.auth_routes")
 
@@ -89,7 +91,8 @@ def _verify_out(context: AuthContext) -> AuthVerifyOut:
         org_id=context.org_id,
         is_superuser=context.is_superuser,
         permissions=sorted(context.permissions),
-        must_change_password=context.user.must_change_password if context.user is not None else False,
+        must_change_password=context.user.must_change_password if context.user is not None else setup_required(context),
+        setup_required=setup_required(context),
     )
 
 
@@ -217,9 +220,15 @@ def _issue(context: AuthContext, session_row, refresh_token: str | None, request
 @router.post("/login", summary="Sign in: get an access token (and the refresh cookie)", response_model=TokenOut)
 def login(body: LoginRequest, request: Request, response: Response) -> TokenOut:
     _throttle_sign_in(request, body.username)
-    context = _check_credentials(
-        request, HTTPBasicCredentials(username=body.username, password=body.password), require_totp=True, totp_code=body.totp_code
-    )
+    try:
+        context = _check_credentials(
+            request, HTTPBasicCredentials(username=body.username, password=body.password), require_totp=True, totp_code=body.totp_code
+        )
+    except HTTPException as exc:
+        # The shared check answers a wrong password with `WWW-Authenticate: Basic` -- right for scripts that send HTTP
+        # Basic, but on this JSON sign-in it makes the browser pop up its own login dialog over the portal's form.
+        headers = {k: v for k, v in (exc.headers or {}).items() if k.lower() != "www-authenticate"}
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=headers or None) from None
     with db.SessionLocal() as session:
         row, refresh_token = auth_tokens.create_session(
             session,
@@ -231,6 +240,80 @@ def login(body: LoginRequest, request: Request, response: Response) -> TokenOut:
         )
         context.session_id = row.id
         return _issue(context, row, refresh_token, request, response)
+
+
+@router.post(
+    "/setup-admin",
+    summary="First run: turn the generated break-glass sign-in into your own administrator account",
+    response_model=TokenOut,
+)
+def setup_admin(
+    body: SetupAdminRequest,
+    request: Request,
+    response: Response,
+    context: AuthContext = Depends(get_current_user_allowing_password_change),
+) -> TokenOut:
+    """The PORTAL_PASSWORD that `deployment.sh init` generates is a one-time key. Signed in with it while no
+    administrator account exists, this creates one -- the same user name, *your* password, the system-wide
+    administrator role -- ends the break-glass session and signs you in as the new account. From then on the .env
+    password no longer works for that name (a database account with the name takes precedence)."""
+    if not setup_required(context):
+        raise HTTPException(status_code=409, detail="The first-run setup is already done -- sign in with your administrator account")
+    try:
+        password = check_password_policy(body.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    now = datetime.now(timezone.utc).isoformat()
+    with db.SessionLocal() as session:
+        # Re-checked inside the transaction's session: two setups racing must not both create an administrator.
+        if system_admin_exists(session):
+            raise HTTPException(status_code=409, detail="An administrator account already exists -- sign in with it")
+        if find_user_for_login(session, context.username) is not None:
+            raise HTTPException(status_code=409, detail=f"A user named {context.username} already exists")
+        role = session.execute(
+            select(db.Role).where(db.Role.org_id.is_(None), db.Role.name == SYSTEM_ADMIN_ROLE_NAME)
+        ).scalar_one()
+        user = db.User(
+            org_id=ROOT_ORG_ID,
+            username=context.username,
+            auth_source="local",
+            password_hash=hash_password(password),
+            must_change_password=False,
+            is_active=True,
+            is_locked=False,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(user)
+        session.flush()
+        session.add(db.UserRoleAssignment(user_id=user.id, role_id=role.id, granted_at=now, granted_by=None, is_active=True))
+        session.commit()
+        audit.record(
+            audit.Actor.of(context, request), "user.create", "user", user.id,
+            label=user.username, org_id=ROOT_ORG_ID,
+            summary=f"First-run setup: created administrator {user.username}",
+            details={"auth_source": "local", "role": SYSTEM_ADMIN_ROLE_NAME},
+        )
+        if context.session_id:
+            auth_tokens.revoke_session(session, context.session_id, "first-run setup finished")
+        session.refresh(user)
+        account = AuthContext(
+            username=user.username,
+            is_superuser=True,
+            permissions=get_effective_permissions(session, user),
+            user=user,
+            org_id=user.org_id,
+        )
+        row, refresh_token = auth_tokens.create_session(
+            session,
+            user=user,
+            username=user.username,
+            ip_address=client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+            remember=False,
+        )
+        account.session_id = row.id
+        return _issue(account, row, refresh_token, request, response)
 
 
 @router.post("/refresh", summary="Trade the refresh cookie for a new access token", response_model=TokenOut)

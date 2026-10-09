@@ -55,6 +55,12 @@ export default function AccountMenu({ auth }: { auth: AuthInfo }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The built-in admin from the server's .env (PORTAL_USERNAME/PORTAL_PASSWORD) has no database row: /users/me
+  // answers 404, so there's no profile, password, 2FA or sessions to show. Say so, and point at the fix, instead of
+  // offering menu entries that land on an empty page.
+  const systemAccount = profileChecked && profile === null && !profileError;
+  const canCreateAccounts = auth.isSuperuser || auth.permissions.includes("user:manage");
+
   function openSettings(tab: SettingsTab) {
     setSettingsTab(tab);
     setSettingsOpen(true);
@@ -90,21 +96,41 @@ export default function AccountMenu({ auth }: { auth: AuthInfo }) {
             <UserAvatar profile={profile} username={auth.username} checked={profileChecked} />
             <div>
               <div className="account-panel-name mono">{auth.username}</div>
+              {systemAccount && <div className="account-panel-sub">Built-in admin account</div>}
             </div>
           </div>
 
-          <button type="button" className="account-item" onClick={() => openSettings("profile")}>
-            Profile
-          </button>
+          {systemAccount ? (
+            <>
+              <p className="account-panel-hint">
+                This sign-in comes from the server's settings and has no profile, password or sessions. Create your own
+                account and sign in with it for everyday use.
+              </p>
+              {canCreateAccounts && (
+                <a className="account-item" href="#/admin/users" onClick={() => setOpen(false)}>
+                  Create your own account
+                </a>
+              )}
+              <button type="button" className="account-item" onClick={() => openSettings("preferences")}>
+                Preferences
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="account-item" onClick={() => openSettings("profile")}>
+                Profile
+              </button>
 
-          {/* Straight onto the Preferences tab (theme, report preview, scrollbars) -- the one tab a break-glass login can use too. */}
-          <button type="button" className="account-item" onClick={() => openSettings("preferences")}>
-            Preferences
-          </button>
+              {/* Straight onto the Preferences tab (theme, report preview, scrollbars). */}
+              <button type="button" className="account-item" onClick={() => openSettings("preferences")}>
+                Preferences
+              </button>
 
-          <button type="button" className="account-item" onClick={() => openSettings("profile")}>
-            Settings
-          </button>
+              <button type="button" className="account-item" onClick={() => openSettings("profile")}>
+                Settings
+              </button>
+            </>
+          )}
 
           <div className="account-divider" />
 

@@ -520,6 +520,29 @@ def effective_parameter_limits(
     return limits
 
 
+def system_admin_exists(session: Session) -> bool:
+    """True once an active, unlocked database user actively holds the system-wide ROLE_ADMINISTRATOR. Until then the
+    break-glass login from .env is the installation's first-run key and must be turned into such an account
+    (POST /auth/setup-admin); afterwards it is only an emergency key."""
+    return (
+        session.execute(
+            select(UserRoleAssignment.id)
+            .join(Role, Role.id == UserRoleAssignment.role_id)
+            .join(User, User.id == UserRoleAssignment.user_id)
+            .where(
+                Role.org_id.is_(None),
+                Role.name == SYSTEM_ADMIN_ROLE_NAME,
+                UserRoleAssignment.is_active.is_(True),
+                _not_expired_clause(UserRoleAssignment),
+                User.is_active.is_(True),
+                User.is_locked.is_(False),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
 def any_user_exists(session: Session) -> bool:
     """Used to distinguish "nothing is configured yet" (503, matching the
     old single-admin-credential behavior) from "credentials just didn't

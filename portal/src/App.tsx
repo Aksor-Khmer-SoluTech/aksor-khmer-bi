@@ -74,7 +74,13 @@ export default function App() {
   // Checked before the console renders at all: a flagged account can't use
   // any of it (the API refuses every call), so it gets only this screen.
   if (auth.mustChangePassword) {
-    return <ForcePasswordChange auth={auth} onChanged={() => setAuth({ ...auth, mustChangePassword: false })} />;
+    return (
+      <ForcePasswordChange
+        auth={auth}
+        onChanged={() => setAuth({ ...auth, mustChangePassword: false })}
+        onAccountReady={setAuth}
+      />
+    );
   }
 
   const canAdmin = canAccessAdmin(auth);

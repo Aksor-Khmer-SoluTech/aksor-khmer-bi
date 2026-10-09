@@ -67,6 +67,7 @@ from .rbac import (
     AuthContext,
     any_user_exists,
     find_user_for_login,
+    system_admin_exists,
     get_effective_permissions,
     has_folder_access,
     has_report_access,
@@ -107,18 +108,20 @@ def resolve_auth_context(credentials: HTTPBasicCredentials) -> AuthContext:
     trail with one row per API call instead of one per sign-in.
     """
     break_glass = _break_glass_credentials()
-    if break_glass is not None:
-        expected_username, expected_password = break_glass
-        # compare_digest on both independently (not the tuple) to avoid
-        # leaking username-correctness via early-exit timing.
-        username_ok = secrets.compare_digest(credentials.username, expected_username)
-        password_ok = secrets.compare_digest(credentials.password, expected_password)
-        if username_ok and password_ok:
-            _log.info("Authenticated break-glass superuser username=%r", credentials.username)
-            return AuthContext(username=credentials.username, is_superuser=True)
-
     with db.SessionLocal() as session:
         user = find_user_for_login(session, credentials.username)
+        if break_glass is not None:
+            expected_username, expected_password = break_glass
+            # compare_digest on both independently (not the tuple) to avoid
+            # leaking username-correctness via early-exit timing.
+            username_ok = secrets.compare_digest(credentials.username, expected_username)
+            password_ok = secrets.compare_digest(credentials.password, expected_password)
+            # Once a database account holds this name (the first-run setup creates it), the generated .env password
+            # is retired for it: only the account's own password signs in. Recovery is a *different* PORTAL_USERNAME.
+            if username_ok and password_ok and user is None:
+                _log.info("Authenticated break-glass superuser username=%r", credentials.username)
+                return AuthContext(username=credentials.username, is_superuser=True)
+
         authenticated = False
 
         if user is not None and user.auth_source == "local" and user.password_hash:
@@ -277,7 +280,25 @@ def get_current_user(context: AuthContext = Depends(get_current_user_allowing_pa
     if context.user is not None and context.user.must_change_password:
         _log.info("Refused request: username=%r must change their password first", context.username)
         raise HTTPException(status_code=403, detail=PASSWORD_CHANGE_REQUIRED_DETAIL)
+    if setup_required(context):
+        _log.info("Refused request: username=%r must finish the first-run setup first", context.username)
+        raise HTTPException(status_code=403, detail=PASSWORD_CHANGE_REQUIRED_DETAIL)
     return context
+
+
+# The first-run gate below. Only the test suite turns it off (tests/conftest.py): most tests sign in as the break-glass
+# superuser on an empty database, which is exactly the state the gate exists for.
+FIRST_RUN_SETUP = True
+
+
+def setup_required(context: AuthContext) -> bool:
+    """The break-glass login while no real administrator exists: its .env password was generated at install time and
+    only gets you to the first-run setup (POST /auth/setup-admin), which turns it into your own administrator
+    account. Until then every other route answers 403 PASSWORD_CHANGE_REQUIRED, as for any temporary password."""
+    if not FIRST_RUN_SETUP or context.user is not None or not context.is_superuser:
+        return False
+    with db.SessionLocal() as session:
+        return not system_admin_exists(session)
 
 
 def require_auth(context: AuthContext = Depends(get_current_user)) -> str:

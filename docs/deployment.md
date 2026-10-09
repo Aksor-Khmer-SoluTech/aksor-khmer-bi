@@ -200,7 +200,8 @@ Everything you do afterwards:
 | update to the new version | read the [CHANGELOG](../CHANGELOG.md) for every version up to the one you want **first**; `git pull` (it brings the new image versions), then `./deployment.sh update` — takes a **backup first**, pulls that version's images, restarts the app (database migrations run as the API starts); Postgres and Redis are not touched. Flag: `--no-backup` |
 | back up now | `./deployment.sh backup` — the database plus templates, images, avatars and the encryption key, into `./backups/` (the newest 14 are kept; `BACKUP_KEEP=30` changes that) |
 | apply a change in `.env` | `./deployment.sh up` (recreates only what changed) |
-| restart | `./deployment.sh restart` (everything), or `restart app` / `restart db` / `restart redis` |
+| restart | `./deployment.sh restart` (everything), `restart app` / `restart db` / `restart redis`, or single services: `restart api portal` (any of `api`, `portal`, `scheduler`, `worker`, `jdbc-worker`). A restart doesn't re-read `.env` — after editing it, run `./deployment.sh up` |
+| free disk space after updates | `./deployment.sh cleanup` — removes the old Aksor images that `docker-compose.yml` no longer uses (lists them and asks first; `--dry-run` only lists). Never the running version, Postgres, Redis or other projects' images |
 | stop everything | `./deployment.sh down` — your data is kept |
 | operate one stack alone | `./deployment.sh app status`, `./deployment.sh db logs`, `./deployment.sh redis restart`, … |
 | use uploaded JDBC drivers (Oracle, SQL Server…) | set `JDBC_WORKER_TOKEN` in `.env` ([Step 4](#step-4-optional--jdbc-driver-service)), then `./deployment.sh app --profile jdbc up -d jdbc-worker api` |
@@ -325,7 +326,7 @@ docker compose -p aksor-app -f docker-compose.yml ps                 # api, sche
 curl http://localhost:8000/api/v1/health                              # {"status":"ok"}
 ```
 
-Then open **http://localhost:8080** and sign in with `PORTAL_USERNAME` / `PORTAL_PASSWORD` from `.env`.
+Then open **http://localhost:8080** and sign in with `PORTAL_USERNAME` / `PORTAL_PASSWORD` from `.env`. That password is a one-time key: the portal asks you to choose your own straight away, which turns the sign-in into your administrator account (the generated password then stops working).
 Create real accounts under **Admin → Users**, then delete the two `PORTAL_*` lines from `.env` and run
 `docker compose -p aksor-app -f docker-compose.yml up -d` to apply it.
 
@@ -451,7 +452,7 @@ command: `docker compose -p aksor-app -f docker-compose.yml -f docker-compose.cu
 | You see | Cause and fix |
 |---|---|
 | `network aksor-network declared as external, but could not be found` | Step by step, 0.1 wasn't run: `docker network create aksor-network` |
-| `api` keeps restarting; its log says the database or password is wrong | Postgres isn't up (do step 2 first), or `.env`'s `POSTGRES_PASSWORD` differs from the one the database was created with. Fix: put the original password back, or change the database's: `docker compose -p aksor-db -f docker-compose.db.yml exec postgres psql -U aksor -d aksor_khmer_bi -c "ALTER USER aksor PASSWORD 'new'"` and use the same in `.env` |
+| `api` keeps restarting; its log says the database or password is wrong, or `up` says Postgres refuses `POSTGRES_PASSWORD` | Postgres isn't up (do step 2 first), or the database was created with a different password than `.env` now has. Put the original password back in `.env`, or give the database the one in `.env`: `./deployment.sh set-db-password` (any characters are safe; it never goes through the shell) |
 | The portal loads but sign-in does nothing / "failed to fetch" | `CORS_ALLOWED_ORIGINS` doesn't match the address in your browser, or `PORTAL_API_BASE_URL` points at the wrong API. See "A server with a domain name" |
 | You sign in, but a reload (or the next minutes) sends you back to the sign-in screen | The refresh cookie isn't reaching the API: the portal and the API are different *sites* (`localhost` vs `127.0.0.1`, or unrelated domains), or you're on plain `http` with `AUTH_COOKIE_SECURE=true`. See [authentication.md](authentication.md#troubleshooting) |
 | `pull access denied` / `manifest unknown` / `not found` while pulling | `docker-compose.yml` names a version that isn't on Docker Hub — it was edited by hand, or you're on an unreleased commit: `git checkout` the file (or a release tag) and run `update` again. `up` / `update` print the exact images they pull. A timeout instead: the server can't reach Docker Hub — see "Get Docker ready" |
@@ -822,7 +823,7 @@ sane defaults), the mount just lets you override them live.
 
 | Variable | Required? | Purpose |
 |---|---|---|
-| `PORTAL_USERNAME` / `PORTAL_PASSWORD` | For the admin surface | The break-glass superuser: signs in through `POST /api/v1/auth/login` like anyone, and is how the first real accounts get created. With neither this nor any user, every protected route returns `503`, not open access. Set on the `api` service. |
+| `PORTAL_USERNAME` / `PORTAL_PASSWORD` | For the first sign-in | The built-in admin. `init` generates a one-time password; at the first sign-in (while no administrator account exists) the portal asks for your own and `POST /api/v1/auth/setup-admin` creates an administrator account with this name — after that the `.env` password is ignored for it. Everything else is refused until that's done. Later it is an emergency key: set a *different* user name and password, `./deployment.sh up`, sign in, reset the account. With no administrator account and no built-in admin, every protected route returns `503`. Set on the `api` service. |
 | `API_PORT` / `PORTAL_PORT` | No (defaults 8000 / 8080) | The host ports the `api` and `portal` services are published on. After changing them, keep `CORS_ALLOWED_ORIGINS` (portal port) and the portal config file's `PORTAL_API_BASE_URL` (API port) in step. |
 | `CORS_ALLOWED_ORIGINS` | For the portal to work at all | Comma-separated origins allowed to call `api` cross-origin — the portal's **exact** origin. Also what lets the browser send the refresh cookie to `/api/v1/auth/*`, and the origins those cookie routes accept. Set on the `api` service. |
 | `JWT_SECRET` | Only with more than one `api` replica | 32+ characters; the key access tokens are signed with. Unset: generated into `data/secrets/jwt.key` on first use (kept in the mounted `data/secrets`). All replicas must share one. Losing or changing it only signs everyone out. See [Sign-in and sessions](authentication.md). |

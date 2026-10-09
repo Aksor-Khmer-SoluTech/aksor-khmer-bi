@@ -170,7 +170,7 @@ Its limits:
 | `AUTH_COOKIE_SECURE` | `auto` | `auto`: the cookie is `Secure` when the request came over HTTPS (or a proxy said so with `X-Forwarded-Proto`). `true` / `false` to force |
 | `AUTH_COOKIE_SAMESITE` | `lax` | `lax`, `strict`, or `none` (needs HTTPS; see below) |
 | `CORS_ALLOWED_ORIGINS` | — | The portal's origin(s). Also the list the refresh and logout routes accept an `Origin` from |
-| `PORTAL_USERNAME` / `PORTAL_PASSWORD` | — | The break-glass superuser |
+| `PORTAL_USERNAME` / `PORTAL_PASSWORD` | — | The built-in admin: a one-time password for the first sign-in, which becomes your administrator account (see [Deployment](deployment.md)); afterwards an emergency key under a different user name |
 
 ## Deploying it
 

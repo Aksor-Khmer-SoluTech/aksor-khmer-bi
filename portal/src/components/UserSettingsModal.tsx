@@ -98,11 +98,6 @@ export default function UserSettingsModal({
               <span className="truncate">{item.label}</span>
             </button>
           ))}
-          {profileChecked && profile === null && !profileError && (
-            <p className="mt-2 px-2 text-[0.74rem] leading-snug text-text-faint max-md:hidden">
-              Signed in with a system account — only Preferences applies here.
-            </p>
-          )}
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -138,6 +133,21 @@ export default function UserSettingsModal({
                 )}
                 {activeTab === "notifications" && profile && (
                   <SettingsNotificationsPanel user={profile} onUpdated={onProfileUpdated} />
+                )}
+                {profile === null && (
+                  <div className="alert alert-warning mb-5 max-w-2xl">
+                    <p className="m-0 font-medium">You're signed in with the built-in admin account</p>
+                    <p className="mt-1 mb-0 text-[0.84rem] leading-relaxed">
+                      It comes from the server's settings (<code className="mono">PORTAL_USERNAME</code> in{" "}
+                      <code className="mono">.env</code>) and is meant for the first sign-in and emergencies, so it has
+                      no profile, password, two-factor or session settings — only Preferences. Create your own account
+                      in{" "}
+                      <a href="#/admin/users" onClick={onClose}>
+                        Admin → Users
+                      </a>{" "}
+                      with the administrator role, then sign in with it to get all of these.
+                    </p>
+                  </div>
                 )}
                 {activeTab === "preferences" && <SettingsPreferencesPanel accountBacked={profile !== null} />}
                 {activeTab === "access" && profile && (

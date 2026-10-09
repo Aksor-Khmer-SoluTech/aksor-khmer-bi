@@ -8,8 +8,22 @@ import LoginShell from "./LoginShell";
  * must-change-password (an admin created it or reset its password, so the
  * one they were handed is temporary). The API refuses everything else until
  * this succeeds -- see api/app/auth.py -- so this screen isn't a courtesy the
- * portal could skip; it's the only way forward besides signing out. */
-export default function ForcePasswordChange({ auth, onChanged }: { auth: AuthInfo; onChanged: () => void }) {
+ * portal could skip; it's the only way forward besides signing out.
+ *
+ * The same screen runs the first-run setup (`auth.setupRequired`): the built-in
+ * admin's password in .env was generated at install time, so instead of changing
+ * it, the chosen password becomes a real administrator account with the same name
+ * (api.setupAdmin), and the generated one stops working. */
+export default function ForcePasswordChange({
+  auth,
+  onChanged,
+  onAccountReady,
+}: {
+  auth: AuthInfo;
+  onChanged: () => void;
+  onAccountReady: (info: AuthInfo) => void;
+}) {
+  const setup = auth.setupRequired;
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -21,11 +35,16 @@ export default function ForcePasswordChange({ auth, onChanged }: { auth: AuthInf
     setError(null);
     const problem = passwordProblem(newPassword);
     if (problem) return setError(problem);
-    if (newPassword === currentPassword) return setError("Choose a password different from the temporary one.");
+    if (!setup && newPassword === currentPassword) return setError("Choose a password different from the temporary one.");
     if (newPassword !== confirmPassword) return setError("New password and confirmation don't match.");
 
     setPending(true);
     try {
+      if (setup) {
+        // Signed in as the new administrator account from here on.
+        onAccountReady(await api.setupAdmin(newPassword));
+        return;
+      }
       await api.users.updateMe({ current_password: currentPassword, new_password: newPassword });
       // This session carries on as it is; the server ended the account's other sessions.
       onChanged();
@@ -43,29 +62,40 @@ export default function ForcePasswordChange({ auth, onChanged }: { auth: AuthInf
   return (
     <LoginShell>
       <div className="login-card">
-        <h1 className="login-heading">Choose a new password</h1>
+        <h1 className="login-heading">{setup ? "Set your administrator password" : "Choose a new password"}</h1>
         <div className="panel">
-          <p className="field-hint" style={{ marginTop: 0 }}>
-            Signed in as <strong className="mono">{auth.username}</strong>. Your password was set by an
-            administrator — choose your own to continue.
-          </p>
+          {setup ? (
+            <p className="field-hint" style={{ marginTop: 0 }}>
+              Welcome. You signed in as <strong className="mono">{auth.username}</strong> with the password generated
+              when this server was installed. Choose your own to finish setting up — it becomes your administrator
+              account, and the generated password stops working.
+            </p>
+          ) : (
+            <p className="field-hint" style={{ marginTop: 0 }}>
+              Signed in as <strong className="mono">{auth.username}</strong>. Your password was set by an
+              administrator — choose your own to continue.
+            </p>
+          )}
           <form onSubmit={handleSubmit}>
-            <label>
-              <span>Current (temporary) password</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                autoFocus
-                required
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-              />
-            </label>
+            {!setup && (
+              <label>
+                <span>Current (temporary) password</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  autoFocus
+                  required
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                />
+              </label>
+            )}
             <label>
               <span>New password</span>
               <input
                 type="password"
                 autoComplete="new-password"
+                autoFocus={setup}
                 required
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
@@ -85,7 +115,7 @@ export default function ForcePasswordChange({ auth, onChanged }: { auth: AuthInf
             {error && <p className="alert alert-error">{error}</p>}
             <button type="submit" className="btn btn-primary" disabled={pending}>
               {pending && <span className="spinner" />}
-              Change password
+              {setup ? "Finish setup" : "Change password"}
             </button>
           </form>
         </div>
