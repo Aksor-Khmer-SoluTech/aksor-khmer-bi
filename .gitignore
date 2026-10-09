@@ -20,6 +20,8 @@ data/avatars/
 data/image_resources/
 data/stylesheet_resources/
 data/font_resources/
+data/postgres/
+data/postgres.moving/
 *.db
 *.db-journal
 *.db-wal

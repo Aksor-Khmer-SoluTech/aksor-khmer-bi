@@ -369,8 +369,8 @@ docker compose -p aksor-db    -f docker-compose.db.yml    down
 docker compose -p aksor-redis -f docker-compose.redis.yml down
 ```
 
-Your data is kept (named volumes and the `data/` folder). **Never add `-v`** to those commands unless you mean to
-delete the database / queue.
+Your data is kept: the database is in `data/postgres`, and everything else Aksor stores is in the rest of `data/`.
+Never delete `data/` (or `data/postgres`) unless you mean to erase every report and user — take a backup first.
 
 #### Back up
 
@@ -537,9 +537,10 @@ Keep the three `-p` project names distinct: with a shared project, `--remove-orp
 on one stack would remove the others' containers. All three stacks read the same `.env`,
 so `POSTGRES_PASSWORD` always agrees.
 
-Upgrading from the old single-file setup: the Postgres volume keeps its name
-(`aksor-khmer-bi_pgdata`), so `./deployment.sh down` on the old stack, then
-`init` and `up`, picks the existing database straight up. A plain
+The database lives in `data/postgres`. An install that still has it in the older Docker volume
+(`aksor-khmer-bi_pgdata`) is moved there automatically by the next `./deployment.sh up` or `update` — once, with
+Postgres stopped, and the volume is kept as a fallback until you remove it
+(`docker volume rm aksor-khmer-bi_pgdata`). A plain
 `docker compose up` no longer starts a database — use the script.
 
 ```bash
@@ -659,8 +660,8 @@ template (`<report_id>/versions/`) — back it up, and expect it to grow
 with each replace; nothing prunes it.
 
 `docker-compose.db.yml`'s `postgres` service uses `POSTGRES_PASSWORD` (default
-`aksor`, override it for anything beyond local use) and a named volume
-(`pgdata`) so data survives `down`; `deployment.sh up` waits for it to be healthy
+`aksor`, override it for anything beyond local use) and keeps its files in
+`./data/postgres` so data survives `down` and container recreates; `deployment.sh up` waits for it to be healthy
 before starting the app (and `api` restarts until it can connect), and `api`
 gets `DATABASE_URL` wired to it automatically — no manual configuration
 needed for the Docker path. `api`'s entrypoint
@@ -810,7 +811,7 @@ path substitutes a fallback font. (Fonts installed in a derived image still work
 | `./data/report_templates` | `/app/data/report_templates`, read-write | Templates registered via `/api/v1/reports` — deliberately outside `api/`'s own directory (runtime data, not code), same reasoning as `api`/`portal` being separate services. Without this mount, uploads are lost on `docker compose down` / container recreate, since they'd otherwise only live in the container's writable layer |
 | `./data/image_resources`, `./data/stylesheet_resources`, `./data/avatars` | `/app/data/…`, read-write (`api`; the first two also `worker`) | The Resources library (images and stylesheets that html templates and docx image fields render from) and user avatars. These were **not mounted before** and were lost whenever the container was recreated — mounted now; back them up with the templates (`./deployment.sh backup` does) |
 | `./data/font_resources` | `/app/data/font_resources`, read-write (`api`) and read-only (`worker`) | Fonts added under **Resources → Fonts** — server-wide, used from the next render with no restart. Back it up with the templates (`./deployment.sh backup` does). |
-| `pgdata` (named volume, not a bind mount) | `/var/lib/postgresql/data` on the `postgres` service | Report metadata (see above) — a named volume rather than a host path since there's no reason to browse/edit Postgres's on-disk files directly the way you would a `.txt` exception list |
+| `./data/postgres` | `/var/lib/postgresql/data` on the `postgres` service | The database. Postgres makes it private to itself (owner `postgres`, mode 700), so read it through Postgres, not the files; back it up with `./deployment.sh backup` (a `pg_dump`), never by copying the folder while Postgres runs |
 
 The first two are read-only bind mounts specifically so editing either
 file on the host takes effect on container **restart**, without an

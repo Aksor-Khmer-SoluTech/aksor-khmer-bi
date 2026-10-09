@@ -38,7 +38,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aksor}
       POSTGRES_DB: aksor_khmer_bi
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # The database files, in a plain folder next to the rest of Aksor's data. Back it up with
+      # `./deployment.sh backup` (a pg_dump), not by copying this folder while Postgres runs.
+      - ./data/postgres:/var/lib/postgresql/data:z
     # No `ports:` on purpose -- only containers on aksor-network can reach the database.
     # For a client on the host: docker compose -p aksor-db -f docker-compose.db.yml exec postgres psql -U aksor aksor_khmer_bi
     healthcheck:
@@ -46,12 +48,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-volumes:
-  pgdata:
-    # Same name Compose gave this volume when it lived in the combined file under the
-    # default project name, so an existing database carries straight over.
-    name: aksor-khmer-bi_pgdata
 
 networks:
   default:

@@ -63,6 +63,10 @@ BACKUP_KEEP="${BACKUP_KEEP:-14}"
 BACKUP_HELPER_IMAGE="${BACKUP_HELPER_IMAGE:-postgres:16-alpine}"
 # Everything the api writes outside the database (all bind-mounted in docker-compose.yml).
 DATA_DIRS=(data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/jdbc_drivers data/font_resources)
+# The database files (docker-compose.db.yml). Not in DATA_DIRS: a backup takes a pg_dump instead of copying them.
+PG_DIR="data/postgres"
+# Where the database lived before it moved to PG_DIR; moved across once by move_old_pg_volume.
+OLD_PG_VOLUME="aksor-khmer-bi_pgdata"
 
 c_red=$'\033[31m'; c_grn=$'\033[32m'; c_ylw=$'\033[33m'; c_off=$'\033[0m'
 [ -t 1 ] || { c_red=; c_grn=; c_ylw=; c_off=; }
@@ -84,9 +88,36 @@ no_build() { die "building from source isn't supported -- run a released version
 start_infra() {
   info "starting redis"
   redis up -d --wait
+  move_old_pg_volume
   info "starting postgres"
   db up -d --wait
   check_db_password
+}
+
+# Older installs kept the database in the Docker volume $OLD_PG_VOLUME; it now lives in ./$PG_DIR. Move it across
+# once -- with Postgres stopped, keeping ownership and permissions -- before Postgres starts on the folder (which would
+# otherwise create a new, empty database). Copied to a temporary folder and renamed only when complete, so an
+# interrupted copy can never pass for a finished one. The volume itself is left untouched as a fallback.
+move_old_pg_volume() {
+  docker volume inspect "$OLD_PG_VOLUME" >/dev/null 2>&1 || return 0
+  # Postgres makes ./$PG_DIR private to itself, so the host user often can't look inside it: every check on its
+  # contents runs in a helper container. 0 = the folder already holds a database, 3 = it holds something else, 10 = empty.
+  local state=0
+  docker run --rm -v "$PWD/data:/data:z" "$BACKUP_HELPER_IMAGE" sh -c \
+    '[ -f /data/postgres/PG_VERSION ] && exit 0; [ -d /data/postgres ] && [ -n "$(ls -A /data/postgres)" ] && exit 3; exit 10' \
+    || state=$?
+  case "$state" in
+    0) return 0 ;;
+    3) die "./$PG_DIR has files but no database, and the old database is still in the Docker volume $OLD_PG_VOLUME -- move ./$PG_DIR aside, then run this again to bring the database across" ;;
+    10) ;;
+    *) die "couldn't check ./$PG_DIR (helper container failed: $state)" ;;
+  esac
+  info "moving the database from the Docker volume $OLD_PG_VOLUME into ./$PG_DIR (once; the volume is kept as a fallback)"
+  db stop postgres >/dev/null 2>&1 || true
+  docker run --rm -v "$OLD_PG_VOLUME:/from:ro" -v "$PWD/data:/data:z" "$BACKUP_HELPER_IMAGE" \
+    sh -c 'set -e; rm -rf /data/postgres.moving; mkdir /data/postgres.moving; cp -a /from/. /data/postgres.moving/; rmdir /data/postgres 2>/dev/null || true; mv /data/postgres.moving /data/postgres' \
+    || die "couldn't copy the database out of $OLD_PG_VOLUME -- the volume is unchanged; check disk space and run again"
+  info "database moved. When everything works, the old copy can go: docker volume rm $OLD_PG_VOLUME"
 }
 
 # A Postgres volume keeps the password it was created with, whatever .env says later -- and a mismatch otherwise shows
@@ -101,7 +132,7 @@ check_db_password() {
   die "Postgres refuses POSTGRES_PASSWORD from .env: this database was created with a different password, and it keeps that one.
        Either put the original password back in .env, or give the database the one in .env:
          docker compose -p $DB_PROJECT -f $DB_FILE exec -T postgres psql -U aksor -d aksor_khmer_bi -c \"ALTER USER aksor PASSWORD '<the password in .env>'\"
-       (on a throwaway machine you can instead delete the database: ./deployment.sh down, then docker volume rm aksor-khmer-bi_pgdata -- that erases every report and user)"
+       (on a throwaway machine you can instead delete the database: ./deployment.sh down, then sudo rm -rf $PG_DIR -- that erases every report and user)"
 }
 
 require_docker() {
@@ -230,11 +261,12 @@ cmd_init() {
   [ -f .env.example ] || die ".env.example is missing"
   umask 077
   cp .env.example .env
-  if docker volume inspect aksor-khmer-bi_pgdata >/dev/null 2>&1; then
+  # A database folder or the old volume means a database already exists (the folder itself may be unreadable here).
+  if [ -d "$PG_DIR" ] || docker volume inspect "$OLD_PG_VOLUME" >/dev/null 2>&1; then
     # An existing database was initialised with a password we can't see; a new random one
     # in .env would make every connection fail. Leave it blank (= the compose default).
     set_env POSTGRES_PASSWORD ""
-    warn "an existing Postgres volume was found -- not generating POSTGRES_PASSWORD (the database keeps the password it was created with); it is left empty, i.e. the compose default 'aksor', which is what a database made by the old single-file setup has"
+    warn "an existing database was found -- not generating POSTGRES_PASSWORD (the database keeps the password it was created with); it is left empty, i.e. the compose default 'aksor', which is what a database made by the old single-file setup has"
     warn "if the database was created with another password, set POSTGRES_PASSWORD in .env to it"
   else
     set_env POSTGRES_PASSWORD "$(random_secret)"
@@ -274,7 +306,7 @@ cmd_down() {
   require_docker
   info "stopping app"
   app down
-  info "stopping postgres (named volumes are kept)"
+  info "stopping postgres (the database in ./$PG_DIR is kept)"
   db down
   info "stopping redis"
   redis down
