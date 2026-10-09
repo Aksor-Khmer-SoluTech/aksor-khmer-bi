@@ -5,7 +5,7 @@ Python packages, each pip-installable on its own:
 
 - `packages/aksor_khmer_ocr_segmenter` — OCR + ICU word segmentation, no dependency on the other two
 - `packages/doc_engine` — depends on `aksor_khmer_ocr_segmenter`
-- `api` — depends on `doc_engine`; kept at the repo root, structurally separate from `packages/`, since it's the deployable service (Dockerfile, docker-compose.yml target it directly) rather than an installable library
+- `api` — depends on `doc_engine`; kept at the repo root, structurally separate from `packages/`, since it's the deployable service (its image is built from `api/Dockerfile`, and docker-compose.yml targets it directly) rather than an installable library
 
 ## Dev setup
 

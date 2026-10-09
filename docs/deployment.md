@@ -62,19 +62,20 @@ On these systems two things are different, and both are already handled or flagg
 
 **macOS and Windows** (Docker Desktop) need none of this; give Docker Desktop at least 4 GB of memory.
 
-**Before the first build, check that containers can reach the internet** — the build downloads Debian, Python and
-npm packages, and this is where most first deployments fail:
+**Before the first start, check that Docker can download the images** from Docker Hub, and that containers can reach
+the network (reports that read a REST API or a database connect from inside them) — this is where most first
+deployments fail:
 
 ```bash
-curl -sI http://deb.debian.org | head -1                                   # the server itself
-docker run --rm alpine wget -q -T 5 -O /dev/null http://deb.debian.org && echo "containers: ok"
+docker pull -q alpine && echo "docker hub: ok"                               # Docker can download images
+docker run --rm alpine wget -q -T 5 -O /dev/null http://example.com && echo "containers: ok"
 ```
 
-| Server | Container | Meaning and fix |
+| Docker Hub | Containers | Meaning and fix |
 |---|---|---|
-| ok | ok | Nothing to do — go on to B. (`./deployment.sh doctor` does this check and more.) |
-| ok | **fails** | Docker's network can't get out. Check, in this order: `sysctl net.ipv4.ip_forward` must print `1` (`sudo sysctl -w net.ipv4.ip_forward=1`); **UFW** drops forwarded traffic by default — set `DEFAULT_FORWARD_POLICY="ACCEPT"` in `/etc/default/ufw` and `sudo ufw reload`; Docker installed as a **snap** (`snap list docker`) — remove it and use the steps above; a DNS that containers can't use — put `{"dns": ["1.1.1.1", "8.8.8.8"]}` in `/etc/docker/daemon.json` and `sudo systemctl restart docker`. A quick workaround while you sort that out: `BUILD_NETWORK=host` in `.env` makes the **build** use the server's own network. |
-| **fails** | fails | The server itself is cut off (a firewall, or an offline network). Build the images somewhere that has internet and ship them, or use internal mirrors — see the Troubleshooting row "`Unable to locate package`". |
+| ok | ok | Nothing to do — go on to B. (`./deployment.sh doctor` checks Docker, ports and disk too.) |
+| ok | **fails** | Docker's network can't get out. Check, in this order: `sysctl net.ipv4.ip_forward` must print `1` (`sudo sysctl -w net.ipv4.ip_forward=1`); **UFW** drops forwarded traffic by default — set `DEFAULT_FORWARD_POLICY="ACCEPT"` in `/etc/default/ufw` and `sudo ufw reload`; Docker installed as a **snap** (`snap list docker`) — remove it and use the steps above; a DNS that containers can't use — put `{"dns": ["1.1.1.1", "8.8.8.8"]}` in `/etc/docker/daemon.json` and `sudo systemctl restart docker`. |
+| **fails** | — | The server can't reach Docker Hub: a proxy (configure it for the Docker daemon), or a firewall that must allow `registry-1.docker.io`, `auth.docker.io` and `production.cloudflare.docker.com`. On a fully offline server, pull the images on a machine that can, `docker save` them there and `docker load` them here. |
 
 #### B. Get the code (once)
 
@@ -123,22 +124,18 @@ which step it was.
 | 3 | `docker-compose.yml` | `aksor-app` | `api`, `scheduler`, `worker`, `portal` |
 | 4 *(optional)* | `docker-compose.yml` `--profile jdbc` | `aksor-app` | `jdbc-worker` — only for Oracle / SQL Server / Db2 drivers |
 
-**Where the app's images come from.** `docker-compose.yml` has no build instructions: each app service runs a
-prebuilt, version-pinned image from Docker Hub, so nothing is compiled on your server.
+**Where the app's images come from.** Each app service runs a released, version-pinned image from Docker Hub —
+nothing is compiled on your server, so it needs only Docker and access to Docker Hub. The images are built for
+Intel/AMD and ARM (`linux/amd64`, `linux/arm64`) machines — each pulls its own.
 
-| Service | Image (`$AKSOR_IMAGE_PREFIX` = `aksorkhmerbi/aksor-khmer-bi`) |
+| Service | Image (named, with its version, in `docker-compose.yml`) |
 |---|---|
-| `api`, `scheduler`, `worker` | `$AKSOR_IMAGE_PREFIX-engine:$AKSOR_VERSION` (one image, three commands) |
-| `portal` | `$AKSOR_IMAGE_PREFIX-portal:$AKSOR_VERSION` |
-| `jdbc-worker` *(optional)* | `$AKSOR_IMAGE_PREFIX-jdbc-worker:$AKSOR_VERSION` |
+| `api`, `scheduler`, `worker` | `aksorkhmerbi/aksor-khmer-bi-engine` (one image, three commands) |
+| `portal` | `aksorkhmerbi/aksor-khmer-bi-portal` |
+| `jdbc-worker` *(optional)* | `aksorkhmerbi/aksor-khmer-bi-jdbc-worker` |
 
-| | **Prebuilt images** *(default, recommended)* | Build from source *(advanced)* |
-|---|---|---|
-| You set | `AKSOR_VERSION` in `.env` — a released version | nothing extra |
-| Command | `./deployment.sh up` / `update` | `./deployment.sh up --build` / `update --build` |
-| Compose files | `docker-compose.yml` | `docker-compose.yml` + `docker-compose.build.yml` |
-| Needs | Docker and access to Docker Hub | internet for Debian, Python and npm packages, ~10 GB of disk, several minutes |
-| Choose it for | every normal deployment and update | a fork, local changes, or an unreleased commit |
+The versions are written in `docker-compose.yml` itself — there is nothing to set. A release updates them, so
+upgrading is `git pull` followed by `./deployment.sh update`.
 
 They share one Docker network, `aksor-network`, which is how the app finds `postgres` and `redis` by name.
 Each file has its **own project name** (`-p …`) — keep them, or stopping one stack could remove another's
@@ -162,10 +159,9 @@ to end — if one of them fails on your server, the Troubleshooting table at the
 > - **Read the [CHANGELOG](../CHANGELOG.md) before you update** — every entry between the version you run now and the one
 >   you are upgrading to. Look for changes to `.env` settings, database migrations and anything marked breaking or
 >   "upgrade note", and do what they say first.
-> - **`up` and `update` pull prebuilt images by default.** Set `AKSOR_VERSION` in `.env` to the released version you
-> read the changelog for, then `./deployment.sh update`: nothing is built, so the server needs no Node/npm and no
-> access to npm or Debian. (Compose files and `deployment.sh` still come from `git pull`.) To build from the
-> source instead, add `--build`.
+> - **`up` and `update` pull the released images.** `git pull` brings the new image versions (they are written in
+> `docker-compose.yml`), then `./deployment.sh update`: nothing is built, so the server needs no Node/npm and no
+> access to npm or Debian.
 > - **Back up `.env` yourself before updating** (`cp -p .env ../aksor.env.bak` — keep it outside the repository folder): it holds the database password and the portal
 >   login. If `.env` is lost, `init` generates a *new* one, and the existing database keeps its old password.
 > - A new version may add settings to `.env.example` that your `.env` doesn't have. They are never merged in
@@ -184,17 +180,12 @@ Before you start, open `.env` and check `CORS_ALLOWED_ORIGINS` is the address pe
 change `API_PORT` / `PORTAL_PORT` if 8000 / 8080 are taken (every setting is explained in `.env.example`; see also
 [Customizing](#customizing)). Then:
 
-In `.env`, set `AKSOR_VERSION` to the released version you want (the image prefix is already set; read
-[CHANGELOG.md](../CHANGELOG.md) first). Then:
-
 ```bash
 ./deployment.sh doctor     # optional: checks Docker, ports and disk, in seconds
 ./deployment.sh up         # starts redis, then postgres, then pulls and starts the app images
 ```
 
-No build happens, so no Node/npm is needed. To build from the source instead (a fork, or a version that isn't
-published), run `./deployment.sh up --build` (this adds `docker-compose.build.yml`) — the first build takes several minutes and needs internet for
-Debian, Python and npm packages.
+No build happens, so no Node/npm is needed — only Docker and access to Docker Hub.
 
 `up` runs `doctor` itself first, so a missing piece (a closed firewall, a busy port) is reported in
 seconds with the fix. When it finishes it prints the portal and API-docs addresses. Open the
@@ -206,14 +197,13 @@ Everything you do afterwards:
 |---|---|
 | see what is running | `./deployment.sh status` |
 | read the logs | `./deployment.sh logs` (the API; add names for others: `logs api worker scheduler portal`) |
-| update to the new version | read the [CHANGELOG](../CHANGELOG.md) for every version up to the one you want **first**; set `AKSOR_VERSION` in `.env`, `git pull`, then `./deployment.sh update` — takes a **backup first**, pulls that version's images, restarts the app (database migrations run as the API starts); Postgres and Redis are not touched. Flags: `--no-backup`, `--build` (build from source instead), `--pull` (with `--build`: refresh the base images) |
+| update to the new version | read the [CHANGELOG](../CHANGELOG.md) for every version up to the one you want **first**; `git pull` (it brings the new image versions), then `./deployment.sh update` — takes a **backup first**, pulls that version's images, restarts the app (database migrations run as the API starts); Postgres and Redis are not touched. Flag: `--no-backup` |
 | back up now | `./deployment.sh backup` — the database plus templates, images, avatars and the encryption key, into `./backups/` (the newest 14 are kept; `BACKUP_KEEP=30` changes that) |
 | apply a change in `.env` | `./deployment.sh up` (recreates only what changed) |
 | restart | `./deployment.sh restart` (everything), or `restart app` / `restart db` / `restart redis` |
 | stop everything | `./deployment.sh down` — your data is kept |
 | operate one stack alone | `./deployment.sh app status`, `./deployment.sh db logs`, `./deployment.sh redis restart`, … |
-| use uploaded JDBC drivers (Oracle, SQL Server…) | set `JDBC_WORKER_TOKEN` in `.env` ([Step 4](#step-4-optional--jdbc-driver-service)), then `./deployment.sh app --profile jdbc up -d --build jdbc-worker api` |
-| deploy prebuilt images (no build, no Node/npm on the server) | in `.env` set `AKSOR_IMAGE_PREFIX=aksorkhmerbi/aksor-khmer-bi` and `AKSOR_VERSION=<released version>`, then `./deployment.sh up` (first time) or `update` (upgrade) — this is the default. Releases are published with `./deployment.sh publish <version>`. |
+| use uploaded JDBC drivers (Oracle, SQL Server…) | set `JDBC_WORKER_TOKEN` in `.env` ([Step 4](#step-4-optional--jdbc-driver-service)), then `./deployment.sh app --profile jdbc up -d jdbc-worker api` |
 | see every command | `./deployment.sh help` |
 
 A command that fails stops with a one-line `error:` that says what to fix. `./deployment.sh init` never overwrites an
@@ -315,17 +305,14 @@ Postgres is deliberately **not** published on a host port; only containers on `a
 
 ### Step 3 — The application
 
-Set `AKSOR_VERSION` in `.env` to the released version you want (read [CHANGELOG.md](../CHANGELOG.md) first), then
-pull the prebuilt images and start:
+Pull the released images `docker-compose.yml` names, and start:
 
 ```bash
 docker compose -p aksor-app -f docker-compose.yml pull
 docker compose -p aksor-app -f docker-compose.yml up -d --wait
 ```
 
-No build, so no Node/npm is needed. To build from the source instead (several minutes — it installs LibreOffice,
-Tesseract and fonts; later builds reuse the cache), skip `pull` and run
-`docker compose -p aksor-app -f docker-compose.yml -f docker-compose.build.yml up -d --build --wait`. What happens:
+No build, so no Node/npm is needed. What happens:
 
 1. `api` starts, **runs the database migrations**, then serves on port 8000. Its health check gates the next two.
 2. `scheduler` and `worker` start once `api` is healthy.
@@ -368,7 +355,7 @@ Then upload a driver under **Admin → JDBC Drivers**.
 |---|---|
 | see what's running | `docker compose -p aksor-app -f docker-compose.yml ps` (and `-p aksor-db`, `-p aksor-redis` with their files) |
 | read the API log | `docker compose -p aksor-app -f docker-compose.yml logs -f api` |
-| deploy a new version | read the [CHANGELOG](../CHANGELOG.md), set the new `AKSOR_VERSION` in `.env`, then `docker compose -p aksor-app -f docker-compose.yml pull` and `… up -d --wait` — only the app restarts; migrations run as `api` starts; the database and Redis are untouched |
+| deploy a new version | read the [CHANGELOG](../CHANGELOG.md), `git pull` (it brings the new image versions), then `docker compose -p aksor-app -f docker-compose.yml pull` and `… up -d --wait` — only the app restarts; migrations run as `api` starts; the database and Redis are untouched |
 | restart one service | `docker compose -p aksor-app -f docker-compose.yml restart api` |
 | apply a `.env` change | `docker compose -p aksor-app -f docker-compose.yml up -d` (recreates what changed) |
 
@@ -397,7 +384,7 @@ Keep the two files together — the encryption key in `data/secrets` and the dat
 
 #### Restore a backup
 
-With the script: `./deployment.sh restore backups/aksor-<time>.sql.gz` (it finds `aksor-<time>-files.tar.gz` next to it, or name it as a second argument). It shows what it will replace and asks you to type `restore`; it takes a **safety backup of the current state** first (`--no-backup` skips that), stops the app, recreates the database from the dump, and moves the current `data/` folders to `data.before-restore-<time>/` (kept, not deleted) before unpacking the archive. Then start it: `./deployment.sh up`. Set `AKSOR_VERSION` in `.env` to the version the backup was made with, or newer — migrations only go forward, so a newer database under older code isn't supported. `--yes` skips the question (for scripts).
+With the script: `./deployment.sh restore backups/aksor-<time>.sql.gz` (it finds `aksor-<time>-files.tar.gz` next to it, or name it as a second argument). It shows what it will replace and asks you to type `restore`; it takes a **safety backup of the current state** first (`--no-backup` skips that), stops the app, recreates the database from the dump, and moves the current `data/` folders to `data.before-restore-<time>/` (kept, not deleted) before unpacking the archive. Then start it: `./deployment.sh up`. Run the release the backup was made with, or a newer one (the image versions in `docker-compose.yml`) — migrations only go forward, so a newer database under older code isn't supported. `--yes` skips the question (for scripts).
 
 By hand: `./deployment.sh down` (or stop `aksor-app`), then
 `docker compose -p aksor-db -f docker-compose.db.yml exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'`,
@@ -448,8 +435,6 @@ top to bottom once. Edit `.env`, then apply it:
 | log more or less | `LOG_LEVEL` (`DEBUG` while investigating), `LOG_MAX_BYTES` | `… up -d` |
 | use my own database or Redis | `DATABASE_URL`, `REDIS_URL` (and skip steps 1–2) | `… up -d` |
 | keep the signing / encryption keys outside `data/` | `JWT_SECRET`, `SECRETS_ENCRYPTION_KEY` | `… up -d` |
-| build on a server with a restricted network | `BUILD_NETWORK`, `APT_MIRROR`, `PIP_INDEX_URL`, `NPM_REGISTRY` | `… -f docker-compose.yml -f docker-compose.build.yml up -d --build` (these only matter when building from source) |
-| which prebuilt images to deploy (build from source with `--build`) | `AKSOR_IMAGE_PREFIX`, `AKSOR_VERSION` | `./deployment.sh up` |
 
 `… up -d` is short for `docker compose -p aksor-app -f docker-compose.yml up -d`: it recreates only the services
 whose settings changed, and leaves the database and Redis alone. After changing `POSTGRES_PASSWORD` read its note in
@@ -466,18 +451,18 @@ command: `docker compose -p aksor-app -f docker-compose.yml -f docker-compose.cu
 | You see | Cause and fix |
 |---|---|
 | `network aksor-network declared as external, but could not be found` | Step by step, 0.1 wasn't run: `docker network create aksor-network` |
-| `api` keeps restarting; its log says the database or password is wrong | Postgres isn't up (do step 2 first), or `.env`'s `POSTGRES_PASSWORD` differs from the one the database was created with. Fix: put the original password back, or change the database's: `docker compose -p aksor-db -f docker-compose.db.yml exec postgres psql -U aksor -c "ALTER USER aksor PASSWORD 'new'"` and use the same in `.env` |
+| `api` keeps restarting; its log says the database or password is wrong | Postgres isn't up (do step 2 first), or `.env`'s `POSTGRES_PASSWORD` differs from the one the database was created with. Fix: put the original password back, or change the database's: `docker compose -p aksor-db -f docker-compose.db.yml exec postgres psql -U aksor -d aksor_khmer_bi -c "ALTER USER aksor PASSWORD 'new'"` and use the same in `.env` |
 | The portal loads but sign-in does nothing / "failed to fetch" | `CORS_ALLOWED_ORIGINS` doesn't match the address in your browser, or `PORTAL_API_BASE_URL` points at the wrong API. See "A server with a domain name" |
 | You sign in, but a reload (or the next minutes) sends you back to the sign-in screen | The refresh cookie isn't reaching the API: the portal and the API are different *sites* (`localhost` vs `127.0.0.1`, or unrelated domains), or you're on plain `http` with `AUTH_COOKIE_SECURE=true`. See [authentication.md](authentication.md#troubleshooting) |
-| `Unable to locate package …` / `Could not connect to deb.debian.org` / `npm ci` or `pip` times out during the build | The build can't download packages. First run the two checks under "Get Docker ready" above: if the server has internet but containers don't, fix Docker's network (UFW forwarding is the usual cause on Ubuntu) or set `BUILD_NETWORK=host`. If the server itself is cut off, best: **build the images on a machine that can** and ship them — `./deployment.sh publish <version>` there, then `AKSOR_IMAGE_PREFIX=… AKSOR_VERSION=… ./deployment.sh up` here (or `docker save` / `docker load` the three images by hand). If you have internal mirrors instead, set `APT_MIRROR` (host name), `PIP_INDEX_URL` and `NPM_REGISTRY` in `.env` and build again. A proxy: configure it in Docker (`~/.docker/config.json` `proxies`) |
-| `Image aksor-khmer-bi-engine … pull access denied` just before the build starts | Harmless: Compose tries to pull the image first, finds none, and builds it. Only the lines after it matter |
+| `pull access denied` / `manifest unknown` / `not found` while pulling | `docker-compose.yml` names a version that isn't on Docker Hub — it was edited by hand, or you're on an unreleased commit: `git checkout` the file (or a release tag) and run `update` again. `up` / `update` print the exact images they pull. A timeout instead: the server can't reach Docker Hub — see "Get Docker ready" |
+| `no matching manifest for linux/…` | The released images cover Intel/AMD and ARM (`linux/amd64`, `linux/arm64`); this machine is neither (`./deployment.sh doctor` shows its CPU) |
 | `port is already allocated` on 8000 or 8080 | Something else uses it. Stop it, or set `API_PORT` / `PORTAL_PORT` in `.env` (then update `CORS_ALLOWED_ORIGINS`, and `PORTAL_API_BASE_URL` in the portal config file if you moved the API) and run `./deployment.sh up` again |
 | `error: PORTAL_PASSWORD in .env is too easy to guess` | `up` / `update` refuse a guessable administrator password. Put a long random one in `.env` (`openssl rand -hex 16`), or set `ALLOW_WEAK_PASSWORDS=1` on a throwaway machine |
 | `backup` says it couldn't archive `data/` | The archive is made in a throwaway container using the `postgres:16-alpine` image (present once the stack is up). Start the stack first, or set `BACKUP_HELPER_IMAGE` to any image that has `tar` |
 | Admin pages answer 503 | `PORTAL_PASSWORD` is empty in `.env`, and no user exists yet |
 | "Found orphan containers" | A stack was started without its own `-p` name. Stop the extras, and always use the commands above |
 | Uploaded JDBC driver: "isn't set up to run uploaded JDBC drivers" | Step 4 wasn't done (`JDBC_WORKER_TOKEN` and the `jdbc` profile). PostgreSQL/MySQL/MariaDB: choose "Built in" as the driver instead |
-| A report fails with "source file could not be loaded" | The template was saved by a tool that writes a quirky Word file; current versions repair that automatically — rebuild the app (`up -d --build`) |
+| A report fails with "source file could not be loaded" | The template was saved by a tool that writes a quirky Word file; current versions repair that automatically — update to the latest release (`./deployment.sh update`) |
 
 More detail on every setting is in the reference sections below and in `.env.example`.
 
@@ -531,8 +516,8 @@ names across projects. A step-by-step walkthrough, one file at a time, is under 
 | Command | Does |
 |---|---|
 | `init` | Creates `aksor-network`, the `data/` folders, and a mode-600 `.env` with a random `POSTGRES_PASSWORD` and `PORTAL_PASSWORD` (shown once). Never overwrites an existing `.env`; if a Postgres volume already exists it does **not** invent a new database password. |
-| `up [--build]` | Starts redis and postgres, waits for health, pulls the prebuilt images for `AKSOR_VERSION` and starts the app (`--build` builds them from the source instead). Warns about a default DB password, a missing `PORTAL_PASSWORD`, or unset `CORS_ALLOWED_ORIGINS`. |
-| `update [--no-backup] [--build] [--pull]` | Backs up, pulls the images for `AKSOR_VERSION` (or `--build`s them), recreates the app (migrations run as the API starts). Redis and Postgres are not recreated. `--pull` (with `--build`) refreshes base images. |
+| `up` | Starts redis and postgres, waits for health, pulls the released images `docker-compose.yml` names and starts the app. Warns about a default DB password, a missing `PORTAL_PASSWORD`, or unset `CORS_ALLOWED_ORIGINS`. |
+| `update [--no-backup]` | After `git pull`: backs up, pulls the images `docker-compose.yml` now names, recreates the app (migrations run as the API starts). Redis and Postgres are not recreated. |
 | `down` | Stops the app, then postgres, then redis. Named volumes and `./data` are kept. |
 | `restart [redis\|db\|app]`, `status`, `logs [service…]` | Operate and inspect. |
 | `restore <dump> [<files>] [--yes] [--no-backup]` | Puts a backup back (see "Restore a backup"): safety backup, stop the app, replace the database and `data/` (the old `data/` is moved aside, not deleted). |
@@ -545,7 +530,7 @@ By hand, without the script:
 docker network create aksor-network
 docker compose -p aksor-redis -f docker-compose.redis.yml up -d --wait
 docker compose -p aksor-db    -f docker-compose.db.yml    up -d --wait
-docker compose -p aksor-app   -f docker-compose.yml       up -d --wait      # AKSOR_VERSION in .env; add -f docker-compose.build.yml --build to build from source
+docker compose -p aksor-app   -f docker-compose.yml       up -d --wait
 ```
 
 Keep the three `-p` project names distinct: with a shared project, `--remove-orphans`
@@ -600,36 +585,25 @@ choose their own at first sign-in, and an admin can reset any local user's
 password later from the same screen (a generated temporary password is
 shown once, and the user must replace it on their next sign-in).
 
-#### Publishing images to Docker Hub
+#### Released images
 
-Three images are published: `<prefix>-engine` (the API; also runs `scheduler` and `worker`), `<prefix>-portal`
-and `<prefix>-jdbc-worker` (only used with the `jdbc` profile). The prefix is
-`aksorkhmerbi/aksor-khmer-bi`.
+Releases are published as three images on Docker Hub: `aksorkhmerbi/aksor-khmer-bi-engine` (the API; also runs
+`scheduler` and `worker`), `aksorkhmerbi/aksor-khmer-bi-portal` and `aksorkhmerbi/aksor-khmer-bi-jdbc-worker` (only
+used with the `jdbc` profile). Each is built for **Intel/AMD and ARM** (`linux/amd64`, `linux/arm64`) under one tag, so Apple-silicon Macs and ARM servers run it natively.
 
-Images are published by hand with `./deployment.sh publish`, from a machine with internet, logged in with
-`docker login` as an account that can push to `aksorkhmerbi`. Publish a commit CI has passed on:
+**Which versions run is written in `docker-compose.yml`**, as fixed tags — there is nothing to set in `.env`. A
+release updates those tags, and each image can move on its own (a release that changes only the portal bumps only
+the portal's tag); `CHANGELOG.md` says what each release contains. To upgrade, read `CHANGELOG.md` first, then:
 ```bash
-./deployment.sh publish 1.0.2      # publishes ...-engine:1.0.2, ...-portal:1.0.2, ...-jdbc-worker:1.0.2
+git pull                  # brings the new image versions in docker-compose.yml
+./deployment.sh update    # backup, pull, recreate, migrate
 ```
-It uses `AKSOR_IMAGE_PREFIX` from `.env` (or the environment); add `--latest` to tag `latest` as well. The first
-push creates each repository; keep them **Public** on Docker Hub so servers can pull without logging in.
-The platform defaults to **`linux/amd64`** because most servers are Intel/AMD even when you build on an
-Apple-silicon Mac — an arm64 image would die on them with `exec format error`. For both, set
-`PLATFORMS=linux/amd64,linux/arm64` (the api image is large — LibreOffice — so the arm64 half builds slowly
-under emulation).
-
-**Deploy from the registry** on the server (it needs this repo's compose files and `.env`, not the source build).
-Read `CHANGELOG.md` for every version up to the one you want first:
-```bash
-AKSOR_VERSION=1.0.2 ./deployment.sh up        # first time
-AKSOR_VERSION=1.0.3 ./deployment.sh update    # upgrade: backup, pull, recreate, migrate
-```
-Put `AKSOR_IMAGE_PREFIX` and `AKSOR_VERSION` in `.env` to make them stick. A private repository needs
-`docker login` on the server too.
+`update` lists the exact images it pulls before pulling them. To run a specific release rather than the newest,
+check out its tag first (`git checkout v1.0.2`).
 
 Notes:
-- **Pin a version** (`1.0.1`) in `.env` rather than relying on `latest`, so a restart can never silently pick up a
-  new release, and a rollback is just setting the old tag and running `up`. Database migrations
+- **Versions are pinned, never `latest`**, so a restart can never silently pick up a new release. A rollback is
+  checking out the older release (`git checkout v1.0.1`) and running `./deployment.sh update`. Database migrations
   only move forward, so take the backup `update` makes before upgrading, and restore it to roll back across a
   schema change.
 - **The portal's API URL is not in the image's control:** `portal/public/config.js` ships pointing at
@@ -799,7 +773,7 @@ there.
 
 #### What the image actually contains, and why it's large
 
-`Dockerfile` is `python:3.12-slim` plus: `tesseract-ocr` + `tesseract-ocr-khm`
+[`api/Dockerfile`](../api/Dockerfile) is `python:3.12-slim` plus: `tesseract-ocr` + `tesseract-ocr-khm`
 (OCR), `libicu-dev` (PyICU, for `aksor_khmer_ocr_segmenter`), `libreoffice`
 (the docx/xlsx → pdf/png conversion engine), `poppler-utils` (`pdftoppm`,
 for the png path), and WeasyPrint's runtime libs
@@ -808,8 +782,8 @@ image's size — there's no slimmer variant that keeps the `libreoffice`
 backend's native Khmer justify working, which is the entire reason that
 backend exists (see [`khmer-line-breaking.md`](khmer-line-breaking.md)).
 If you only ever need the `weasyprint` backend and don't need the
-`libreoffice` backend or xlsx templates at all, you could fork the
-Dockerfile to drop `libreoffice` — not done here since it's the default,
+`libreoffice` backend or xlsx templates at all, you could fork
+`api/Dockerfile` to drop `libreoffice` — not done here since it's the default,
 recommended backend.
 
 The bundled Khmer fonts (`templates/fonts/*.ttf`) are copied into
@@ -849,7 +823,6 @@ sane defaults), the mount just lets you override them live.
 |---|---|---|
 | `PORTAL_USERNAME` / `PORTAL_PASSWORD` | For the admin surface | The break-glass superuser: signs in through `POST /api/v1/auth/login` like anyone, and is how the first real accounts get created. With neither this nor any user, every protected route returns `503`, not open access. Set on the `api` service. |
 | `API_PORT` / `PORTAL_PORT` | No (defaults 8000 / 8080) | The host ports the `api` and `portal` services are published on. After changing them, keep `CORS_ALLOWED_ORIGINS` (portal port) and the portal config file's `PORTAL_API_BASE_URL` (API port) in step. |
-| `BUILD_NETWORK` / `APT_MIRROR` / `PIP_INDEX_URL` / `NPM_REGISTRY` | No (defaults: `default`, the public Debian / PyPI / npm) | Where the image **build** downloads packages from. `BUILD_NETWORK=host` builds on the server's own network (a fix when Docker's bridge can't reach the internet, e.g. UFW forwarding on Ubuntu); the three mirror settings point it at internal mirrors. Only used by `up --build`. See [Get Docker ready](#a-get-docker-ready-ubuntu-debian-centos--rhel--rocky--alma-and-others). |
 | `CORS_ALLOWED_ORIGINS` | For the portal to work at all | Comma-separated origins allowed to call `api` cross-origin — the portal's **exact** origin. Also what lets the browser send the refresh cookie to `/api/v1/auth/*`, and the origins those cookie routes accept. Set on the `api` service. |
 | `JWT_SECRET` | Only with more than one `api` replica | 32+ characters; the key access tokens are signed with. Unset: generated into `data/secrets/jwt.key` on first use (kept in the mounted `data/secrets`). All replicas must share one. Losing or changing it only signs everyone out. See [Sign-in and sessions](authentication.md). |
 | `ACCESS_TOKEN_TTL_SECONDS` | No | Access-token lifetime, 60–3600 (default 900 = 15 minutes). |
@@ -899,7 +872,7 @@ separate, locked-down container instead of in `api`:
 
 ```bash
 # in .env: JDBC_WORKER_TOKEN=<a long random string>
-docker compose --profile jdbc up -d jdbc-worker api     # pulls the prebuilt jdbc-worker image (AKSOR_VERSION in .env)
+docker compose --profile jdbc up -d jdbc-worker api     # pulls the released jdbc-worker image docker-compose.yml names
 ```
 
 The `jdbc-worker` service has no published port, a read-only filesystem and read-only drivers, no
@@ -932,7 +905,7 @@ if the API is reachable from the internet, have the proxy limit it too, and cons
 
 ### Without Docker
 
-The Dockerfile's apt-get list mirrors [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)'s
+`api/Dockerfile`'s apt-get list mirrors [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)'s
 Ubuntu setup — same packages, same install order — so that workflow is
 the reference for a bare-metal Linux install. On macOS for local
 development, use [`packages/aksor_khmer_ocr_segmenter/scripts/setup_env.sh`](../packages/aksor_khmer_ocr_segmenter/scripts/setup_env.sh)

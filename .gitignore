@@ -28,7 +28,8 @@ data/font_resources/
 .env.*
 !.env.example
 .venv/
-.claude/settings.local.json
+.claude/
+CLAUDE.md
 .idea/
 .vscode/
 *.swp

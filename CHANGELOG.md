@@ -5,13 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **The image versions are written in `docker-compose.yml`** (`aksorkhmerbi/aksor-khmer-bi-engine:1.0.0` and so
+  on), not taken from `.env`: `AKSOR_VERSION` and `AKSOR_IMAGE_PREFIX` are no longer read, and there is nothing to set.
+  A release updates those tags — each image on its own, so a release that only changes the portal moves only the
+  portal — and upgrading is `git pull`, then `./deployment.sh update` (which prints the exact images it pulls).
+  **Upgrade note:** `AKSOR_VERSION` / `AKSOR_IMAGE_PREFIX` left in an existing `.env` are ignored; delete them.
+- **Installing means running a released version — building from source is no longer offered.** `./deployment.sh up`
+  and `update` only pull the released images from Docker Hub; `--build` and `--pull` now stop with a message saying
+  so, `docker-compose.build.yml` is removed, and so are the build settings in `.env.example` (`BUILD_NETWORK`,
+  `APT_MIRROR`, `APT_SCHEME`, `PIP_INDEX_URL`, `NPM_REGISTRY` — an existing `.env` that still has them is harmless) and
+  the build checks in `doctor`. The released images are published for both Intel/AMD and ARM (`linux/amd64`, `linux/arm64`), so Apple-silicon Macs and ARM servers run them natively.
+  **Upgrade note:** a server that ran `up --build` / `update --build` switches with `git pull` and
+  `./deployment.sh update`.
+- **The engine's Dockerfile moved to `api/Dockerfile`**, beside `portal/Dockerfile` and `jdbc-worker/Dockerfile` (the
+  build context is still the repository root).
 - **Prebuilt images now come from Docker Hub** — `aksorkhmerbi/aksor-khmer-bi-engine`, `-portal` and
-  `-jdbc-worker` — instead of GitHub Container Registry. The default `AKSOR_IMAGE_PREFIX` (compose files,
-  `.env.example`) is now `aksorkhmerbi/aksor-khmer-bi`. **Upgrade note:** an existing `.env` that still says
-  `AKSOR_IMAGE_PREFIX=ghcr.io/aksor-khmer-solutech/aksor-khmer-bi` keeps pulling from GHCR until you change it.
+  `-jdbc-worker` — instead of GitHub Container Registry.
 - **The GitHub release workflow is removed** (`.github/workflows/release-images.yml`); pushing a `v*` tag no longer
-  publishes images. Publish with `./deployment.sh publish <version>` (after `docker login`). GitHub Actions now only
-  runs the tests (`ci.yml`).
+  publishes images, and GitHub Actions now only runs the tests (`ci.yml`). Publishing is a maintainer task and has
+  left the installer: `./deployment.sh publish` is gone (maintainers use `scripts/publish-images.sh`), so
+  `deployment.sh` only installs, pulls, updates and operates a released version.
 - **`DEPLOYMENT.md` is merged into `docs/deployment.md`.** The root file's install how-to (get Docker and the code, quick
   deployment, step by step, running it daily, customizing, troubleshooting) is now the **Install it** half of
   `docs/deployment.md`, with the reference sections after it, so there is one deployment guide (also the one shown in

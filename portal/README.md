@@ -134,7 +134,7 @@ change them, edit that file and rebuild.
 ## Run (Docker)
 
 ```bash
-docker compose -p aksor-app -f docker-compose.yml -f docker-compose.build.yml up -d --build portal   # build the portal alone from this source; ./deployment.sh up pulls the released images
+./deployment.sh up        # from the repository root: pulls and starts the released images, the portal included
 # open http://localhost:8080
 ```
 

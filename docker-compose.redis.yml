@@ -9,7 +9,7 @@
 #   docker network create aksor-network
 #   docker compose -p aksor-redis -f docker-compose.redis.yml up -d --wait
 #   docker compose -p aksor-db    -f docker-compose.db.yml    up -d --wait
-#   docker compose -p aksor-app   -f docker-compose.yml       up -d --wait      # set AKSOR_VERSION in .env first
+#   docker compose -p aksor-app   -f docker-compose.yml       up -d --wait
 #
 # Use distinct project names (-p) as above: with one shared project, `--remove-orphans`
 # on one stack would delete the others' containers.

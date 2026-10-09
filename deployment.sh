@@ -10,18 +10,13 @@
 # rolled back without ever restarting the database or the queue.
 #
 #   ./deployment.sh init              first-time setup: network + .env (from .env.example) with generated secrets
-#   ./deployment.sh up [--build]      start redis, then postgres (each waits until healthy), then the app. The app
-#                                     images are PULLED (AKSOR_IMAGE_PREFIX + AKSOR_VERSION in .env); --build builds
-#                                     them from the Dockerfiles instead (needs internet for apt/pip/npm)
-#   ./deployment.sh update [--no-backup] [--build] [--pull]
-#                                     back up, pull the AKSOR_VERSION images (or --build them; --pull refreshes the
-#                                     base images then), recreate the app (migrations run at api start); redis and
-#                                     postgres are left alone
-#   ./deployment.sh publish <version> [--latest]
-#                                     build engine, portal and jdbc-worker for PLATFORMS (default linux/amd64) and push
-#                                     to the registry named by AKSOR_IMAGE_PREFIX (Docker Hub: aksorkhmerbi/aksor-khmer-bi)
-#   ./deployment.sh doctor [build]    check this machine (docker, compose, ports, disk; with `build`, also whether a
-#                                     container can reach what the build downloads); `up` runs it for you
+#   ./deployment.sh up                start redis, then postgres (each waits until healthy), then the app. The app
+#                                     runs the released images named in docker-compose.yml, PULLED from Docker Hub;
+#                                     nothing is built here
+#   ./deployment.sh update [--no-backup]
+#                                     after `git pull`: back up, pull the images docker-compose.yml now names, recreate
+#                                     the app (migrations run at api start); redis and postgres are left alone
+#   ./deployment.sh doctor            check this machine (docker, compose, CPU, ports, disk); `up` runs it for you
 #   ./deployment.sh down              stop the app, then postgres, then redis (volumes and data are kept)
 #   ./deployment.sh restart [redis|db|app]
 #   ./deployment.sh status
@@ -34,6 +29,21 @@
 #
 # Settings come from ./.env (never committed): POSTGRES_PASSWORD, PORTAL_USERNAME,
 # PORTAL_PASSWORD, CORS_ALLOWED_ORIGINS, ... -- see docs/deployment.md.
+
+# `. deployment.sh up` runs this inside your own shell: its `set -e` and every `exit` would then close that shell on
+# the first error. Refuse, loudly, before touching anything (tests source it on purpose with DEPLOYMENT_SH_NO_MAIN).
+if [ -z "${DEPLOYMENT_SH_NO_MAIN:-}" ]; then
+  _sourced=0
+  if [ -n "${BASH_VERSION:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then _sourced=1; fi
+  case "${ZSH_EVAL_CONTEXT:-}" in *:file*) _sourced=1 ;; esac
+  if [ "$_sourced" = 1 ]; then
+    unset _sourced
+    printf 'error: run it as  ./deployment.sh %s  -- not  . deployment.sh  (that runs it inside your shell, and an error would close it)\n' "$*" >&2
+    return 1
+  fi
+  unset _sourced
+fi
+
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -45,7 +55,6 @@ APP_PROJECT="aksor-app"
 REDIS_FILE="docker-compose.redis.yml"
 DB_FILE="docker-compose.db.yml"
 APP_FILE="docker-compose.yml"
-APP_BUILD_FILE="docker-compose.build.yml"
 BACKUP_DIR="${BACKUP_DIR:-backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
 # The data/ folder is written by the containers (as root), so a normal host user may not be able to read parts of
@@ -63,16 +72,13 @@ die()  { printf '%serror:%s %s\n' "$c_red" "$c_off" "$*" >&2; exit 1; }
 
 redis() { docker compose -p "$REDIS_PROJECT" -f "$REDIS_FILE" "$@"; }
 db()    { docker compose -p "$DB_PROJECT"    -f "$DB_FILE"    "$@"; }
-# The app stack runs prebuilt, version-pinned images (docker-compose.yml). APP_BUILD=1 (up/update --build) adds the
-# override that builds them from the Dockerfiles. Without a version, commands that don't need an image (down, logs,
-# status...) still work: a placeholder satisfies the compose file's required AKSOR_VERSION.
-APP_BUILD=0
-app() {
-  local compose_files=(-f "$APP_FILE") ver; ver="$(image_version)"
-  if [ "$APP_BUILD" = 1 ]; then compose_files+=(-f "$APP_BUILD_FILE"); [ -n "$ver" ] || ver="local"; fi
-  [ -n "$ver" ] || ver="unset"
-  AKSOR_VERSION="$ver" docker compose -p "$APP_PROJECT" "${compose_files[@]}" "$@"
-}
+# The app stack runs the released, version-pinned images docker-compose.yml names; building them is not part of
+# installing.
+app()   { docker compose -p "$APP_PROJECT"   -f "$APP_FILE"   "$@"; }
+
+# Building the images from source is not a supported way to install (the maintainers publish released images), so
+# say so plainly instead of a bare usage line when an old instruction still passes --build / --pull.
+no_build() { die "building from source isn't supported -- run a released version: git pull (it brings the image versions in docker-compose.yml), then ./deployment.sh ${1:-up}"; }
 
 # Redis first, then Postgres, each waiting until healthy (the app needs both).
 start_infra() {
@@ -80,6 +86,22 @@ start_infra() {
   redis up -d --wait
   info "starting postgres"
   db up -d --wait
+  check_db_password
+}
+
+# A Postgres volume keeps the password it was created with, whatever .env says later -- and a mismatch otherwise shows
+# up as the api crash-looping at its migrations behind pages of traceback. Log in the way the api does (over the
+# network, as `postgres`, where the password is really checked -- connections from inside the container itself are
+# trusted) and stop here with the fix instead. Skipped for your own database (DATABASE_URL).
+check_db_password() {
+  [ -z "$(env_value DATABASE_URL)" ] || return 0
+  local pw; pw="$(env_value POSTGRES_PASSWORD)"; [ -n "$pw" ] || pw=aksor
+  docker run --rm --pull=never --network "$NETWORK" -e PGPASSWORD="$pw" postgres:16-alpine \
+      psql -h postgres -U aksor -d aksor_khmer_bi -tAc 'select 1' >/dev/null 2>&1 && return 0
+  die "Postgres refuses POSTGRES_PASSWORD from .env: this database was created with a different password, and it keeps that one.
+       Either put the original password back in .env, or give the database the one in .env:
+         docker compose -p $DB_PROJECT -f $DB_FILE exec -T postgres psql -U aksor -d aksor_khmer_bi -c \"ALTER USER aksor PASSWORD '<the password in .env>'\"
+       (on a throwaway machine you can instead delete the database: ./deployment.sh down, then docker volume rm aksor-khmer-bi_pgdata -- that erases every report and user)"
 }
 
 require_docker() {
@@ -95,7 +117,7 @@ ensure_network() {
 env_value() { # env_value KEY -> value from .env, read the way Compose reads it (empty if absent)
   [ -f .env ] || return 0
   # Last assignment wins. Drops a Windows line ending, an inline " # comment" and one pair of surrounding quotes,
-  # so `AKSOR_VERSION="1.2.0"  # latest` is 1.2.0 here exactly as it is for `docker compose`.
+  # so `API_PORT="8000"  # default` is 8000 here exactly as it is for `docker compose`.
   sed -n "s/^$1=//p" .env | tail -n1 | tr -d '\r' | sed -e 's/[[:space:]]\{1,\}#.*$//' -e 's/[[:space:]]*$//' \
     -e "s/^\"\(.*\)\"\$/\1/" -e "s/^'\(.*\)'\$/\1/"
 }
@@ -158,10 +180,10 @@ preflight() {
   fi
 }
 
-# Checks the machine before a long build, so a problem shows up in seconds with a fix instead of ten minutes in.
+# Checks the machine before anything starts, so a problem shows up in seconds with a fix.
 # Prints ok / warn / FAIL for each check; exits non-zero only on FAIL. SKIP_DOCTOR=1 skips it inside `up`.
 cmd_doctor() {
-  local building="${1:-pull}" fails=0
+  local fails=0
   ok()   { printf '  %sok%s    %s\n' "$c_grn" "$c_off" "$*"; }
   bad()  { printf '  %sFAIL%s  %s\n' "$c_red" "$c_off" "$*"; fails=$((fails + 1)); }
   note() { printf '  %swarn%s  %s\n' "$c_ylw" "$c_off" "$*"; }
@@ -173,12 +195,13 @@ cmd_doctor() {
 
   local arch; arch="$(docker info --format '{{.Architecture}}' 2>/dev/null)"
   ok "CPU: ${arch:-unknown}"
-  if [ "$building" = pull ] && [ "$arch" != x86_64 ] && [ "$arch" != amd64 ]; then
-    note "images are published for linux/amd64 unless PLATFORMS says otherwise; on $arch pulling may fail with 'exec format error'"
-  fi
+  case "$arch" in
+    x86_64|amd64|aarch64|arm64) ;;
+    *) note "released images are built for Intel/AMD (linux/amd64) and ARM (linux/arm64); on $arch pulling will fail with 'no matching manifest'" ;;
+  esac
 
   local free_kb; free_kb="$(df -Pk . 2>/dev/null | awk 'NR==2 {print $4}')"
-  if [ -n "$free_kb" ] && [ "$free_kb" -lt 10485760 ]; then note "only $((free_kb / 1048576)) GB free here; a build needs about 10 GB (LibreOffice, Tesseract, fonts)"; else ok "disk space"; fi
+  if [ -n "$free_kb" ] && [ "$free_kb" -lt 10485760 ]; then note "only $((free_kb / 1048576)) GB free here; the images take a few GB (LibreOffice, Tesseract, fonts), plus room for data and backups"; else ok "disk space"; fi
 
   if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" = Enforcing ]; then
     ok "SELinux is enforcing -- the compose file labels its mounts (:z), nothing to do"
@@ -192,52 +215,6 @@ cmd_doctor() {
       if docker ps --filter "label=com.docker.compose.project=$APP_PROJECT" --format '{{.Ports}}' 2>/dev/null | grep -q ":$port->"; then ok "port $port is ours (already running)"; else bad "port $port is already in use -- set $name in .env"; fi
     else ok "port $port is free"; fi
   done
-
-  if [ "$building" = build ]; then
-    local net apt scheme pip npm
-    net="$(env_value BUILD_NETWORK | grep . || echo default)"
-    apt="$(env_value APT_MIRROR | grep . || echo deb.debian.org)"
-    scheme="$(env_value APT_SCHEME | grep . || echo http)"
-    pip="$(env_value PIP_INDEX_URL | grep . || echo https://pypi.org/simple)"
-    npm="$(env_value NPM_REGISTRY | grep . || echo https://registry.npmjs.org/)"
-    local before=$fails
-    info "can a container reach what the build downloads? (network: $net)"
-    local netarg=(); [ "$net" = host ] && netarg=(--network host)
-    local result base=python:3.12-slim-trixie
-    # The build needs this image anyway, so fetching it now costs nothing -- and if even that fails, that's the answer.
-    if ! docker image inspect "$base" >/dev/null 2>&1 && ! docker pull -q "$base" >/dev/null 2>&1; then
-      bad "can't download the base image $base from Docker Hub -- this machine can't reach the registry (a proxy, firewall or DNS problem)"
-    fi
-    result="$(docker run -i --rm ${netarg[@]+"${netarg[@]}"} "$base" python - "$scheme://$apt/" "$pip" "$npm" <<'PY' 2>/dev/null || true
-import sys, urllib.request
-for url in sys.argv[1:]:
-    try:
-        urllib.request.urlopen(url, timeout=8).close()
-        print("ok", url)
-    except Exception as exc:
-        print("FAIL", url, type(exc).__name__)
-PY
-)"
-    local line
-    [ -n "$result" ] || bad "the network check could not start a container -- try: docker run --rm $base true"
-    while IFS= read -r line; do
-      case "$line" in
-        ok\ *) ok "reachable: ${line#ok }" ;;
-        FAIL\ *) bad "can't reach ${line#FAIL }" ;;
-        "") ;;
-        *) bad "network check could not run: $line" ;;
-      esac
-    done <<EOF2
-$result
-EOF2
-    if [ "$fails" -gt "$before" ]; then
-      printf '\n  The build would fail at the download step. Try, in this order:\n'
-      printf '    1. BUILD_NETWORK=host in .env (build on the server'"'"'s own network)\n'
-      printf '    2. fix Docker'"'"'s network (UFW forwarding, DNS) -- docs/deployment.md, "Get Docker ready"\n'
-      printf '    3. APT_SCHEME=https if only port 80 is blocked; APT_MIRROR / PIP_INDEX_URL / NPM_REGISTRY for internal mirrors\n'
-      printf '    4. skip the build: ./deployment.sh up (without --build) pulls the prebuilt images instead\n\n'
-    fi
-  fi
 
   [ "$fails" -eq 0 ] && info "all good" || return 1
 }
@@ -271,26 +248,24 @@ cmd_init() {
 }
 
 cmd_up() {
-  require_docker
-  local build=()
   for a in "$@"; do
     case "$a" in
-      --build) build=(--build); APP_BUILD=1 ;;
-      --from-registry) ;;   # the default now; accepted so older instructions still work
-      *) die "up [--build]" ;;
+      --build) no_build up ;;
+      --from-registry) ;;   # the only way now; accepted so older instructions still work
+      *) die "usage: up" ;;
     esac
   done
+  require_docker
   preflight
-  [ ${#build[@]} -gt 0 ] || require_registry_images
   if [ -z "${SKIP_DOCTOR:-}" ]; then
-    if [ ${#build[@]} -eq 0 ]; then cmd_doctor pull || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"; else cmd_doctor build || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"; fi
+    cmd_doctor || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"
   fi
   ensure_network
   mkdir -p "${DATA_DIRS[@]}" data/logs
   start_infra
   info "starting app (api, scheduler, worker, portal) -- migrations run as the api starts"
-  if [ ${#build[@]} -eq 0 ]; then pull_app_images; fi
-  app up -d ${build[@]+"${build[@]}"} --wait
+  pull_app_images
+  app up -d --wait || die "the app didn't come up healthy -- see why with: ./deployment.sh logs api"
   cmd_status
   printf '\n  portal   http://localhost:%s\n  api docs http://localhost:%s/docs\n' "$(env_value PORTAL_PORT | grep . || echo 8080)" "$(env_value API_PORT | grep . || echo 8000)"
 }
@@ -436,79 +411,36 @@ cmd_restore() {
       sh -c 'set -e; cd /work; mkdir -p "$ASIDE"; for d in "$@"; do if [ -e "$d" ]; then mkdir -p "$ASIDE/$(dirname "$d")"; mv "$d" "$ASIDE/$d"; fi; done; tar -xzf "/in/$FILE" -C /work' sh "${DATA_DIRS[@]}" \
       || die "couldn't restore data/ -- the previous folders are in $aside/ (move them back)"
   fi
-  info "restored. Start it again with ./deployment.sh up (set AKSOR_VERSION in .env to the version the backup was made with, or newer: migrations only go forward)"
+  info "restored. Start it again with ./deployment.sh up (with the version the backup was made with, or newer -- migrations only go forward)"
 }
 
 cmd_update() {
-  require_docker
-  local backup=1 pull=() registry=1
+  local backup=1
   for a in "$@"; do
     case "$a" in
       --no-backup) backup=0 ;;
-      --pull) pull=(--pull) ;;
-      --build) registry=0; APP_BUILD=1 ;;
-      --from-registry) ;;   # the default now; accepted so older instructions still work
-      *) die "update [--no-backup] [--build] [--pull]" ;;
+      --build|--pull) no_build update ;;
+      --from-registry) ;;   # the only way now; accepted so older instructions still work
+      *) die "usage: update [--no-backup]" ;;
     esac
   done
+  require_docker
   preflight
-  [ "$registry" = 1 ] && require_registry_images
   ensure_network
   # Redis and Postgres untouched: brought up only if they aren't (a fresh host), never recreated.
   start_infra
   if [ "$backup" = 1 ]; then cmd_backup; else warn "skipping backup (--no-backup)"; fi
-  if [ "$registry" = 1 ]; then
-    pull_app_images
-  else
-    info "building app images"
-    app build "${pull[@]}"
-  fi
+  pull_app_images
   info "recreating the app (alembic upgrade head runs as the api starts)"
-  app up -d --wait
+  app up -d --wait || die "the app didn't come up healthy -- see why with: ./deployment.sh logs api"
   cmd_status
 }
 
-image_prefix() { echo "${AKSOR_IMAGE_PREFIX:-$(env_value AKSOR_IMAGE_PREFIX)}"; }
-image_version() { echo "${AKSOR_VERSION:-$(env_value AKSOR_VERSION)}"; }
-
-# Deploying prebuilt images needs to know which ones: say so before anything is started or backed up.
-require_registry_images() {
-  case "$(image_prefix)" in
-    */*) ;;
-    *) die "no images to pull: set AKSOR_IMAGE_PREFIX (e.g. aksorkhmerbi/aksor-khmer-bi) and AKSOR_VERSION in .env -- see .env.example. To build from the source instead: add --build" ;;
-  esac
-  [ -n "$(image_version)" ] || die "set AKSOR_VERSION in .env to the released version you want (read CHANGELOG.md first). To build from the source instead: add --build"
-}
-
 pull_app_images() {
-  info "pulling app images ($(image_prefix)-{engine,portal}:$(image_version))"
-  app pull || die "couldn't pull the images -- is version $(image_version) published (./deployment.sh publish $(image_version) pushes it), and is the repository public or are you logged in (docker login)? Or add --build to build from the source"
-}
-
-cmd_publish() {
-  require_docker
-  docker buildx version >/dev/null 2>&1 || die "docker buildx is required to publish"
-  local version="${1:-}" latest=0
-  [ -n "$version" ] || die "publish <version> [--latest]   e.g. publish 1.0.1 --latest"
-  [ "${2:-}" = "--latest" ] && latest=1
-  [[ "$version" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || die "'$version' isn't a valid image tag"
-  local prefix; prefix="$(image_prefix)"
-  case "$prefix" in
-    */*) ;;
-    *) die "set AKSOR_IMAGE_PREFIX (in .env or the environment) to <dockerhub-user>/aksor-khmer-bi -- got '${prefix:-<empty>}'" ;;
-  esac
-  local platforms="${PLATFORMS:-linux/amd64}"
-  info "publishing $prefix-{engine,portal,jdbc-worker}:$version for $platforms (docker login first if the push is denied)"
-  local name file tags
-  for name in engine portal jdbc-worker; do
-    # All build from the repo root: the portal bundles /docs (portal/Dockerfile).
-    case "$name" in engine) file=Dockerfile ;; *) file="$name/Dockerfile" ;; esac
-    tags=(-t "$prefix-$name:$version")
-    [ "$latest" = 1 ] && tags+=(-t "$prefix-$name:latest")
-    info "building and pushing $prefix-$name"
-    docker buildx build --platform "$platforms" "${tags[@]}" -f "$file" --push .
-  done
-  info "published. On the server: AKSOR_IMAGE_PREFIX=$prefix AKSOR_VERSION=$version ./deployment.sh up"
+  # Each image can be at its own version (a release may update only the portal), so say exactly what is pulled.
+  info "pulling app images:"
+  app config --images 2>/dev/null | sort -u | sed 's/^/      /'
+  app pull || die "couldn't pull the images -- see the lines above: 'no matching manifest' means there is no image for this CPU yet (Intel/AMD and ARM are published); a timeout or 'pull access denied' means this server can't reach Docker Hub (docs/deployment.md, \"Get Docker ready\")"
 }
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -525,8 +457,7 @@ main() {
     backup)  cmd_backup "$@" ;;
     restore) cmd_restore "$@" ;;
     update)  cmd_update "$@" ;;
-    publish) cmd_publish "$@" ;;
-    doctor)  cmd_doctor "${1:-pull}" ;;
+    doctor)  cmd_doctor ;;
     redis)   require_docker; ensure_network; redis "${@:-ps}" ;;
     db)      require_docker; ensure_network; db "${@:-ps}" ;;
     app)     require_docker; ensure_network; app "${@:-ps}" ;;

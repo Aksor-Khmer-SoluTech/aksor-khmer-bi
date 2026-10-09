@@ -68,7 +68,6 @@ footprint. Full writeup: [`docs/architecture.md`](docs/architecture.md).
 
 ```bash
 ./deployment.sh init   # once: network + .env with generated secrets
-# edit .env: set AKSOR_VERSION to a released version (see CHANGELOG.md) -- the app runs prebuilt images
 ./deployment.sh up     # postgres + redis, then the app (pulls the images; nothing is built)
 # open http://localhost:8000/docs (API reference) or http://localhost:8080 (template manager)
 ```

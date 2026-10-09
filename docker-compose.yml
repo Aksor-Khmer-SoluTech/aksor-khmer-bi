@@ -12,12 +12,10 @@ x-logging: &default-logging
 
 services:
   api:
-    # One image for api, scheduler and worker (same code, different command). Every app service runs a
-    # PREBUILT image from Docker Hub, pinned by AKSOR_VERSION (and AKSOR_IMAGE_PREFIX) in .env:
-    # nothing is built on the server. A release is published with `./deployment.sh publish <version>`.
-    # To build from the source instead, add the override file:
-    #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build   (or ./deployment.sh up --build)
-    image: ${AKSOR_IMAGE_PREFIX:-aksorkhmerbi/aksor-khmer-bi}-engine:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
+    # One image for api, scheduler and worker (same code, different command). Every app service runs a released
+    # image from Docker Hub, pinned to the version written here -- nothing is built on the server. A release updates
+    # these tags (each image can move on its own); get them with `git pull`, then `./deployment.sh update`.
+    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0
     restart: unless-stopped
     logging: *default-logging
     ports:
@@ -44,7 +42,7 @@ services:
       - path: .env
         required: false
     environment:
-      # api's own entrypoint (Dockerfile) runs `alembic upgrade head`
+      # api's own entrypoint (api/Dockerfile) runs `alembic upgrade head`
       # against this before starting uvicorn, so the schema is always
       # current on container start — no separate manual migration step.
       # Change the password via POSTGRES_PASSWORD, not just here, so both
@@ -138,7 +136,7 @@ services:
   # memory/CPU/processes. Nothing is published to the host.
   jdbc-worker:
     profiles: ["jdbc"]
-    image: ${AKSOR_IMAGE_PREFIX:-aksorkhmerbi/aksor-khmer-bi}-jdbc-worker:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
+    image: aksorkhmerbi/aksor-khmer-bi-jdbc-worker:1.0.0
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -167,7 +165,7 @@ services:
   # more than one replica would make every cron trigger fire once per
   # replica, not once total. Scale `worker` instead for more throughput.
   scheduler:
-    image: ${AKSOR_IMAGE_PREFIX:-aksorkhmerbi/aksor-khmer-bi}-engine:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
+    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["python", "-m", "app.scheduler"]
     restart: unless-stopped
@@ -196,7 +194,7 @@ services:
   # retry/backoff (app/celery_app.py's run_job task). Horizontally
   # scalable: `docker compose up --scale worker=3`.
   worker:
-    image: ${AKSOR_IMAGE_PREFIX:-aksorkhmerbi/aksor-khmer-bi}-engine:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
+    image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0
     entrypoint: ["./docker-entrypoint-no-migrate.sh"]
     command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
     restart: unless-stopped
@@ -234,7 +232,7 @@ services:
   # this container, so there's no network dependency between the two at
   # the container level — only in the browser loading the page.
   portal:
-    image: ${AKSOR_IMAGE_PREFIX:-aksorkhmerbi/aksor-khmer-bi}-portal:${AKSOR_VERSION:?Set AKSOR_VERSION in .env to a released version (see CHANGELOG.md)}
+    image: aksorkhmerbi/aksor-khmer-bi-portal:1.0.0
     restart: unless-stopped
     logging: *default-logging
     ports:

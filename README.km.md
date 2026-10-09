@@ -60,7 +60,6 @@ WeasyPrint ត្រូវការជំហានញែកពាក្យមុ
 
 ```bash
 ./deployment.sh init   # ម្តង៖ បណ្តាញ + .env
-# កែ .env៖ កំណត់ AKSOR_VERSION ជាកំណែដែលបានចេញផ្សាយ (មើល CHANGELOG.md) -- កម្មវិធីដំណើរការដោយ image ដែលបានបង្កើតរួច
 ./deployment.sh up
 # បើក http://localhost:8000/docs (ឯកសារយោង API) ឬ http://localhost:8080 (កម្មវិធីគ្រប់គ្រងទម្រង់គំរូ)
 ```
