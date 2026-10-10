@@ -124,7 +124,7 @@ export default function ProtectedTermsTab({ report, canManageSets }: { report: R
         {sets.length === 0 ? (
           <p className="terms-empty">
             No shared sets in this organization yet.{" "}
-            {canManageSets && <a href="#/admin/protected-terms">Create one in Admin → Protected Terms</a>}
+            {canManageSets && <a href="#/admin/protected-terms">Create one in Manage → Protected Terms</a>}
           </p>
         ) : (
           <ul className="terms-set-list">

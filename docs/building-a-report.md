@@ -157,7 +157,7 @@ itself would silently break type detection.
 ## Images (docx templates only)
 
 An image you've uploaded to the Resources library (`POST /api/v1/images`
-on the api service, or the portal's Admin > Resources page) embeds into a
+on the api service, or the portal's Manage → Resources page) embeds into a
 rendered document the same way a chart does — a plain `{{ field }}`
 placeholder, with the *value* (not the placeholder syntax) telling
 doc_engine to treat it as an image instead of text:
@@ -193,9 +193,10 @@ equivalent mechanism yet, the same limitation charts already have.
 
 ## Khmer segmentation — automatic, no action needed
 
-Every string in your JSON body is run through ICU word segmentation
-(ZWSP insertion) before rendering, regardless of which fields you named
-or what language they're in — see
+Every string in your JSON body that contains Khmer is run through ICU word
+segmentation (ZWSP insertion) before rendering, whichever field it's in. Text with no
+Khmer in it — dates, amounts, IDs, English — reaches the template exactly as sent, so
+slicing a date or comparing a value works as written. See
 [`segment_generic`](../packages/doc_engine/src/doc_engine/segmentation.py),
 which recurses into every string in the payload since a report template
 has no fixed field list to selectively segment against. In practice this
@@ -426,13 +427,13 @@ limit (20,000 by default) is an error, not a silent cut-off. That guard is a saf
 **point the connection at a read-only database account**, which is the real limit on what a report's SQL
 can do.
 
-**Connections** (Admin → Connections; permission `connection:manage`, held by system
+**Connections** (Manage → Connections; permission `connection:manage`, held by system
 administrators and each organization's `ROLE_ORG_ADMIN`) are named, reusable
 `base URL + headers + authentication`. A report picks one and adds only a path, so when an API moves —
 or you go from test to production — you edit the connection once instead of every report. Give
 the connection the same *name* in each environment and the reports need no change at all.
 Authentication is a bearer token, or a username with a password, and where it comes from is a choice
-made per connection: a **Secret** (Admin → Secrets — a named credential created, rotated and revoked
+made per connection: a **Secret** (Manage → Secrets — a named credential created, rotated and revoked
 in the portal, encrypted at rest, and never shown again once saved) or an environment variable on the
 API server, for a deployment that would rather keep credentials out of the database entirely. Rotating
 a Secret is one edit; the very next run uses it, no server access, no restart. Whoever can edit a connection (`connection:manage`) decides where its credential is
@@ -450,7 +451,7 @@ connections (`report:manage` is enough to pick one) but neither their header val
 credentials. A connection in use, or a Secret anything still refers to, can't be deleted; a connection's
 name is fixed once created because reports refer to it.
 
-**Database connections** (Admin → Connections → *+ Database*) hold what is needed to reach one database:
+**Database connections** (Manage → Connections → *+ Database*) hold what is needed to reach one database:
 the engine (Oracle, PostgreSQL, MySQL, SQL Server, MariaDB or IBM Db2, each with its logo), host, port,
 database (Oracle: service name or SID), a **secure connection mode** (disabled, required, verify CA,
 verify full — each engine's own settings are built for you), the driver, and the login. The JDBC URL is
@@ -458,7 +459,7 @@ shown and editable: it is built from the fields, and pasting one fills them in. 
 in with the settings on screen and runs the engine's trivial statement, saving nothing; a failure says
 only that it failed, since the driver's own message can name hosts and users (it is in the server log).
 
-The password is never a field on that form. It is a **Secret** (Admin → Secrets): encrypted in the
+The password is never a field on that form. It is a **Secret** (Manage → Secrets): encrypted in the
 database with a key kept outside it, write-only — no page, API, audit entry or backup can read it back —
 and decrypted only for the moment a query runs. The picker offers *+ New credential* for anyone who holds
 `secret:manage`; replacing a password is rotating the Secret. A Secret that a connection uses can't be
@@ -466,7 +467,7 @@ deleted. Whoever can edit a connection (`connection:manage`) decides where that 
 treat the permission accordingly.
 
 **JDBC drivers.** PostgreSQL, MySQL and MariaDB run on built-in Python drivers. For any other engine —
-Oracle, SQL Server, Db2 — upload the vendor's JDBC driver (`.jar`) under Admin → JDBC Drivers
+Oracle, SQL Server, Db2 — upload the vendor's JDBC driver (`.jar`) under Manage → JDBC Drivers
 (permission `driver:manage`, held by system administrators and each organization's `ROLE_ORG_ADMIN`),
 then choose it on the connection; the page links to each vendor's download. The upload is checked (a
 real `.jar` containing the driver class you named, under 80 MB), its SHA-256 is recorded and audited, and
@@ -508,7 +509,7 @@ An **API client** is a machine identity -- a client ID and a secret -- that may 
 list of reports, beside roles and per-user grants. It is the way to let an embedding app (such as
 partner-web) send just the parameters, and it is managed at runtime: no environment variable, no restart.
 
-1. In the portal open **Admin → API Clients** (needs the `client:manage` permission -- a system
+1. In the portal open **Manage → API Clients** (needs the `client:manage` permission -- a system
    administrator or an organization's `ROLE_ORG_ADMIN`; deliberately *not* `report:manage`, so
    editing a template can't also hand out access to its data), choose **New client**, tick the
    reports it may run, and copy the client ID and secret it shows. The secret is shown **once**; only
@@ -567,7 +568,7 @@ versions weren't kept, and the *Download original* button is disabled. From
 its next replace on, everything is kept.
 
 Admins can search the same trail across everything — templates, users, roles,
-access, directory settings, jobs — under **Admin → Audit Log**; see
+access, directory settings, jobs — under **Manage → Audit Log**; see
 [the change audit trail](../api/README.md#change-audit-trail).
 
 ## Worked examples

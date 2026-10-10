@@ -143,7 +143,7 @@ export default function UserSettingsModal({
                       no profile, password, two-factor or session settings — only Preferences. Create your own account
                       in{" "}
                       <a href="#/admin/users" onClick={onClose}>
-                        Admin → Users
+                        Manage → Users
                       </a>{" "}
                       with the administrator role, then sign in with it to get all of these.
                     </p>

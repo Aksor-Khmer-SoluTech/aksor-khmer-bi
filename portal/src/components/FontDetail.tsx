@@ -110,7 +110,7 @@ export default function FontDetail({ font, canManage, onClose, onChanged }: { fo
             <dt>License</dt><dd>{font.license || <span className="muted">not stated in the font</span>}</dd>
             {font.license_url && (<><dt>License URL</dt><dd><a href={font.license_url} target="_blank" rel="noreferrer">{font.license_url}</a></dd></>)}
             <dt>Copyright</dt><dd>{font.copyright || "—"}</dd>
-            {font.note && (<><dt>Note</dt><dd>{font.note}</dd></>)}
+            {font.note && (<><dt>Source &amp; license</dt><dd>{font.note}</dd></>)}
           </dl>
           <h3 className="font-detail-h" style={{ marginTop: 16 }}>Used by</h3>
           {font.used_by.length === 0 ? (

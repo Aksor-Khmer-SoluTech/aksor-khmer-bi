@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -61,6 +61,9 @@ class ReportRow(Base):
     # app/rbac.py's has_report_access. Never implies render/manage: running
     # a report still needs an explicit grant, same as today.
     is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Made with the New report wizard and not yet published: only people who manage the report see it, in lists or
+    # runs (app/routers/report_wizard.py). Registering a finished template directly publishes it at once.
+    is_draft: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     # Optional report code -- an alternative to `report_id` in every
     # /api/v1/reports/{ref}/... route, so an integration or an <iframe> can say
     # `revenue-comparison` instead of an id that differs per environment. Globally

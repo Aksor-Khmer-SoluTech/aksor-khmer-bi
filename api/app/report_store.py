@@ -135,6 +135,7 @@ def _row_to_dict(row: ReportRow) -> dict:
         "sample_context": row.sample_context,
         "resource_bindings": row.resource_bindings,
         "is_public": row.is_public,
+        "is_draft": row.is_draft,
         "code": row.code,
         # Internal only -- ReportMeta (the public response model) has no
         # such fields, so these never leave through GET /reports; managers
@@ -291,6 +292,10 @@ def create_report(
     actor: Actor | None = None,
     note: str | None = None,
     original_filename: str | None = None,
+    is_draft: bool = False,
+    sample_context: dict | None = None,
+    parameters: list | None = None,
+    data_source: dict | None = None,
 ) -> dict:
     code = _clean_code(code)  # before any file is written
     report_id = uuid.uuid4().hex[:12]
@@ -308,9 +313,12 @@ def create_report(
         version=1,
         created_at=now,
         updated_at=now,
-        sample_context=None,
+        sample_context=sample_context,
         resource_bindings=resource_bindings,
         code=code,
+        is_draft=is_draft,
+        parameters=parameters,
+        data_source=data_source,
     )
     try:
         with db.SessionLocal() as session:
@@ -343,6 +351,7 @@ def update_report_meta(
     folder_id: str | None = UNSET,
     is_public: bool | None = None,
     code: str | None = UNSET,
+    is_draft: bool | None = None,
 ) -> dict:
     """Partial update: only overwrites fields that were actually passed.
 
@@ -372,6 +381,8 @@ def update_report_meta(
             row.folder_id = folder_id
         if is_public is not None:
             row.is_public = is_public
+        if is_draft is not None:
+            row.is_draft = is_draft
         if code is not UNSET:
             new_code = _clean_code(code)
             if new_code is not None:

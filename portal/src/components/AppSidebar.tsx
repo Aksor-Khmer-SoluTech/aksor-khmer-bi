@@ -1,6 +1,5 @@
-import { ADMIN_SECTIONS, canManageTemplates, has } from "../admin/sections";
-import { BATCH_RENDER_ENABLED } from "../features";
-import { BatchIcon, DashboardIcon, ChevronIcon, ReportsIcon, SchedulesIcon, TemplatesIcon } from "../admin/icons";
+import { MANAGE_GROUPS, manageItems } from "../admin/sections";
+import { ChevronIcon } from "../admin/icons";
 import type { Route } from "../hooks";
 import type { AuthInfo } from "../types";
 
@@ -31,136 +30,100 @@ function navItemClasses({
   return `flex w-full cursor-pointer appearance-none items-center gap-2.5 rounded-sm border-none text-left font-medium ${padding} ${verticalPadding} ${size} ${color}`;
 }
 
-/** The contextual left rail below TopBar. Its contents swap with where you
- * are: outside Admin it shows the top-level destinations (Templates and
- * Batch render if you hold report:manage, Reports for everyone, Schedules if
- * and you hold job:view) — the Admin entry
- * point lives only in TopBar; inside Admin
- * it swaps to a back-link and the admin section list (users/roles/.../
- * plugins) — the same pattern GitLab uses for a project/group's sidebar
- * nested under the global top bar. `collapsed` shrinks it to an
- * icon-only rail. */
+/** What "Back to ..." calls the everyday page Manage was opened from. */
+function backLabel(route: Route): string {
+  switch (route.view) {
+    case "reports":
+      return "Back to Reports";
+    case "run":
+      return "Back to the report";
+    case "runs":
+      return "Back to My runs";
+    case "starred":
+      return "Back to Starred";
+    case "docs":
+      return "Back to Guides";
+    default:
+      return "Back to Home";
+  }
+}
+
+/** The Manage sidebar, shown only on Manage pages (see isManageRoute): a way back to the everyday page you came from, then
+ * everything this person can manage in groups (Authoring, Scheduling, Data sources, People & access, Operations).
+ * Everyday pages -- Home, Reports, My runs, Starred -- live in the top bar instead, so most people never see a
+ * sidebar at all. `collapsed` shrinks it to an icon-only rail. */
 export default function AppSidebar({
   route,
+  backTo,
   navigate,
   auth,
   collapsed,
   onToggleCollapse,
 }: {
   route: Route;
+  /** The everyday page Manage was opened from; "Back" returns there. */
+  backTo: Route;
   navigate: (route: Route) => void;
   auth: AuthInfo;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }) {
-  const inAdmin = route.view === "admin";
-  const manageTemplates = canManageTemplates(auth);
-  const sections = ADMIN_SECTIONS.filter((s) => s.visible(auth));
-  const activeSectionId = inAdmin ? (sections.find((s) => s.id === route.section) ?? sections[0])?.id : null;
+  const items = manageItems(auth);
+  // An #/admin/<section> this person can't open shows the first one they can (AdminShell), so highlight that.
+  const active =
+    items.find((i) => i.isActive(route)) ?? (route.view === "admin" ? items.find((i) => i.route.view === "admin") : undefined);
 
-  // Unconditional, not just `max-md:hidden` -- the original CSS hides
-  // labels whenever collapsed regardless of viewport (collapsing only
-  // really makes sense at desktop width, where the icon-only rail is a
-  // real toggle; mobile's own row-wrapped layout doesn't re-show them).
-  // Reproduced as-is rather than "fixed" here -- a pure styling
-  // migration isn't the place to change behavior even if this looks
-  // like a pre-existing quirk.
+  // Labels hide whenever collapsed (collapsing only really matters at desktop width, where the icon-only rail is a
+  // real toggle; the phone layout wraps into rows and has its own toggle hidden).
   const navLabel = collapsed ? "hidden" : "truncate";
 
   return (
     <aside
-      className={`flex flex-col gap-0.5 overflow-y-auto border-border-soft bg-bg-chrome pb-4 transition-[flex-basis] duration-150 ease-out max-md:flex-row max-md:flex-wrap max-md:items-center max-md:overflow-y-visible max-md:border-r-0 max-md:border-b max-md:px-3 max-md:py-2.5 ${
+      className={`flex flex-none flex-col gap-0.5 overflow-y-auto border-border-soft bg-bg-chrome pb-4 transition-[flex-basis] duration-150 ease-out max-md:flex-row max-md:flex-wrap max-md:items-center max-md:overflow-y-visible max-md:border-r-0 max-md:border-b max-md:px-3 max-md:py-2.5 ${
         collapsed ? "basis-[60px] px-2" : "basis-56 px-3.5"
       }`}
+      aria-label="Manage"
+      data-tour="manage-sidebar"
     >
       <nav className="flex flex-col gap-0.5 max-md:flex-row max-md:flex-wrap">
-        {inAdmin ? (
-          <>
-            <button
-              type="button"
-              className={navItemClasses({ collapsed, navBack: true })}
-              onClick={() => navigate({ view: "reports" })}
-              title="Reports"
-            >
-              <span aria-hidden="true">&larr;</span>
-              <span className={navLabel}>Reports</span>
-            </button>
-            <div
-              className={`overflow-hidden px-3 pt-4 pb-1.5 font-mono text-[0.66rem] font-semibold tracking-[0.06em] whitespace-nowrap text-text-faint uppercase max-md:w-full max-md:px-2 max-md:pt-1 max-md:pb-0.5 ${collapsed ? "hidden" : ""}`}
-            >
-              Admin console
+        <button
+          type="button"
+          className={navItemClasses({ collapsed, navBack: true })}
+          onClick={() => navigate(backTo)}
+          title={backLabel(backTo)}
+          data-tour="manage-back"
+        >
+          <span aria-hidden="true">&larr;</span>
+          <span className={navLabel}>{backLabel(backTo)}</span>
+        </button>
+        {MANAGE_GROUPS.map((g) => {
+          const inGroup = items.filter((i) => i.group === g.id);
+          if (inGroup.length === 0) return null;
+          return (
+            <div key={g.id} role="group" aria-label={g.label} className="contents">
+              <div
+                className={`overflow-hidden px-3 pt-4 pb-1.5 font-mono text-[0.66rem] font-semibold tracking-[0.06em] whitespace-nowrap text-text-faint uppercase max-md:w-full max-md:px-2 max-md:pt-1 max-md:pb-0.5 ${collapsed ? "hidden" : ""}`}
+              >
+                {g.label}
+              </div>
+              {collapsed && <div aria-hidden="true" className="mx-2 my-1.5 h-px bg-border-soft max-md:hidden" />}
+              {inGroup.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={navItemClasses({ collapsed, active: item === active })}
+                  onClick={() => navigate(item.route)}
+                  title={item.label}
+                  aria-current={item === active ? "page" : undefined}
+                  data-tour={`manage-${item.key}`}
+                >
+                  <item.icon />
+                  <span className={navLabel}>{item.label}</span>
+                </button>
+              ))}
             </div>
-            {sections.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className={navItemClasses({ collapsed, active: s.id === activeSectionId })}
-                onClick={() => navigate({ view: "admin", section: s.id })}
-                title={s.label}
-              >
-                <s.icon />
-                <span className={navLabel}>{s.label}</span>
-              </button>
-            ))}
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              className={navItemClasses({ collapsed, active: route.view === "home" })}
-              onClick={() => navigate({ view: "home" })}
-              title="Home"
-            >
-              <DashboardIcon />
-              <span className={navLabel}>Home</span>
-            </button>
-            <button
-              type="button"
-              className={navItemClasses({ collapsed, active: route.view === "reports" || route.view === "run" })}
-              onClick={() => navigate({ view: "reports" })}
-              title="Reports"
-            >
-              <ReportsIcon />
-              <span className={navLabel}>Reports</span>
-            </button>
-            {manageTemplates && (
-              <button
-                type="button"
-                className={navItemClasses({ collapsed, active: route.view === "gallery" || route.view === "detail" })}
-                onClick={() => navigate({ view: "gallery" })}
-                title="Templates"
-              >
-                <TemplatesIcon />
-                <span className={navLabel}>Templates</span>
-              </button>
-            )}
-            {/* A developer's tool -- you hand-write the JSON records a template
-                expects -- so it's for people who manage templates, like the
-                Templates item above, not for everyone who can open a report. */}
-            {BATCH_RENDER_ENABLED && manageTemplates && (
-              <button
-                type="button"
-                className={navItemClasses({ collapsed, active: route.view === "batch" })}
-                onClick={() => navigate({ view: "batch" })}
-                title="Batch render"
-              >
-                <BatchIcon />
-                <span className={navLabel}>Batch render</span>
-              </button>
-            )}
-            {has(auth, "job:view") && (
-              <button
-                type="button"
-                className={navItemClasses({ collapsed, active: route.view === "schedules" })}
-                onClick={() => navigate({ view: "schedules" })}
-                title="Schedules"
-              >
-                <SchedulesIcon />
-                <span className={navLabel}>Schedules</span>
-              </button>
-            )}
-          </>
-        )}
+          );
+        })}
       </nav>
 
       <div className="mt-auto pt-2 max-md:hidden">

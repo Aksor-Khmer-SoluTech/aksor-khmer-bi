@@ -197,7 +197,7 @@ def test_listing_is_lean_and_sorted_by_name(auth_headers):
     resp = client.get("/api/v1/reports/accessible", headers=auth_headers)
     rows = resp.json()
     assert [r["name"] for r in rows] == ["Apple", "banana"]
-    assert set(rows[0]) == {"report_id", "name", "description", "template_ext", "version", "version_label", "updated_at", "access_level", "folder_path", "shortcuts"}
+    assert set(rows[0]) == {"report_id", "name", "description", "template_ext", "version", "version_label", "updated_at", "access_level", "folder_path", "shortcuts", "is_draft"}
     assert rows[1]["description"] == "Fruit"
 
 

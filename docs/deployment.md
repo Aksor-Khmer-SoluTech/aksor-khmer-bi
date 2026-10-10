@@ -196,7 +196,8 @@ Everything you do afterwards:
 | I want to… | Command |
 |---|---|
 | see what is running | `./deployment.sh status` |
-| read the logs | `./deployment.sh logs` (the API; add names for others: `logs api worker scheduler portal`) |
+| read the logs | `./deployment.sh logs` follows the API (add names for others: `logs api worker scheduler portal jdbc-worker`; Ctrl+C stops). Last lines only: `./deployment.sh app logs --tail 100 api`; a time window: `./deployment.sh app logs -f --since 10m api`; Postgres / Redis: `./deployment.sh db logs --tail 50`, `./deployment.sh redis logs --tail 50`. Older history: the dated files in `data/logs/` |
+| start or apply changes to the app only (Postgres and Redis untouched) | `./deployment.sh app up -d --wait`, or some services: `./deployment.sh app up -d --wait api portal`; the JDBC worker needs its profile: `./deployment.sh app --profile jdbc up -d --wait api jdbc-worker portal`. Skips the checks `up` runs first — plain `./deployment.sh up` is usually just as quick, since it only recreates what changed |
 | update to the new version | read the [CHANGELOG](../CHANGELOG.md) for every version up to the one you want **first**; `git pull` (it brings the new image versions), then `./deployment.sh update` — takes a **backup first**, pulls that version's images, restarts the app (database migrations run as the API starts); Postgres and Redis are not touched. Flag: `--no-backup` |
 | back up now | `./deployment.sh backup` — the database plus templates, images, avatars and the encryption key, into `./backups/` (the newest 14 are kept; `BACKUP_KEEP=30` changes that) |
 | apply a change in `.env` | `./deployment.sh up` (recreates only what changed) |
@@ -327,7 +328,7 @@ curl http://localhost:8000/api/v1/health                              # {"status
 ```
 
 Then open **http://localhost:8080** and sign in with `PORTAL_USERNAME` / `PORTAL_PASSWORD` from `.env`. That password is a one-time key: the portal asks you to choose your own straight away, which turns the sign-in into your administrator account (the generated password then stops working).
-Create real accounts under **Admin → Users**, then delete the two `PORTAL_*` lines from `.env` and run
+Create real accounts under **Manage → Users**, then delete the two `PORTAL_*` lines from `.env` and run
 `docker compose -p aksor-app -f docker-compose.yml up -d` to apply it.
 
 API docs are at http://localhost:8000/docs.
@@ -346,7 +347,7 @@ docker compose -p aksor-app -f docker-compose.yml --profile jdbc up -d jdbc-work
 docker compose -p aksor-app -f docker-compose.yml --profile jdbc ps jdbc-worker       # running / healthy
 ```
 
-Then upload a driver under **Admin → JDBC Drivers**.
+Then upload a driver under **Manage → JDBC Drivers**.
 
 ---
 
@@ -555,7 +556,7 @@ Then:
 - Management portal: http://localhost:8080
 - Health check: http://localhost:8000/api/v1/health
 
-The portal's own Admin mode embeds that same `/docs` Swagger UI in an
+The portal's Manage → API Explorer page embeds that same `/docs` Swagger UI in an
 iframe (API Explorer) rather than reimplementing it — `/docs` and
 `/openapi.json` are intentionally unauthenticated (matches FastAPI's
 default), so this needs no CORS/CSP changes; individual endpoint calls
@@ -580,7 +581,7 @@ settings in the reference table below need no compose edit — `scheduler`/`work
 break-glass login regardless. Set `DATABASE_URL`/`REDIS_URL` there to use managed services.
 
 Those two variables are the *break-glass* superuser: sign in with them
-once, create real accounts under **Admin → Users**, and (once someone
+once, create real accounts under **Manage → Users**, and (once someone
 holds the system administrator role) you can remove them again. Accounts
 you create are flagged *must change password* — the new user is asked to
 choose their own at first sign-in, and an admin can reset any local user's
@@ -797,7 +798,7 @@ system-wide to find them by name during conversion; WeasyPrint doesn't
 need this since it loads font files directly via `@font-face`. If you
 register your own template (via `/api/v1/reports`) that references a
 font by name and that font isn't one of the two bundled ones, add it under
-**Admin → Resources → Fonts** (no rebuild or restart — see
+**Manage → Resources → Fonts** (no rebuild or restart — see
 [create-a-template.md](create-a-template.md#65-fonts)); otherwise the docx→pdf/png
 path substitutes a fallback font. (Fonts installed in a derived image still work too.)
 
@@ -833,12 +834,12 @@ sane defaults), the mount just lets you override them live.
 | `LOGIN_ATTEMPTS_PER_MINUTE` | No | Default 10: sign-in attempts per minute per client address and user name (5× that per address) before `429`. Per `api` process. |
 | `AUTH_ALLOW_BASIC` | No | Default `true`: scripts may send `curl -u user:password`. `false` forces every client through `/auth/login`. Accounts with 2FA can't use Basic either way. |
 | `AUTH_COOKIE_SECURE` / `AUTH_COOKIE_SAMESITE` | No | The refresh cookie's `Secure` flag (`auto`: on when the request is HTTPS or a proxy sent `X-Forwarded-Proto: https`) and `SameSite` (`lax`, `strict`, `none`). |
-| `SECRETS_ENCRYPTION_KEY` | No | A [Fernet](https://cryptography.io/en/latest/fernet/) key (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) that encrypts every Secret and every user's two-factor (authenticator-app) secret (Admin → Secrets — a named credential a connection or a report's own data source refers to by name instead of an environment variable). Leave it unset and the API generates one into `data/secrets/master.key` on first use — `docker-compose.yml` mounts that directory, so it survives restarts. **Back the key up with the database**: without it those credentials can't be decrypted and must be re-entered, and users with 2FA must re-enrol (an administrator clears it under Admin → Users) — nothing else is lost. Set on the `api` service. |
+| `SECRETS_ENCRYPTION_KEY` | No | A [Fernet](https://cryptography.io/en/latest/fernet/) key (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) that encrypts every Secret and every user's two-factor (authenticator-app) secret (Manage → Secrets — a named credential a connection or a report's own data source refers to by name instead of an environment variable). Leave it unset and the API generates one into `data/secrets/master.key` on first use — `docker-compose.yml` mounts that directory, so it survives restarts. **Back the key up with the database**: without it those credentials can't be decrypted and must be re-entered, and users with 2FA must re-enrol (an administrator clears it under Manage → Users) — nothing else is lost. Set on the `api` service. |
 | `JDBC_WORKER_TOKEN` | To use uploaded JDBC drivers | A long random string (at least 32 characters — generate with `openssl rand -hex 32`; there is no default or example value) shared by `api` and the `jdbc-worker` service; the worker refuses to start without it, and `api` sends it with every query that runs on an uploaded driver. Not needed for PostgreSQL/MySQL/MariaDB connections. See [Database connections](#database-connections-and-jdbc-drivers). |
 | `JDBC_WORKER_URL` | No | Where `api` finds the driver service (default `http://jdbc-worker:9000`). |
 | `JDBC_ALLOWED_HOSTS` | No | Comma-separated hosts, `*.suffix` patterns or CIDRs that a database connection may point at; unset allows any host except link-local and cloud-metadata addresses (always refused). Set on `api`. |
 | `JDBC_MAX_ROWS` / `JDBC_TIMEOUT_SECONDS` / `JDBC_DRIVER_MAX_MB` | No | Largest result a report query may return (20000 rows), how long it may run (30 s), and the largest driver upload (80 MB). |
-| `CLIENT_RUN_LIMIT_PER_MINUTE` | No | Most `embed-run` calls per minute one **API client** (client id + secret, Admin → API Clients) may make; over it, `429`. Default 120. Clients themselves are created in the portal -- no environment variable per report. See [Running a report as an API client](building-a-report.md#running-a-report-as-an-api-client-client-id--secret). |
+| `CLIENT_RUN_LIMIT_PER_MINUTE` | No | Most `embed-run` calls per minute one **API client** (client id + secret, Manage → API Clients) may make; over it, `429`. Default 120. Clients themselves are created in the portal -- no environment variable per report. See [Running a report as an API client](building-a-report.md#running-a-report-as-an-api-client-client-id--secret). |
 | `REPORT_TIMEZONE` | No | IANA time zone (e.g. `Asia/Phnom_Penh`; default `UTC`) that a parameter's `now()` default is read in when a run leaves that parameter out -- an API call or an embed. The portal's own run form fills `now()` from the viewer's browser clock instead. An unknown name is logged and falls back to UTC. See [Filters and a data source](building-a-report.md#filters-a-data-source-and-connections). Set on `api` |
 | `AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE` / `AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE` | No | Extra Khmer terms this deployment has observed ICU mis-splitting, on top of the shared package's built-ins — see [`protected-terms-guide.md`](protected-terms-guide.md) |
 | `AKSOR_KHMER_OCR_PROTECTED_TERMS_DIR` / `AKSOR_KHMER_OCR_EXCLUDED_TERMS_DIR` | No | Directory form of the row above — every `*.txt` file inside is merged in |
@@ -867,9 +868,9 @@ the LDAP config endpoints, which use the same gate. It reports the host
 ### Database connections and JDBC drivers
 
 A report can run a read-only SQL query against Oracle, PostgreSQL, MySQL, SQL Server, MariaDB or Db2
-(Admin → Connections → *+ Database*; see docs/building-a-report.md). **PostgreSQL, MySQL and MariaDB need
+(Manage → Connections → *+ Database*; see docs/building-a-report.md). **PostgreSQL, MySQL and MariaDB need
 nothing here** — their drivers ship in the `api` image. The other engines need the vendor's JDBC driver
-uploaded in the portal (Admin → JDBC Drivers), and a driver is code the server runs, so it runs in a
+uploaded in the portal (Manage → JDBC Drivers), and a driver is code the server runs, so it runs in a
 separate, locked-down container instead of in `api`:
 
 ```bash

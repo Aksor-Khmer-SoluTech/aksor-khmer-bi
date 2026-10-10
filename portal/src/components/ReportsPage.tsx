@@ -146,6 +146,7 @@ function ReportCard({
     >
       <div className="card-top">
         <h3 className="card-name">{report.name}</h3>
+        {report.is_draft && <span className="badge badge-draft" title="Not published yet — only people who manage it see it">Draft</span>}
         <StarButton name={report.name} starred={starred} onToggle={onToggleStar} />
       </div>
       {/* Always rendered, even blank -- .card-desc reserves two lines'
@@ -203,6 +204,7 @@ function ReportRow({
       <div className="list-row-main">
         <div className="list-row-title">
           <h3>{report.name}</h3>
+          {report.is_draft && <span className="badge badge-draft" title="Not published yet — only people who manage it see it">Draft</span>}
           {shortcutFrom && (
             <span className="shortcut-chip" title={`A shortcut to the report filed in ${shortcutFrom}. It has the original's access.`}>
               <Link2 size={12} aria-hidden="true" /> Shortcut · {shortcutFrom}

@@ -36,7 +36,17 @@ from sqlalchemy import select
 
 from .. import audit, auth_tokens, db, totp
 from ..auth import context_for_session, get_current_user, get_current_user_allowing_password_change, resolve_auth_context, setup_required
-from ..auth_events import client_ip, parse_user_agent, record_login_failure, record_login_success
+from ..auth_events import (
+    DEVICE_COOKIE,
+    DEVICE_COOKIE_MAX_AGE,
+    browser_brand,
+    client_ip,
+    device_hash,
+    new_device_token,
+    parse_user_agent,
+    record_login_failure,
+    record_login_success,
+)
 from ..models import AuthVerifyOut, LoginRequest, SessionOut, SetupAdminRequest, TokenOut
 from ..rate_limit import RateLimiter
 from ..rbac import ROOT_ORG_ID, SYSTEM_ADMIN_ROLE_NAME, AuthContext, find_user_for_login, get_effective_permissions, system_admin_exists
@@ -97,9 +107,15 @@ def _verify_out(context: AuthContext) -> AuthVerifyOut:
 
 
 def _check_credentials(
-    request: Request, credentials: HTTPBasicCredentials, *, require_totp: bool, totp_code: str | None
+    request: Request,
+    credentials: HTTPBasicCredentials,
+    *,
+    require_totp: bool,
+    totp_code: str | None,
+    record_success: bool = True,
 ) -> AuthContext:
-    """Password, then (if asked and the account has it) the 2FA code -- logging each failure."""
+    """Password, then (if asked and the account has it) the 2FA code -- logging each failure, and the success unless
+    the caller logs it itself (/auth/login does, once it knows the session and device)."""
     ip_address = client_ip(request)
     user_agent = request.headers.get("user-agent")
 
@@ -134,10 +150,29 @@ def _check_credentials(
 
     # No database row behind a break-glass superuser (see auth.py's
     # module docstring) -- nothing to attach a log row to.
-    if context.user is not None:
+    if record_success and context.user is not None:
         with db.SessionLocal() as session:
             record_login_success(session, context.user, ip_address=ip_address, user_agent=user_agent)
     return context
+
+
+def _device(request: Request, response: Response) -> str:
+    """This browser's device id (as stored: its hash), giving it one -- and the cookie -- if it has none yet. The
+    cookie is renewed on every sign-in, so a browser in regular use stays known."""
+    token = request.cookies.get(DEVICE_COOKIE)
+    if device_hash(token) is None:
+        token = new_device_token()
+    same_site = _cookie_samesite()
+    response.set_cookie(
+        DEVICE_COOKIE,
+        token,
+        max_age=DEVICE_COOKIE_MAX_AGE,
+        path=COOKIE_PATH,
+        httponly=True,
+        secure=_cookie_secure(request) or same_site == "none",
+        samesite=same_site,
+    )
+    return device_hash(token)  # type: ignore[return-value]  -- a fresh token always hashes
 
 
 # --- the refresh cookie ---------------------------------------------------------------------------
@@ -222,7 +257,11 @@ def login(body: LoginRequest, request: Request, response: Response) -> TokenOut:
     _throttle_sign_in(request, body.username)
     try:
         context = _check_credentials(
-            request, HTTPBasicCredentials(username=body.username, password=body.password), require_totp=True, totp_code=body.totp_code
+            request,
+            HTTPBasicCredentials(username=body.username, password=body.password),
+            require_totp=True,
+            totp_code=body.totp_code,
+            record_success=False,
         )
     except HTTPException as exc:
         # The shared check answers a wrong password with `WWW-Authenticate: Basic` -- right for scripts that send HTTP
@@ -237,8 +276,19 @@ def login(body: LoginRequest, request: Request, response: Response) -> TokenOut:
             ip_address=client_ip(request),
             user_agent=request.headers.get("user-agent"),
             remember=body.remember,
+            browser_brand=browser_brand(request),
         )
         context.session_id = row.id
+        if context.user is not None:
+            record_login_success(
+                session,
+                context.user,
+                ip_address=client_ip(request),
+                user_agent=request.headers.get("user-agent"),
+                device=_device(request, response),
+                session_id=row.id,
+                brand=browser_brand(request),
+            )
         return _issue(context, row, refresh_token, request, response)
 
 
@@ -311,6 +361,7 @@ def setup_admin(
             ip_address=client_ip(request),
             user_agent=request.headers.get("user-agent"),
             remember=False,
+            browser_brand=browser_brand(request),
         )
         account.session_id = row.id
         return _issue(account, row, refresh_token, request, response)
@@ -377,7 +428,7 @@ def me(context: AuthContext = Depends(get_current_user_allowing_password_change)
 
 
 def _session_out(row: db.AuthSession, current_id: str | None) -> SessionOut:
-    parsed = parse_user_agent(row.user_agent)
+    parsed = parse_user_agent(row.user_agent, row.browser_brand)
     return SessionOut(
         id=row.id,
         current=row.id == current_id,

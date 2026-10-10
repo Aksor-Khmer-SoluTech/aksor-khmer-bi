@@ -5,6 +5,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-10-10
+
+### Changed
+- **New navigation.** Everyday pages — Home, Reports, My runs, Starred — are links in the top bar, and people who
+  only run reports no longer see a sidebar. The **Admin** button is now **Manage**: it appears only for someone with
+  something to manage (templates, schedules, data sources, users…), and opens a sidebar grouped into Authoring,
+  Scheduling, Data sources, People & access and Operations, showing only the pages that person can use. Manage's "Back to …" returns to the page you opened it
+  from (Home if you came straight in), and the logo now goes to Home. The product name ("Control Plane") shows in the top bar only on Manage
+  pages. Templates,
+  Batch render and Schedules moved there from the old sidebar. The admin Dashboard is now for people who can view the
+  audit log or manage settings, rather than everyone.
+
+### Added
+- **A short guided tour** the first time someone opens Home (the top-bar pages, Home's cards, notifications, the guides,
+  Manage, their account) and the first time they open Manage (its groups, Templates, data sources, people, the
+  way back). Each stop highlights the thing it explains; **Skip tour** or Esc ends it, and it's remembered on the
+  account so it doesn't come back. Steps for things a person can't see are left out. **Show me around** in the
+  account menu plays it again.
+- **New report — start from your data** (Templates → New report). Choose a data source (sample JSON, a REST API
+  or a database query), press **Run** and see exactly what it returns; the filters it uses (`:month`,
+  `{{ month }}`) become the report's filters by themselves. Then every field is listed with its type and an
+  example — click one for the exact placeholder (a list gives the whole table-row loop) — and Aksor writes a
+  **starter template** (.docx, .xlsx or .html) with every field already placed, totals included, to restyle.
+  Upload your design and it's **checked against the data**: a placeholder that names nothing is flagged with the
+  nearest real field (the typo), and unused fields are listed. Preview it with real data, then **Publish**.
+  Until then the report is a **draft**, seen and run only by people who manage it. *Register template* still
+  takes a finished file and publishes it at once. **Upgrade note:** adds a database migration
+  (`0006_report_drafts`), applied automatically at start-up; existing reports are published.
+- **My runs** (`#/runs`): every report you've run, newest first, each one a click from running again — backed by
+  `GET /api/v1/me/runs?limit=` (your own runs only, up to 200).
+- **Starred** (`#/starred`): the reports you starred, on their own page.
+- **New sign-in alerts you can act on.** When your account signs in on a browser it hasn't used before, the bell
+  asks your other signed-in browsers *Was this you?* — **It was me**, or **Not me**, which signs that device out
+  and offers to change your password and review your sign-in activity. The new browser itself never sees the alert.
+  Browsers are now recognised by a device cookie rather than IP address + browser version, so a new network or a
+  browser update no longer counts as a new device, and an account's first sign-in raises no alert. Each person can
+  still turn alerts off under Settings → Notifications. **Upgrade note:** adds a database migration
+  (`0004_signin_device`), applied automatically at start-up.
+
+### Fixed
+- **Dates, amounts and IDs reach templates exactly as sent.** Khmer word-breaking used to add invisible
+  separators to *every* string — `2026-09-02` became `2026​-​09​-​02` — so the guide's own date recipe
+  (`{{ date[8:10] }}`) printed the wrong characters, comparing a value could fail, and `.xlsx` cells held hidden
+  characters inside IDs and dates. Only text that contains Khmer (or Thai, Lao or Myanmar) is segmented now;
+  Khmer wraps exactly as before.
+- An `.html` file can now replace a template's file (it used to need registering as a new template), checked
+  like a new html template against the resources the report already has mapped.
+- **Resources** no longer has a double margin around it; it lines up with every other Manage page.
+- Page action buttons (*+ New credential*, *+ Database* / *+ REST API*, *+ Upload driver*) sit top-right like on every
+  other page, instead of dropping under a long page description; JDBC Drivers gets a search box like the other lists.
+- **Resources → Fonts → Add font** asks for the optional *source and license* note in a dialog after you pick the
+  file, with an example, instead of an unlabeled box you had to fill in before choosing it.
+- **Brave was listed as Chrome** in Active Sessions, the sign-in log and new-sign-in alerts: Brave sends Chrome's
+  browser identification unchanged, so it's now named from its client hint (https / localhost) or, on plain http,
+  by the portal at sign-in. Browser versions show the major number only ("Chrome 152", not "152.0.0.0"), and the
+  session list says "signed in 5 min ago · ends in 12 h" (exact times on hover). **Upgrade note:** adds a database
+  migration (`0005_browser_brand`), applied automatically at start-up.
+- **Active Sessions:** *Sign out other sessions* sits in its own row under the list instead of crowding the first
+  session.
+- **Two-step verification at sign-in** is clearer: it shows who you're signing in as (click to change account,
+  instead of a bare "Back" link), six code boxes that accept a pasted code and sign in on the sixth digit, a wrong code
+  clears the boxes ready to try again, and a note on what to do if you've lost your authenticator.
+- The file-type filter on the Templates page no longer shows a scrollbar under its chips (Windows browsers drew one).
+- **Register a template** is a wide, short dialog instead of one tall stack (one column on a phone): Name and
+  Folder beside the file, then Code beside a larger Description box, their labels level; a stray horizontal
+  scrollbar in it is gone.
+
 ## [1.0.0-beta.2] - 2026-10-09
 
 ### Changed

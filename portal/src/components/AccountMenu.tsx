@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type { AuthInfo, User } from "../types";
 import UserAvatar from "./UserAvatar";
+import { startTour } from "./GuidedTour";
 import UserSettingsModal, { type SettingsTab } from "./UserSettingsModal";
 
 /** Dropdown for the signed-in account — "Profile", "Preferences" and "Settings" all
@@ -15,6 +16,14 @@ import UserSettingsModal, { type SettingsTab } from "./UserSettingsModal";
  * people expect to find fastest. "Request support" used to live here
  * too; moved to the footer (see Footer.tsx) since that's on screen at
  * all times, not tucked behind this menu. */
+const OPEN_SETTINGS_EVENT = "aksor:open-settings";
+
+/** Open the account settings on a tab from anywhere (the notifications bell's "Change password" / "Review sign-in
+ * activity"), without threading a callback through TopBar. */
+export function openSettings(tab: SettingsTab) {
+  window.dispatchEvent(new CustomEvent<SettingsTab>(OPEN_SETTINGS_EVENT, { detail: tab }));
+}
+
 export default function AccountMenu({ auth }: { auth: AuthInfo }) {
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -55,13 +64,19 @@ export default function AccountMenu({ auth }: { auth: AuthInfo }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const onOpen = (e: Event) => openSettingsTab((e as CustomEvent<SettingsTab>).detail);
+    window.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, onOpen);
+  }, []);
+
   // The built-in admin from the server's .env (PORTAL_USERNAME/PORTAL_PASSWORD) has no database row: /users/me
   // answers 404, so there's no profile, password, 2FA or sessions to show. Say so, and point at the fix, instead of
   // offering menu entries that land on an empty page.
   const systemAccount = profileChecked && profile === null && !profileError;
   const canCreateAccounts = auth.isSuperuser || auth.permissions.includes("user:manage");
 
-  function openSettings(tab: SettingsTab) {
+  function openSettingsTab(tab: SettingsTab) {
     setSettingsTab(tab);
     setSettingsOpen(true);
     setOpen(false);
@@ -85,7 +100,7 @@ export default function AccountMenu({ auth }: { auth: AuthInfo }) {
 
   return (
     <div className="account-menu" ref={rootRef}>
-      <button type="button" className="account-trigger" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button type="button" className="account-trigger" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-tour="account">
         <UserAvatar profile={profile} username={auth.username} checked={profileChecked} />
         <span className="who-name">{auth.username}</span>
       </button>
@@ -111,26 +126,37 @@ export default function AccountMenu({ auth }: { auth: AuthInfo }) {
                   Create your own account
                 </a>
               )}
-              <button type="button" className="account-item" onClick={() => openSettings("preferences")}>
+              <button type="button" className="account-item" onClick={() => openSettingsTab("preferences")}>
                 Preferences
               </button>
             </>
           ) : (
             <>
-              <button type="button" className="account-item" onClick={() => openSettings("profile")}>
+              <button type="button" className="account-item" onClick={() => openSettingsTab("profile")}>
                 Profile
               </button>
 
               {/* Straight onto the Preferences tab (theme, report preview, scrollbars). */}
-              <button type="button" className="account-item" onClick={() => openSettings("preferences")}>
+              <button type="button" className="account-item" onClick={() => openSettingsTab("preferences")}>
                 Preferences
               </button>
 
-              <button type="button" className="account-item" onClick={() => openSettings("profile")}>
+              <button type="button" className="account-item" onClick={() => openSettingsTab("profile")}>
                 Settings
               </button>
             </>
           )}
+
+          <button
+            type="button"
+            className="account-item"
+            onClick={() => {
+              setOpen(false);
+              startTour();
+            }}
+          >
+            Show me around
+          </button>
 
           <div className="account-divider" />
 

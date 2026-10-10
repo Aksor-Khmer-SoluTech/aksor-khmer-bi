@@ -14,11 +14,14 @@ import type {
   AuthInfo,
   BatchLimits,
   MyDashboard,
+  MyRun,
   Connection,
   ConnectionConfig,
   ConnectionSummary,
   ConnectionTestResult,
   DataConfig,
+  DataPreview,
+  DataSource,
   DeploymentTerms,
   EffectivePermissions,
   Folder,
@@ -26,6 +29,8 @@ import type {
   FontResource,
   InstalledFont,
   TemplateFont,
+  TemplateCheck,
+  ReportParameter,
   ReportShortcut,
   Grant,
   ImageResource,
@@ -364,6 +369,13 @@ interface TokenResponse {
   user: AuthVerifyResponse;
 }
 
+/** Brave sends Chrome's User-Agent unchanged, so the server would list it as Chrome. Over https (or localhost)
+ * it says so in the Sec-CH-UA client hint; elsewhere -- plain http on a LAN address -- the page can still tell, and
+ * passes that along at sign-in so Settings > Active Sessions and new-sign-in alerts name the right browser. */
+function browserHintHeaders(): Record<string, string> {
+  return "brave" in navigator ? { "X-Aksor-Browser": "Brave" } : {};
+}
+
 export const api = {
   /** Sign in: password (and the 2FA code, on the second step for an account that has it). The access token
    * stays in memory; the refresh cookie is set by the server. `remember` keeps this browser signed in for
@@ -378,7 +390,7 @@ export const api = {
       resp = await fetch(API + "/auth/login", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...browserHintHeaders() },
         body: JSON.stringify({ username, password, totp_code: options.totpCode || null, remember: options.remember ?? false }),
         signal: controller.signal,
       });
@@ -426,7 +438,7 @@ export const api = {
     const resp = await apiFetch("/auth/setup-admin", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...browserHintHeaders() },
       body: JSON.stringify({ new_password: newPassword }),
     });
     if (!resp.ok) {
@@ -563,6 +575,38 @@ export const api = {
     request.then(forget, forget);
     embedRunsInFlight.set(key, request);
     return request;
+  },
+
+  /** The New report wizard: start from the data (api/app/routers/report_wizard.py). */
+  wizard: {
+    /** Run a data source once, unsaved. `missing` set = it needs test values for those filters first. */
+    preview(body: { data_source: DataSource; parameters: ReportParameter[]; values: Record<string, string> }): Promise<DataPreview> {
+      return sendJSON("/reports/data-preview", "POST", body);
+    },
+    /** Create the report as a draft: its source and filters saved, the data as its sample, a starter template. */
+    createDraft(body: {
+      name: string;
+      description?: string | null;
+      code?: string | null;
+      folder_id?: string | null;
+      format: TemplateExt;
+      parameters: ReportParameter[];
+      data_source: DataSource | null;
+      sample: Record<string, unknown>;
+      values: Record<string, string>;
+    }): Promise<ReportMeta> {
+      return sendJSON("/reports/drafts", "POST", body);
+    },
+    /** Replace the template with a fresh starter in `format` (a new version). */
+    starter(id: string, format: TemplateExt): Promise<ReportMeta> {
+      return sendJSON(`/reports/${encodeURIComponent(id)}/starter`, "POST", { format });
+    },
+    check(id: string): Promise<TemplateCheck> {
+      return getJSON(`/reports/${encodeURIComponent(id)}/template-check`);
+    },
+    publish(id: string): Promise<ReportMeta> {
+      return sendJSON(`/reports/${encodeURIComponent(id)}/publish`, "POST", {});
+    },
   },
 
   getReport(id: string): Promise<ReportMeta> {
@@ -766,6 +810,14 @@ export const api = {
     },
     ackNotifications(): Promise<void> {
       return apiFetch(`/users/me/notifications/ack`, { method: "POST" }).then(() => undefined);
+    },
+    /** "It was me": dismiss one new-device alert. */
+    confirmSignIn(eventId: string): Promise<void> {
+      return apiFetch(`/users/me/notifications/${encodeURIComponent(eventId)}/ack`, { method: "POST" }).then(() => undefined);
+    },
+    /** "Not me": sign out the session a new-device alert is about, and dismiss it. */
+    disownSignIn(eventId: string): Promise<{ signed_out: boolean }> {
+      return apiFetch(`/users/me/notifications/${encodeURIComponent(eventId)}/sign-out`, { method: "POST" }).then((r) => r.json());
     },
     // Generic per-account settings (see api/app/db/user_settings.py) —
     // one `{code: JSON value}` map, so a new preference is a new code
@@ -1160,6 +1212,10 @@ export const api = {
   me: {
     dashboard(): Promise<MyDashboard> {
       return getJSON("/me/dashboard");
+    },
+    /** My runs: the signed-in person's own runs, newest first (up to 200). */
+    runs(limit = 100): Promise<MyRun[]> {
+      return getJSON(`/me/runs?limit=${limit}`);
     },
   },
 

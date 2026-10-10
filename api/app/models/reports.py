@@ -39,6 +39,10 @@ class ReportMeta(BaseModel):
         description="Optional code: use it in place of `report_id` in any /api/v1/reports/{ref}/... "
         "path, or in #/embed/{ref}. Lowercase letters, digits and single hyphens, 3-64 chars, globally unique.",
     )
+    is_draft: bool = Field(
+        False,
+        description="Made with the New report wizard and not yet published: only people who manage it see or run it",
+    )
 
 
 class ParameterOption(BaseModel):
@@ -305,6 +309,7 @@ class AccessibleReport(BaseModel):
         description="Other folders the report is listed in. A shortcut carries the original's access and no more: "
         "it only appears for someone who already has access to the report, in folders they may open",
     )
+    is_draft: bool = Field(False, description="Not yet published -- listed only for people who manage it")
 
 
 class TemplateSyntaxIssue(BaseModel):
@@ -372,3 +377,74 @@ class OptionsPreviewRequest(BaseModel):
 class OptionsPreview(BaseModel):
     total: int = Field(..., description="How many choices the source produced")
     options: list[ParameterOption] = Field(..., description="The first few of them")
+
+
+# --- the New report wizard (routers/report_wizard.py) ----------------------------------------------------------------
+
+
+class DataField(BaseModel):
+    """One path a template can use in a report's data -- see app/report_wizard.py's data_fields."""
+
+    path: str = Field(..., description="invoices[].total_usd -- `[]` marks the items of a list")
+    kind: Literal["text", "number", "date", "boolean", "list", "object", "empty"]
+    example: str | None = Field(None, description="A value from the data, for showing what the field holds")
+    count: int | None = Field(None, description="list: how many items the run returned")
+    depth: int = 0
+
+
+class DataPreviewRequest(BaseModel):
+    """Run a data source once, unsaved -- the wizard's Run button."""
+
+    data_source: DataSource
+    parameters: list[ReportParameter] = Field(
+        default_factory=list,
+        description="Filters already defined. Any `:name` / `{{ name }}` the source uses that isn't here is added as a text filter",
+    )
+    values: dict[str, str] = Field(default_factory=dict, description="Test values for the filters, by name")
+
+
+class DataPreview(BaseModel):
+    data: dict = Field(..., description="What the source returned, lists cut to their first 20 items")
+    fields: list[DataField]
+    parameters: list[ReportParameter] = Field(..., description="The filters the source uses: the given ones plus any it added")
+    elapsed_ms: int
+    truncated: bool = Field(False, description="Some list held more items than `data` shows")
+    missing: list[str] = Field(
+        default_factory=list,
+        description="Filters the source needs that have no test value yet. When set, nothing was fetched: give them values and run again",
+    )
+
+
+class DraftCreate(BaseModel):
+    """Create a draft report from a data source and what it returned: the report starts with a generated starter
+    template, its data source and filters saved, and the run's data as its sample."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=500)
+    code: str | None = None
+    folder_id: str | None = None
+    format: Literal["docx", "xlsx", "html"] = "docx"
+    parameters: list[ReportParameter] = Field(default_factory=list)
+    data_source: DataSource | None = None
+    sample: dict = Field(..., description="The data to design against -- normally DataPreview.data")
+    values: dict[str, str] = Field(default_factory=dict, description="The filters' test values, kept with the sample")
+
+
+class StarterRequest(BaseModel):
+    format: Literal["docx", "xlsx", "html"]
+
+
+class UnknownPlaceholder(BaseModel):
+    placeholder: str
+    suggestion: str | None = Field(None, description="The nearest real field name, when one is close -- usually a typo")
+
+
+class TemplateCheck(BaseModel):
+    """The current template compared with the report's sample data -- see app/report_wizard.py's check_template."""
+
+    checked: bool = Field(..., description="False: the template or the sample couldn't be read (see `reason`)")
+    reason: str | None = None
+    matched: list[str] = Field(default_factory=list, description="Placeholders that name a real field or filter")
+    unknown: list[UnknownPlaceholder] = Field(default_factory=list, description="Placeholders that name nothing in the data: they print empty")
+    unused: list[str] = Field(default_factory=list, description="Single values in the data the template never shows")
+    fields: list[DataField] = Field(default_factory=list)

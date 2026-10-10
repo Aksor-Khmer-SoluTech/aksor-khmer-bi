@@ -92,6 +92,13 @@ from .reports import (
     RunFormParameter,
     RunRequest,
     TemplateSyntaxIssue,
+    DataField,
+    DataPreview,
+    DataPreviewRequest,
+    DraftCreate,
+    StarterRequest,
+    TemplateCheck,
+    UnknownPlaceholder,
 )
 from .settings import SETTING_CODE_PATTERN, UserSettingOut, UserSettingUpdate, check_setting_value
 from .system import DiskUsage, SystemMetrics
@@ -125,6 +132,13 @@ __all__ = [
     "ChangelogEntry",
     "DeploymentProtectedTermsOut",
     "DataConfig",
+    "DataField",
+    "DataPreview",
+    "DataPreviewRequest",
+    "DraftCreate",
+    "StarterRequest",
+    "TemplateCheck",
+    "UnknownPlaceholder",
     "DataSource",
     "DataSourceAuth",
     "EmbedRunRequest",

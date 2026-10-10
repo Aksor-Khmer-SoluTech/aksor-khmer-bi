@@ -409,7 +409,7 @@ export default function JdbcConnectionDialog({
             <p className="field-hint jdbc-warn">
               {engine.label} has no built-in driver. Download the vendor's .jar from the link above, then{" "}
               {canUploadDrivers ? (
-                <a href="#/admin/jdbc-drivers">upload it under Admin → JDBC drivers</a>
+                <a href="#/admin/jdbc-drivers">upload it under Manage → JDBC drivers</a>
               ) : (
                 "ask someone with the driver:manage permission to upload it"
               )}

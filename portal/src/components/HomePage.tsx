@@ -18,24 +18,13 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable } 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, BookOpen, CalendarClock, FileText, GripVertical, Layers, Play, RotateCcw, ShieldCheck, Star } from "lucide-react";
 import { api } from "../api";
-import { has } from "../admin/sections";
+import { canManage, firstManageRoute, has } from "../admin/sections";
 import { useFavoriteReports } from "../favorites";
 import { useHomeLayout } from "../homeLayout";
 import type { Route } from "../hooks";
+import { ago, plural } from "../relativeTime";
 import type { AccessibleReport, AuthInfo, MyDashboard } from "../types";
 import { LinesSkeleton, StatRowSkeleton } from "./Skeletons";
-
-/** "5 minutes ago" / "yesterday" / a date -- how long ago something happened. */
-function ago(iso: string): string {
-  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)} h ago`;
-  if (seconds < 172_800) return "yesterday";
-  return new Date(iso).toLocaleDateString();
-}
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const greeting = () => {
   const hour = new Date().getHours();
@@ -94,11 +83,9 @@ function useFlip(grid: React.RefObject<HTMLElement | null>, order: string[]) {
  * be run from here. */
 export default function HomePage({
   auth,
-  canAdmin,
   navigate,
 }: {
   auth: AuthInfo;
-  canAdmin: boolean;
   navigate: (route: Route) => void;
 }) {
   const [mine, setMine] = useState<MyDashboard | null>(null);
@@ -174,7 +161,7 @@ export default function HomePage({
           <Shortcut icon={<FileText size={15} />} label="All reports" onClick={() => navigate({ view: "reports" })} />
           <Shortcut icon={<BookOpen size={15} />} label="Guides" onClick={() => navigate({ view: "docs" })} />
           {has(auth, "job:view") && <Shortcut icon={<CalendarClock size={15} />} label="Schedules" onClick={() => navigate({ view: "schedules" })} />}
-          {canAdmin && <Shortcut icon={<ShieldCheck size={15} />} label="Admin console" onClick={() => navigate({ view: "admin", section: "dashboard" })} />}
+          {canManage(auth) && <Shortcut icon={<ShieldCheck size={15} />} label="Manage" onClick={() => navigate(firstManageRoute(auth))} />}
         </div>
       ),
     },
@@ -251,6 +238,9 @@ export default function HomePage({
                   </div>
                 );
               })}
+              <a className="link-btn" href="#/runs" style={{ alignSelf: "flex-start", fontSize: "0.84rem" }}>
+                See all your runs &rarr;
+              </a>
             </div>
           )}
         </>
@@ -260,7 +250,7 @@ export default function HomePage({
 
   return (
     <div className="home">
-      <div className="home-hero">
+      <div className="home-hero" data-tour="home-cards">
         <div>
           <p className="home-eyebrow">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</p>
           <h1 className="page-title">

@@ -36,6 +36,8 @@ class AuthSession(Base):
     remember: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The browser's own name when its User-Agent hides it (Brave reads as Chrome) -- see auth_events.browser_brand.
+    browser_brand: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     last_used_at: Mapped[str] = mapped_column(String, nullable=False)
     # Absolute end of the session: refreshing never extends it.

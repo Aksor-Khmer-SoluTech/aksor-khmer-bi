@@ -59,7 +59,7 @@ export default function JdbcSourceFields({
       {connections !== null && connections.length === 0 && connectionsAvailable && (
         <p className="field-hint">
           No database connection exists yet.{" "}
-          {canManageConnections ? <a href="#/admin/connections">Create one under Admin → Connections</a> : "Ask someone who manages connections to create one"}.
+          {canManageConnections ? <a href="#/admin/connections">Create one under Manage → Connections</a> : "Ask someone who manages connections to create one"}.
         </p>
       )}
       {!connectionsAvailable && <p className="field-hint">You can't list connections here — type the name of an existing database connection.</p>}

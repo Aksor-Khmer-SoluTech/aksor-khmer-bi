@@ -32,8 +32,34 @@ An `.xlsx` template can only produce `.xlsx` (see [architecture](architecture.md
 
 ## 2. The workflow, end to end
 
+### 2.1 Start from your data (recommended): **Templates → New report**
+
+Design against the data you actually have, instead of guessing placeholder names first. Four steps:
+
+1. **Data** — name the report and choose where its data comes from: **Sample JSON** (paste an example; connect
+   real data later), a **REST API** or a **Database** (a saved connection plus a path or a SQL query). Press
+   **Run** and you see exactly what comes back, as a table or as JSON. Filters the source uses — `:month` in SQL,
+   `{{ month }}` in a URL — become the report's filters by themselves; give each a type and a test value.
+2. **Fields** — every field in that data, with its type and an example value. Click one to copy the exact
+   placeholder to type (a list gives you the whole table-row loop). Or download the **starter template**: a
+   `.docx`, `.xlsx` or `.html` file Aksor writes with every field already placed — a line for each value, a table
+   for each list, a total for each number column — which you then restyle.
+3. **Design** — make it look the way you want in Word, Excel or an editor, and upload it. Aksor compares its
+   placeholders with the data: one that names nothing in the data (it would print empty) is flagged with the
+   nearest real field, usually the typo; fields you never show are listed too.
+4. **Preview & publish** — run it like a reader would (real data, the real renderer), then **Publish**.
+
+From step 2 on the report exists as a **draft**: only people who manage it can see or run it, in the Reports list,
+the API or an embed, until it's published. Its own page says so and has **Continue setup**, which reopens the wizard
+where you left off (`#/templates/new/<report id>`). The starter is the report's first version, so the history keeps
+it next to your design.
+
+### 2.2 Register a finished template
+
+Already have the file? **Templates → Register template**:
+
 1. **Write** the file with `{{ placeholders }}` where data goes (sections 4–6).
-2. **Register** it (section 3). Aksor reads the file and lists the fields it found.
+2. **Register** it (section 3). Aksor reads the file and lists the fields it found. It is published straight away.
 3. **Check** the **Placeholders** tab — it shows every field the template expects.
 4. **Preview** with sample data (**Preview** tab → save it as the *sample payload*).
 5. **Integrate** — the **Integration** tab gives ready-made curl / JavaScript / Python
@@ -111,11 +137,12 @@ added or dropped. A typo in a label or note can be fixed afterwards with
 > Replacing a `.docx` with an `.xlsx` (or the reverse) changes which output formats the
 > template can produce. The form warns you first, because anything asking for a format
 > the new file can't make will fail.
-> An `.html` template can't be replaced in place — register it as a new template.
+> An `.html` file can replace a template too; it's checked like a new html template, and every
+> `{{ resource('name') }}` it uses must already be mapped on this report.
 
 ### 3.4 Folders and shortcuts
 
-Templates are organised in **Resources** folders (Admin → Resources), which can be nested as deep as you
+Templates are organised in **Resources** folders (Manage → Resources), which can be nested as deep as you
 like. The **Reports** page (where people go to *run* things) offers **Tree** (the default, first in the layout
 switch), **Grid** and **List**: the tree shows each folder with a count, its sub-folders inside it, and what is
 filed there. The **Templates** page is a flat catalogue of every template — grid or list — because folders and
@@ -142,7 +169,7 @@ page.
     on the report *or* on the folder it sits in, and never touches the report.
   - Deleting the report removes its shortcuts. Deleting a folder removes the shortcuts in it (they are only
     links); filing the report itself into a folder where it has a shortcut replaces that shortcut.
-  - In Admin → Resources a shortcut shows with a *Shortcut* badge, **Open the original** and
+  - In Manage → Resources a shortcut shows with a *Shortcut* badge, **Open the original** and
     **Remove shortcut**; it can't be dragged (move the original instead).
 
 ---
@@ -205,8 +232,9 @@ that may be absent with `if`, or give the filter a default (see
 
 ### 4.4 Khmer text
 
-Nothing to do. Every string in your JSON is word-segmented automatically so long Khmer
-text wraps and justifies correctly ([why](khmer-line-breaking.md)). If a Khmer word is
+Nothing to do. Every string in your JSON that contains Khmer is word-segmented automatically,
+so long Khmer text wraps and justifies correctly ([why](khmer-line-breaking.md)); text without
+Khmer — dates, numbers, IDs — arrives untouched. If a Khmer word is
 being split wrongly, see the [protected-terms guide](protected-terms-guide.md).
 Set the template's font to a Khmer font (e.g. *Khmer OS Siemreap*) in Word.
 
@@ -569,7 +597,7 @@ breaks, widths and the page count change. Check before you rely on a font:
   **Installed**, **Added** (under Resources → Fonts), **Substituted** (not installed, but a metric-compatible font
   such as Liberation Serif stands in for "Times New Roman", so the layout holds) or **Missing** (no match: the
   renderer picks a default and the layout can change).
-- **Add a font without redeploying:** **Admin → Resources → Fonts → Add font** (a `.ttf` or `.otf`; needs the
+- **Add a font without redeploying:** **Manage → Resources → Fonts → Add font** (a `.ttf` or `.otf`; needs the
   `font:manage` permission, which system administrators have). It is installed for the **whole server**: the next render of
   *every* organization's templates that name the font's family uses it — LibreOffice for `.docx`, WeasyPrint for
   `.html`, and charts — with no restart. A template names it by the **family** shown in the list (`Noto Sans Khmer`),

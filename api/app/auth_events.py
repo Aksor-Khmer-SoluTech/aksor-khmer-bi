@@ -4,18 +4,17 @@ AuthEvent -- see app/db/auth_events.py for the table shape and why a
 "session" here is really a throttled (user, ip_address, user_agent)
 fingerprint rather than a literal server-side session.
 
-Hooked from exactly one place, routers/auth.py's /auth/verify -- the
-portal calls that once per page load and once per login-form submit
-(see that router's own docstring), not on every single API request the
-way app/auth.py's Basic Auth check runs. Recording there instead of in
-get_current_user keeps this off the hot path of every report render/list
-call, at the cost of only auditing "the portal noticed you were signed
-in" rather than literally every authenticated request -- the right
-trade-off for a human-readable sign-in log instead of a request log.
+Hooked from routers/auth.py: the portal's /auth/login (one row per
+sign-in, tied to the session it opened and the browser's device cookie)
+and the older HTTP Basic /auth/verify that scripts use -- not from every
+authenticated API request, so this stays a human-readable sign-in log
+rather than a request log.
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -61,12 +60,33 @@ _OS_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
 )
 
 
-def parse_user_agent(user_agent: str | None) -> ParsedUserAgent:
+# Browsers that send another browser's User-Agent but name themselves in the Sec-CH-UA client hint
+# ('"Brave";v="152", "Chromium";v="152", "Not_A Brand";v="24"'). Chrome's own brand, Chromium and the deliberately
+# junk "Not A Brand" entries are skipped: the User-Agent already says as much.
+_HINT_BRANDS = {"Brave": "Brave", "Microsoft Edge": "Edge", "Opera": "Opera", "Vivaldi": "Vivaldi", "Samsung Internet": "Samsung Internet"}
+# What the portal itself may report (X-Aksor-Browser) where client hints aren't sent -- plain http on a LAN address.
+# Only names a page can actually detect (Brave exposes navigator.brave); anything else is ignored.
+_PORTAL_BRANDS = {"brave": "Brave"}
+_SEC_CH_UA_ENTRY = re.compile(r'"([^"]+)"\s*;\s*v="')
+
+
+def browser_brand(request: Request) -> str | None:
+    """The browser's real name when its User-Agent hides it (Brave's is Chrome's, unchanged), else None. For
+    display only: like the User-Agent, it's whatever the browser says."""
+    for name in _SEC_CH_UA_ENTRY.findall(request.headers.get("sec-ch-ua", "")):
+        if name in _HINT_BRANDS:
+            return _HINT_BRANDS[name]
+    return _PORTAL_BRANDS.get(request.headers.get("x-aksor-browser", "").strip().lower())
+
+
+def parse_user_agent(user_agent: str | None, brand: str | None = None) -> ParsedUserAgent:
     """Small, dependency-free UA sniff -- covers the handful of browsers/
     OSes an internal reporting portal's users actually show up with.
     Falls back to "Unknown" rather than guessing when nothing matches,
     same spirit as security.verify_password treating a malformed hash as
-    "doesn't match" rather than raising.
+    "doesn't match" rather than raising. `brand` (see browser_brand) names
+    the browser when the User-Agent can't. Versions are major only: Chrome
+    and its relatives now report "152.0.0.0" whatever the real build.
     """
     ua = user_agent or ""
 
@@ -74,8 +94,11 @@ def parse_user_agent(user_agent: str | None) -> ParsedUserAgent:
     for name, pattern in _BROWSER_PATTERNS:
         m = pattern.search(ua)
         if m:
-            browser = f"{name} {m.group(1)}"
+            browser = f"{brand or name} {m.group(1).split('.')[0]}"
             break
+    else:
+        if brand:
+            browser = brand
 
     os_name = "Unknown"
     for name, pattern in _OS_PATTERNS:
@@ -104,50 +127,77 @@ def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-def record_login_success(session: Session, user: User, ip_address: str | None, user_agent: str | None) -> AuthEvent:
-    """Renew the matching fingerprint's row if one's still within
-    SESSION_RENEW_WINDOW, else insert a new one -- flagged is_new_device
-    if this exact fingerprint has genuinely never succeeded for this user
-    before (any age), which is what the Notifications bell surfaces.
+# The browser's device id: a random value in a long-lived HttpOnly cookie (scoped to the auth routes, like the refresh
+# cookie), stored server-side only as its SHA-256. It is what makes a device "known" -- not the IP address, which
+# changes with every network, nor the User-Agent, which changes with every browser update.
+DEVICE_COOKIE = "aksor_device"
+DEVICE_COOKIE_MAX_AGE = 400 * 24 * 3600  # browsers cap cookie lifetimes at 400 days
+
+
+def new_device_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def device_hash(token: str | None) -> str | None:
+    if not token or len(token) > 200:
+        return None
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _is_new_device(session: Session, user: User, ip_address: str | None, user_agent: str | None, device: str | None) -> bool:
+    """A sign-in is from a new device unless this browser (its device cookie) has signed in to this account before.
+    Rows from before device cookies existed carry no device_hash; they still vouch for a browser by its exact
+    ip_address + user_agent, so upgrading doesn't alert everyone once. An account's very first sign-in isn't "new":
+    there is nothing to compare with, and nobody else to warn."""
+    def _seen(*conditions) -> bool:
+        return session.execute(
+            select(AuthEvent.id).where(AuthEvent.user_id == user.id, AuthEvent.success.is_(True), *conditions).limit(1)
+        ).scalar_one_or_none() is not None
+
+    if not _seen():
+        return False
+    if device is not None and _seen(AuthEvent.device_hash == device):
+        return False
+    return not _seen(AuthEvent.ip_address == ip_address, AuthEvent.user_agent == user_agent, AuthEvent.device_hash.is_(None))
+
+
+def record_login_success(
+    session: Session,
+    user: User,
+    ip_address: str | None,
+    user_agent: str | None,
+    *,
+    device: str | None = None,
+    session_id: str | None = None,
+    brand: str | None = None,
+) -> AuthEvent:
+    """Log a successful sign-in. A portal sign-in (`session_id` given -- it opened that session) always gets its own
+    row, flagged is_new_device if this browser has never signed in to the account (see _is_new_device); `device` is
+    the browser's device_hash. An HTTP Basic check (no session) renews the matching fingerprint's row if one's still
+    within SESSION_RENEW_WINDOW, so a script calling /auth/verify doesn't flood the sign-in activity.
     """
     now = datetime.now(timezone.utc)
-    cutoff = (now - SESSION_RENEW_WINDOW).isoformat()
-    existing = (
-        session.execute(
-            select(AuthEvent)
-            .where(
-                AuthEvent.user_id == user.id,
-                AuthEvent.success.is_(True),
-                AuthEvent.ip_address == ip_address,
-                AuthEvent.user_agent == user_agent,
-                AuthEvent.last_seen_at >= cutoff,
+    if session_id is None:
+        cutoff = (now - SESSION_RENEW_WINDOW).isoformat()
+        existing = (
+            session.execute(
+                select(AuthEvent)
+                .where(
+                    AuthEvent.user_id == user.id,
+                    AuthEvent.success.is_(True),
+                    AuthEvent.ip_address == ip_address,
+                    AuthEvent.user_agent == user_agent,
+                    AuthEvent.last_seen_at >= cutoff,
+                )
+                .order_by(AuthEvent.last_seen_at.desc())
             )
-            .order_by(AuthEvent.last_seen_at.desc())
+            .scalars()
+            .first()
         )
-        .scalars()
-        .first()
-    )
-    if existing is not None:
-        existing.last_seen_at = now.isoformat()
-        session.commit()
-        return existing
-
-    # `.first()`, not `.scalar_one_or_none()` -- over time a real device
-    # naturally accumulates *many* prior success rows for the same
-    # fingerprint (a fresh row opens each time SESSION_RENEW_WINDOW
-    # lapses between sign-ins), so "more than one match" is the normal
-    # case here, not an error -- this only ever asks "does at least one
-    # exist," never "exactly one."
-    seen_before = session.execute(
-        select(AuthEvent.id)
-        .where(
-            AuthEvent.user_id == user.id,
-            AuthEvent.success.is_(True),
-            AuthEvent.ip_address == ip_address,
-            AuthEvent.user_agent == user_agent,
-        )
-        .limit(1)
-    ).scalar_one_or_none()
+        if existing is not None:
+            existing.last_seen_at = now.isoformat()
+            session.commit()
+            return existing
 
     event = AuthEvent(
         user_id=user.id,
@@ -156,7 +206,10 @@ def record_login_success(session: Session, user: User, ip_address: str | None, u
         success=True,
         ip_address=ip_address,
         user_agent=user_agent,
-        is_new_device=seen_before is None,
+        is_new_device=_is_new_device(session, user, ip_address, user_agent, device),
+        device_hash=device,
+        session_id=session_id,
+        browser_brand=brand,
         created_at=now.isoformat(),
         last_seen_at=now.isoformat(),
     )

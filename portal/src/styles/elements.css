@@ -50,6 +50,20 @@
   flex-wrap: wrap;
 }
 
+/* The title + description take the free space and wrap their own lines, so the page's action buttons stay in the
+   top-right corner however long the description is (a long one used to push them onto a line of their own). The
+   actions only drop below on a screen too narrow for both. */
+.page-header:not(.page-header-compact) > :first-child:not(:last-child) {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.page-header:not(.page-header-compact) > :last-child:not(:first-child) {
+  flex: none;
+}
+.page-header:not(.page-header-compact) .page-subtitle {
+  max-width: 82ch;
+}
+
 .page-title {
   font-family: var(--font-display);
   font-size: 1.7rem;

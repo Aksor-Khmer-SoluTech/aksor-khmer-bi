@@ -328,8 +328,8 @@ def list_accessible_reports(context: AuthContext = Depends(get_current_user)) ->
 
         for row in rows:
             level = "manage" if context.is_superuser else _report_access_level(session, context, row["report_id"])
-            if level is None:
-                continue
+            if level is None or (row.get("is_draft") and level != "manage"):
+                continue  # a draft is listed only for the people who can finish it
             visible.append(
                 {
                     "report_id": row["report_id"],
@@ -340,6 +340,7 @@ def list_accessible_reports(context: AuthContext = Depends(get_current_user)) ->
                     "version_label": row["version_label"],
                     "updated_at": row["updated_at"],
                     "access_level": level,
+                    "is_draft": bool(row.get("is_draft")),
                     "folder_path": folder_path(row.get("folder_id")),
                     # Only for a report the caller can already open, and only in folders they may open: a
                     # shortcut adds a place to find a report, never a way to reach one.
@@ -371,8 +372,11 @@ def list_shortcuts(context: AuthContext = Depends(get_current_user)) -> list[dic
         for sc in session.execute(select(db.ReportShortcut)).scalars():
             if not can_view_folder_contents(session, context, sc.folder_id):
                 continue
-            if not context.is_superuser and _report_access_level(session, context, sc.report_id) is None:
-                continue
+            if not context.is_superuser:
+                level = _report_access_level(session, context, sc.report_id)
+                draft = session.scalar(select(db.ReportRow.is_draft).where(db.ReportRow.report_id == sc.report_id))
+                if level is None or (draft and level != "manage"):
+                    continue
             out.append(_shortcut_out(sc))
         return out
 
@@ -530,25 +534,34 @@ def update_report(
 async def replace_report_file(
     report_id: str,
     request: Request,
-    file: UploadFile = File(..., description="A .docx or .xlsx template with Jinja2 placeholders"),
+    file: UploadFile = File(..., description="A .docx, .xlsx or .html template with Jinja2 placeholders"),
     note: str | None = Form(None, description="Optional: what changed in this version -- shown in the changelog"),
     version_label: str | None = Form(None, description="Optional name for this version, e.g. 1.0.1 -- shown instead of v<N>; unique per report"),
     context: AuthContext = Depends(require_report_permission("manage")),
 ) -> dict:
     try:
-        report_store.get_report(report_id)
+        current = report_store.get_report(report_id)
     except report_store.ReportNotFoundError:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    filename = (file.filename or "").lower()
-    if filename.endswith(".docx"):
-        template_ext = "docx"
-    elif filename.endswith(".xlsx"):
-        template_ext = "xlsx"
-    else:
-        raise HTTPException(status_code=400, detail="Template file must be a .docx or .xlsx")
+    template_ext = _template_ext_for(file.filename or "")
+    if template_ext is None:
+        raise HTTPException(status_code=400, detail="Template file must be a .docx, .xlsx or .html")
     content = await file.read()
-    if not report_store.is_valid_office_file(content, template_ext):
+    if template_ext == "html":
+        # The same checks a new html template gets on registering, against the resources this report already has
+        # mapped: a replacement can't bring in a resource() nobody mapped (map it by registering, or keep the name).
+        try:
+            source = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Template is not valid UTF-8 text: {exc}") from exc
+        parsed = parse_html_template(source)
+        if parsed.errors:
+            raise HTTPException(status_code=400, detail="; ".join(e.message for e in parsed.errors))
+        binding_errors = validate_resource_bindings(set(parsed.resources), current.get("resource_bindings") or {}, current["org_id"])
+        if binding_errors:
+            raise HTTPException(status_code=400, detail="; ".join(binding_errors))
+    elif not report_store.is_valid_office_file(content, template_ext):
         raise HTTPException(status_code=400, detail=f"Uploaded file is not a valid .{template_ext}")
     actor = audit.Actor.of(context, request)
     try:
@@ -1232,7 +1245,8 @@ def _authorize_run(report_id: str, context: AuthContext):
     definitions = meta.get("parameters") or []
     with db.SessionLocal() as session:
         level = "manage" if context.is_superuser else _report_access_level(session, context, report_id)
-        if level is None:
+        # A draft doesn't exist yet for anyone but the people who manage it.
+        if level is None or (meta.get("is_draft") and level != "manage"):
             raise HTTPException(status_code=404, detail="Report not found")
         if level == "view":
             raise HTTPException(status_code=403, detail="You can view this report but not run it")
@@ -1467,6 +1481,10 @@ def embed_run_report(report_id: str, body: EmbedRunRequest, request: Request) ->
     try:
         meta = report_store.get_report(report_id)
     except report_store.ReportNotFoundError:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    if meta.get("is_draft"):
+        # Not published yet: no embedder can run it (managers test drafts in the portal).
         raise HTTPException(status_code=404, detail="Report not found")
 
     if body.client_id is not None:

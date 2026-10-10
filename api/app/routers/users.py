@@ -70,8 +70,10 @@ def _row_to_out(row: db.User) -> UserOut:
     )
 
 
-def _event_to_out(row: db.AuthEvent, current_ip: str | None, current_user_agent: str | None) -> AuthEventOut:
-    parsed = parse_user_agent(row.user_agent)
+def _event_to_out(
+    row: db.AuthEvent, current_ip: str | None, current_user_agent: str | None, live_session_ids: set[str] | None = None
+) -> AuthEventOut:
+    parsed = parse_user_agent(row.user_agent, row.browser_brand)
     return AuthEventOut(
         id=row.id,
         success=row.success,
@@ -84,6 +86,8 @@ def _event_to_out(row: db.AuthEvent, current_ip: str | None, current_user_agent:
         is_new_device=row.is_new_device,
         created_at=row.created_at,
         last_seen_at=row.last_seen_at,
+        session_id=row.session_id,
+        session_active=row.session_id is not None and row.session_id in (live_session_ids or set()),
     )
 
 
@@ -461,36 +465,52 @@ def list_my_auth_log(request: Request, context: AuthContext = Depends(get_curren
         return [_event_to_out(row, ip_address, user_agent) for row in rows]
 
 
+def _pending_alerts(session, context: AuthContext):
+    """The caller's unanswered new-device alerts -- except any about the session asking. A sign-in is reported to the
+    *other* places the account is signed in, so whoever is on the new device can neither see nor dismiss it."""
+    query = select(db.AuthEvent).where(
+        db.AuthEvent.user_id == context.user.id,
+        db.AuthEvent.is_new_device.is_(True),
+        db.AuthEvent.acknowledged.is_(False),
+    )
+    if context.session_id is not None:
+        query = query.where((db.AuthEvent.session_id.is_(None)) | (db.AuthEvent.session_id != context.session_id))
+    return session.execute(query.order_by(db.AuthEvent.created_at.desc())).scalars().all()
+
+
+def _live_session_ids(session, context: AuthContext) -> set[str]:
+    return {row.id for row in auth_tokens.live_sessions(session, user_id=context.user.id)}
+
+
+def _pending_alert(session, context: AuthContext, event_id: str) -> db.AuthEvent:
+    if context.user is None:
+        raise HTTPException(status_code=404, detail="No profile for this credential")
+    row = next((r for r in _pending_alerts(session, context) if r.id == event_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return row
+
+
 @router.get(
     "/me/notifications",
-    summary="Unacknowledged new-device sign-in alerts for the caller",
+    summary="Unanswered new-device sign-in alerts for the caller",
     response_model=list[AuthEventOut],
-    description="Empty if the caller has turned off Settings > Notifications' new-sign-in-alert toggle "
-    "(UserSelfUpdate.notify_new_signin) -- see app/auth_events.py's is_new_device.",
+    description="Sign-ins from a browser that had never signed in to this account before (see app/auth_events.py), "
+    "not yet answered, never including the session asking. `session_active` says whether that sign-in is still "
+    "signed in. Empty if the caller has turned off Settings > Notifications' new-sign-in-alert toggle "
+    "(UserSelfUpdate.notify_new_signin).",
 )
 def list_my_notifications(context: AuthContext = Depends(get_current_user)) -> list[AuthEventOut]:
     if context.user is None or not context.user.notify_new_signin:
         return []
     with db.SessionLocal() as session:
-        rows = (
-            session.execute(
-                select(db.AuthEvent)
-                .where(
-                    db.AuthEvent.user_id == context.user.id,
-                    db.AuthEvent.is_new_device.is_(True),
-                    db.AuthEvent.acknowledged.is_(False),
-                )
-                .order_by(db.AuthEvent.created_at.desc())
-            )
-            .scalars()
-            .all()
-        )
-        return [_event_to_out(row, None, None) for row in rows]
+        live = _live_session_ids(session, context)
+        return [_event_to_out(row, None, None, live) for row in _pending_alerts(session, context)]
 
 
 @router.post(
     "/me/notifications/ack",
-    summary="Acknowledge every pending new-device sign-in alert",
+    summary="Mark every pending new-device sign-in alert as seen",
     status_code=204,
     response_model=None,
 )
@@ -498,18 +518,50 @@ def ack_my_notifications(context: AuthContext = Depends(get_current_user)) -> No
     if context.user is None:
         raise HTTPException(status_code=404, detail="No profile for this credential")
     with db.SessionLocal() as session:
-        rows = (
-            session.execute(
-                select(db.AuthEvent).where(
-                    db.AuthEvent.user_id == context.user.id, db.AuthEvent.acknowledged.is_(False)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for row in rows:
+        for row in _pending_alerts(session, context):
             row.acknowledged = True
         session.commit()
+
+
+@router.post(
+    "/me/notifications/{event_id}/ack",
+    summary="\"It was me\": dismiss one new-device sign-in alert",
+    status_code=204,
+    response_model=None,
+)
+def ack_my_notification(event_id: str, request: Request, context: AuthContext = Depends(get_current_user)) -> None:
+    with db.SessionLocal() as session:
+        row = _pending_alert(session, context, event_id)
+        row.acknowledged = True
+        session.commit()
+    audit.record(
+        audit.Actor.of(context, request), "auth.signin_confirmed", "user", context.user.id, label=context.username,
+        org_id=context.org_id, summary="Confirmed a sign-in from a new device", details={"sign_in": event_id},
+    )
+
+
+@router.post(
+    "/me/notifications/{event_id}/sign-out",
+    summary="\"Not me\": sign out the session a new-device alert is about",
+    response_model=dict,
+    description="Signs that session out (if it still is signed in) and dismisses the alert. Changing the password, "
+    "which the portal offers next, is what keeps whoever it was from simply signing in again.",
+)
+def disown_my_notification(event_id: str, request: Request, context: AuthContext = Depends(get_current_user)) -> dict:
+    with db.SessionLocal() as session:
+        row = _pending_alert(session, context, event_id)
+        signed_out = False
+        if row.session_id is not None and row.session_id in _live_session_ids(session, context):
+            signed_out = auth_tokens.revoke_session(session, row.session_id, "disowned_by_user")
+        row.acknowledged = True
+        session.commit()
+        ip_address, session_id = row.ip_address, row.session_id
+    audit.record(
+        audit.Actor.of(context, request), "auth.signin_disowned", "session", session_id or event_id, label=context.username,
+        org_id=context.org_id, summary="Reported a sign-in from a new device as not theirs" + (" and signed it out" if signed_out else ""),
+        details={"sign_in": event_id, "ip_address": ip_address, "signed_out": signed_out},
+    )
+    return {"signed_out": signed_out}
 
 
 @router.get(

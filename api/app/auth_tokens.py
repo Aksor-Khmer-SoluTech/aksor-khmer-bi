@@ -254,6 +254,7 @@ def create_session(
     ip_address: str | None,
     user_agent: str | None,
     remember: bool,
+    browser_brand: str | None = None,
 ) -> tuple[db.AuthSession, str]:
     """Open a session and return it with its first refresh token (the only time the plain value exists)."""
     purge_old(session)
@@ -266,6 +267,7 @@ def create_session(
         remember=remember,
         ip_address=ip_address,
         user_agent=(user_agent or "")[:400] or None,
+        browser_brand=browser_brand,
         created_at=now.isoformat(),
         last_used_at=now.isoformat(),
         expires_at=(now + refresh_ttl(remember)).isoformat(),

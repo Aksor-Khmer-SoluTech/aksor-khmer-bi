@@ -295,6 +295,28 @@ def _template_variables(source: str, where: str) -> set[str]:
         raise DataConfigError(f"Template syntax error in the data source {where}: {exc.message}") from exc
 
 
+def source_parameter_names(data_source: dict | None) -> list[str]:
+    """The filters a data source refers to, in order of first use: a database query's `:name` placeholders, a REST
+    source's `{{ name }}` in its URL or body. What the New report wizard turns into filter parameters, so nobody
+    has to declare them by hand first. Raises DataConfigError for a query or template that doesn't parse."""
+    if not data_source:
+        return []
+    kind = data_source.get("type") or "rest"
+    if kind == "jdbc":
+        from . import jdbc
+
+        return jdbc.validate_query(data_source.get("query"))
+    if kind != "rest":
+        return []
+    names: list[str] = []
+    texts = [data_source.get("url") or ""] + list(_walk_strings(data_source.get("body_template")))
+    for text in texts:
+        for name in sorted(_template_variables(text, "URL" if text is texts[0] else "body")):
+            if name not in names:
+                names.append(name)
+    return names
+
+
 def _walk_strings(value: Any):
     if isinstance(value, str):
         yield value

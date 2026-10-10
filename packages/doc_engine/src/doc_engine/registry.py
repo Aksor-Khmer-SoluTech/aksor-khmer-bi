@@ -48,7 +48,8 @@ def render(
     backend="weasyprint" (there's no LibreOffice path for it); a docx
     template's "pdf"/"png" only support backend="libreoffice" (WeasyPrint
     has no notion of a custom *docx* template). There's no fixed field
-    list to allowlist from, so every string in `context` is segmented.
+    list to allowlist from, so every string in `context` is segmented -- every one that contains Khmer, that is:
+    aksor_khmer_ocr_segmenter.process_text leaves text without it (dates, amounts, IDs) exactly as it is.
 
     `extra_terms`/`exclude_terms` are a per-render protected-terms layer
     on top of aksor_khmer_ocr_segmenter's own deployment-wide default

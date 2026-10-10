@@ -67,6 +67,11 @@ def _forge(claims_patch=None, *, alg="HS256", key=None, drop_signature=False):
 # --- signing in ------------------------------------------------------------------------------------
 
 
+def _refresh_cookie(resp) -> str:
+    """The refresh cookie's own Set-Cookie line -- a sign-in also sets the device cookie (aksor_device)."""
+    return next(c.lower() for c in resp.headers.get_list("set-cookie") if c.startswith("aksor_refresh="))
+
+
 def test_login_returns_an_access_token_and_sets_an_httponly_refresh_cookie(http, make_local_user):
     make_local_user("alice", "pw-alice-1", ("ROLE_REPORT_VIEWER",))
     resp = _login(http, "alice", "pw-alice-1")
@@ -77,9 +82,13 @@ def test_login_returns_an_access_token_and_sets_an_httponly_refresh_cookie(http,
     assert "refresh" not in json.dumps(body).lower()  # the refresh token never travels in the body
     assert resp.headers["cache-control"] == "no-store"
 
-    cookie = resp.headers["set-cookie"].lower()
-    assert "aksor_refresh=" in cookie and "httponly" in cookie and "path=/api/v1/auth" in cookie and "samesite=lax" in cookie
+    cookies = {c.split("=", 1)[0]: c.lower() for c in resp.headers.get_list("set-cookie")}
+    cookie = cookies["aksor_refresh"]
+    assert "httponly" in cookie and "path=/api/v1/auth" in cookie and "samesite=lax" in cookie
     assert "max-age" not in cookie and "secure" not in cookie  # a session cookie, over plain http
+    # The device cookie (new-sign-in alerts, app/auth_events.py) is meant to outlive the browser session.
+    device = cookies["aksor_device"]
+    assert "httponly" in device and "path=/api/v1/auth" in device and "max-age=34560000" in device
 
 
 def test_a_wrong_password_on_login_does_not_make_the_browser_pop_up_its_own_dialog(http, make_local_user):
@@ -97,7 +106,7 @@ def test_a_wrong_password_on_login_does_not_make_the_browser_pop_up_its_own_dial
 def test_remember_keeps_the_cookie_beyond_the_browser_and_the_session_for_longer(http, make_local_user):
     make_local_user("alice", "pw-alice-1", ())
     resp = _login(http, "alice", "pw-alice-1", remember=True)
-    assert "max-age=" in resp.headers["set-cookie"].lower()
+    assert "max-age=" in _refresh_cookie(resp)
     row = _sessions()[0]
     assert row.remember is True
     assert datetime.fromisoformat(row.expires_at) - datetime.now(timezone.utc) > timedelta(days=29)
@@ -113,12 +122,12 @@ def test_the_secure_flag_follows_https_and_samesite_none_forces_it(http, make_lo
     proxied = http.post(
         "/api/v1/auth/login", json={"username": "alice", "password": "pw-alice-1"}, headers={"X-Forwarded-Proto": "https"}
     )
-    assert "secure" in proxied.headers["set-cookie"].lower()
+    assert "secure" in _refresh_cookie(proxied)
 
     monkeypatch.setenv("AUTH_COOKIE_SAMESITE", "none")
     cross_site = _login(TestClient(app), "alice", "pw-alice-1")
-    cookie = cross_site.headers["set-cookie"].lower()
-    assert "samesite=none" in cookie and "secure" in cookie
+    for cookie in cross_site.headers.get_list("set-cookie"):  # the refresh cookie and the device cookie alike
+        assert "samesite=none" in cookie.lower() and "secure" in cookie.lower()
 
 
 def test_the_access_token_authenticates_api_calls(http, make_local_user):

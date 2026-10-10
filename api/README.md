@@ -44,6 +44,11 @@ JSON, no fixed schema required:
 | GET    | `/api/v1/reports/batch-limits`    | no    | the per-format batch size limits and rough seconds per record |
 | GET/PUT | `/api/v1/reports/{report_id}/data-config` | yes (manage) | the report's filter `parameters` (type, `required`, `default_value` — a literal or `now()`, a fixed choice list or an `options_source`) and its `data_source` (`type: "rest"`, a `connection` + path or a full `url`, method, headers, body, auth). PUT replaces both; see [`docs/building-a-report.md`](../docs/building-a-report.md#filters-a-data-source-and-connections) |
 | POST   | `/api/v1/reports/{report_id}/data-config/preview-options` | yes (manage, own organization) | try an `options_source` — saved or not — and get the first choices its JSONPaths produce, or a readable reason it can't (`400` bad config, `502` the request failed) |
+| POST   | `/api/v1/reports/data-preview` | yes (`report:manage`, own organization) | the New report wizard's **Run**: run a `data_source` once, unsaved, with test `values` — the data (lists cut to 20 items), its `fields`, and the filter `parameters` it uses (a `:name` / `{{ name }}` not yet defined is added). `missing` lists filters still without a test value (nothing fetched) |
+| POST   | `/api/v1/reports/drafts` | yes (`report:manage`) | create a **draft** report from that data: source and filters saved, the data kept as its sample, and a generated starter template (`format`: docx, xlsx or html) with every field placed as version 1. A draft is listed for and runnable by only people who manage it |
+| POST   | `/api/v1/reports/{report_id}/starter` | yes (manage) | replace the template with a freshly generated starter in another `format` (a new version) |
+| GET    | `/api/v1/reports/{report_id}/template-check` | yes (manage) | the template's placeholders against the report's sample data: `matched`, `unknown` (each with the nearest real field), `unused`, and the data's `fields`. Follows loops |
+| POST   | `/api/v1/reports/{report_id}/publish` | yes (manage) | publish a draft |
 
 "Auth?" means a signed-in caller: an **access token** from `POST /api/v1/auth/login`
 (`Authorization: Bearer …`, see "Signing in" below), or HTTP Basic for a script — both checked by
@@ -116,7 +121,8 @@ only — WeasyPrint has no notion of a user-supplied `.docx` template); a
 `.xlsx` template only renders to `xlsx` (LibreOffice could convert it to
 pdf/png too, but that path isn't wired up yet). Requesting a format your
 template's file type doesn't support returns `400`. Every string in the
-JSON body is Khmer-segmented before rendering, since a custom template
+JSON body that contains Khmer is segmented before rendering (text without Khmer is left
+exactly as sent), since a custom template
 has no fixed field list to allowlist from (see
 `doc_engine/segmentation.py`'s `segment_generic`).
 
@@ -182,7 +188,7 @@ startup), jobs, folders, images and stylesheets — writes one row to
 `audit_events` (`app/audit.py`): who, from which IP, what, when, and the
 before/after of each field that changed. Read it at `GET /api/v1/audit`
 (`audit:view`, the same permission as the security feed), or in the portal:
-**Admin → Audit Log**, a template's **History** tab, a user's **Activity**
+**Manage → Audit Log**, a template's **History** tab, a user's **Activity**
 tab, and the Dashboard's "Recent changes".
 
 - **Secrets are never stored.** Values under credential-shaped keys
@@ -190,7 +196,7 @@ tab, and the Dashboard's "Recent changes".
   in a data source, and free-text `body_template`s are recorded as
   *changed* with no before/after. The *name* of an environment variable
   or a Secret (`token_env`, `token_secret`, `service_bind_password_env`) is
-  not a secret and stays visible -- a Secret's own value (Admin → Secrets,
+  not a secret and stays visible -- a Secret's own value (Manage → Secrets,
   `app/secret_store.py`) never reaches the audit trail in the first place,
   by construction, not by this redaction.
 - **Append-only.** Nothing in the API updates or deletes an audit row, and
@@ -577,7 +583,7 @@ SQLite file, so `pytest` needs no database running.
 
 ### Khmer protected terms for this project
 
-Every string in a custom template's render payload goes through
+Every string in a custom template's render payload that contains Khmer goes through
 `aksor_khmer_ocr_segmenter.process_text()` (see
 `doc_engine/segmentation.py`'s `segment_generic`) before rendering, so it
 already benefits from the shared package's built-in protected-terms list

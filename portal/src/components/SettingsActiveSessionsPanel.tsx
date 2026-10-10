@@ -1,6 +1,8 @@
+import { LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DeviceDesktopIcon, DeviceMobileIcon, DeviceTabletIcon } from "../admin/icons";
 import { api, ApiError } from "../api";
+import { ago, plural, until } from "../relativeTime";
 import { LinesSkeleton } from "./Skeletons";
 import type { DeviceType, UserSession } from "../types";
 
@@ -61,24 +63,14 @@ export default function SettingsActiveSessionsPanel({ onGoToAccess }: { onGoToAc
 
   return (
     <div className="panel max-w-5xl">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="panel-title">Active sessions</h3>
-          <p className="panel-subtitle">
-            Where you're signed in right now. Sign out any you don't recognize — it ends at once. If one looks wrong, also{" "}
-            <button type="button" className="link-btn" onClick={onGoToAccess}>
-              change your password
-            </button>
-            , which signs out every other session.
-          </p>
-        </div>
-        {others > 0 && (
-          <button type="button" className="btn btn-sm btn-danger" onClick={signOutOthers} disabled={busy !== null}>
-            {busy === "others" && <span className="spinner" />}
-            Sign out {others} other session{others === 1 ? "" : "s"}
-          </button>
-        )}
-      </div>
+      <h3 className="panel-title">Active sessions</h3>
+      <p className="panel-subtitle">
+        Where you're signed in right now. Sign out any you don't recognize — it ends at once. If one looks wrong, also{" "}
+        <button type="button" className="link-btn" onClick={onGoToAccess}>
+          change your password
+        </button>
+        , which signs out every other session.
+      </p>
       {error && <p className="alert alert-error">{error}</p>}
       {sessions === null ? (
         <LinesSkeleton count={3} />
@@ -100,8 +92,13 @@ export default function SettingsActiveSessionsPanel({ onGoToAccess }: { onGoToAc
                   {s.remember && <span className="badge badge-system">Kept signed in</span>}
                 </div>
                 <div className="mt-0.5 text-[0.78rem] text-text-faint">
-                  <span className="mono">{s.ip_address ?? "unknown IP"}</span> · signed in {new Date(s.created_at).toLocaleString()} · last
-                  active {new Date(s.last_used_at).toLocaleString()} · ends {new Date(s.expires_at).toLocaleString()}
+                  <span className="mono">{s.ip_address ?? "unknown IP"}</span>
+                  {" · "}
+                  <span title={new Date(s.created_at).toLocaleString()}>signed in {ago(s.created_at)}</span>
+                  {" · "}
+                  <span title={new Date(s.last_used_at).toLocaleString()}>active {ago(s.last_used_at)}</span>
+                  {" · "}
+                  <span title={new Date(s.expires_at).toLocaleString()}>ends {until(s.expires_at)}</span>
                 </div>
               </div>
               {!s.current && (
@@ -112,6 +109,17 @@ export default function SettingsActiveSessionsPanel({ onGoToAccess }: { onGoToAc
               )}
             </div>
           ))}
+          {others > 0 && (
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-3 border-t border-border-soft pt-3.5">
+              <span className="text-[0.8rem] text-text-faint">
+                Signed in on {plural(others, "other device")}. Not all yours? End them in one go.
+              </span>
+              <button type="button" className="btn btn-sm btn-danger" onClick={signOutOthers} disabled={busy !== null}>
+                {busy === "others" ? <span className="spinner" /> : <LogOut size={14} aria-hidden="true" />}
+                Sign out {plural(others, "other session")}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

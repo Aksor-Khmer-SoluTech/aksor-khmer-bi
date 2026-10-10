@@ -71,7 +71,7 @@ function TwoFactorSection({ user, onUpdated }: { user: User; onUpdated: (u: User
       <p className="panel-subtitle">
         Adds a code step to signing in. Once it's on, your password alone no longer works for scripts calling
         the API either, so the second factor can't be walked around — give a script its own service account
-        (or, to run reports, an API client under Admin → API Clients). If you think your password's been exposed,
+        (or, to run reports, an API client under Manage → API Clients). If you think your password's been exposed,
         change it too.
       </p>
 

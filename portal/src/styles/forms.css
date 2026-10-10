@@ -278,6 +278,8 @@ label > .field-hint {
    land on one generous target. */
 .sr-only-input {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   padding: 0;
@@ -289,6 +291,9 @@ label > .field-hint {
 }
 
 .dropzone {
+  /* Anchors its visually hidden file input (.sr-only-input); unanchored, the input sits wherever the layout puts it
+     and can stick out of a dialog as a stray horizontal scrollbar. */
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;

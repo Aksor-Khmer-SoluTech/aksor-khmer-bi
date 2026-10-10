@@ -165,8 +165,8 @@ together** (and "never protect" beats all of them):
 
 | Layer | Where | Who | Applies to |
 |---|---|---|---|
-| Built-in list + the server's config files | code / mounted files (steps 1–7) | whoever deploys | every report, every organization — shown **read-only** under *Admin → Protected Terms → Deployment-wide list* (it is re-read from the files at each API restart, and its version bumps when they change) |
-| **Shared sets** | *Admin → Protected Terms* → **+ New set** | needs the `protected_terms:manage` permission | any report in the organization that selects the set |
+| Built-in list + the server's config files | code / mounted files (steps 1–7) | whoever deploys | every report, every organization — shown **read-only** under *Manage → Protected Terms → Deployment-wide list* (it is re-read from the files at each API restart, and its version bumps when they change) |
+| **Shared sets** | *Manage → Protected Terms* → **+ New set** | needs the `protected_terms:manage` permission | any report in the organization that selects the set |
 | **This report's own terms** | the report's **Protected Terms** tab (*Templates → the report*) | needs `report:manage` | that one report |
 
 - **Sets are linked, not copied.** Editing a set updates every report that
@@ -176,7 +176,7 @@ together** (and "never protect" beats all of them):
   `×` to remove it. Paste a list (one per line, e.g. a spreadsheet column) to add
   many at once. Spaces are part of a term (`ធនាគារ អេស៊ីលីដា` is one term), repeats
   are ignored, and a term still being typed when you click Save is kept. Up to
-  1,000 terms of 200 characters each per list. The Admin page's search also looks
+  1,000 terms of 200 characters each per list. The Manage page's search also looks
   *inside* sets, so you can check whether a name is already covered.
 - **Never protect** hands a term back to the normal word-breaker. It wins over
   every layer, including the deployment-wide list, so a report can opt out of a
@@ -365,7 +365,7 @@ one-off/deployment-specific name here.
 
 ## Worked example: project-scoped terms for `api`
 
-Every string in a report's render payload goes through
+Every string in a report's render payload that contains Khmer goes through
 `aksor_khmer_ocr_segmenter.process_text()` (see
 `doc_engine/segmentation.py`'s `segment_generic`) before rendering. When
 preparing real-world terms for this project:

@@ -8,7 +8,7 @@
 import khqrUrl from "./assets/aba-khqr.jpg";
 
 export const support = {
-  email: "sieng.sotheara.7@gmail.com",
+  email: "aksorkhmerbi@gmail.com",
   phone: "+855 10 335 644",
   // With its leading "@", as people usually write it -- AboutDialog strips
   // it when building the t.me link.

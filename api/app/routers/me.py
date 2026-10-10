@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 
 from .. import db
@@ -25,13 +25,52 @@ _RECENT = 8
 _TOP = 5
 
 
+def _mine(context: AuthContext):
+    """The caller's own audit rows: by user id for a database account, by name for the break-glass login."""
+    return db.AuditEvent.actor_user_id == context.user.id if context.user else db.AuditEvent.actor_username == context.username
+
+
+def _to_run(row: db.AuditEvent) -> MyRun:
+    details = row.details or {}
+    return MyRun(
+        report_id=row.entity_id,
+        name=row.entity_label,
+        at=row.created_at,
+        via=details.get("via"),
+        format=details.get("format"),
+        parameters_selected=details.get("parameters_selected"),
+        ok=row.action == "report.run",
+        reason=None if row.action == "report.run" else details.get("reason"),
+    )
+
+
+@router.get("/runs", summary="The signed-in user's own report runs, newest first", response_model=list[MyRun])
+def my_runs(
+    limit: int = Query(50, ge=1, le=200, description="How many runs to return"),
+    context: AuthContext = Depends(get_current_user),
+) -> list[MyRun]:
+    """The portal's My runs page: the same rows as the dashboard's recent list, further back."""
+    with db.SessionLocal() as session:
+        rows = (
+            session.execute(
+                select(db.AuditEvent)
+                .where(_mine(context), db.AuditEvent.action.in_(("report.run", "report.run_failed")))
+                .order_by(db.AuditEvent.created_at.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
+    return [_to_run(row) for row in rows]
+
+
 @router.get("/dashboard", summary="The signed-in user's own recent report activity", response_model=MyDashboard)
 def my_dashboard(context: AuthContext = Depends(get_current_user)) -> MyDashboard:
     now = datetime.now(timezone.utc)
     since = (now - timedelta(days=30)).isoformat()
     week = (now - timedelta(days=7)).isoformat()
 
-    mine = db.AuditEvent.actor_user_id == context.user.id if context.user else db.AuditEvent.actor_username == context.username
+    mine = _mine(context)
     with db.SessionLocal() as session:
         rows = (
             session.execute(
@@ -52,19 +91,7 @@ def my_dashboard(context: AuthContext = Depends(get_current_user)) -> MyDashboar
         if row.action == "report.run":
             runs_by_report[row.entity_id] += 1
         if len(recent) < _RECENT:
-            details = row.details or {}
-            recent.append(
-                MyRun(
-                    report_id=row.entity_id,
-                    name=row.entity_label,
-                    at=row.created_at,
-                    via=details.get("via"),
-                    format=details.get("format"),
-                    parameters_selected=details.get("parameters_selected"),
-                    ok=row.action == "report.run",
-                    reason=None if row.action == "report.run" else details.get("reason"),
-                )
-            )
+            recent.append(_to_run(row))
 
     succeeded = [r for r in rows if r.action == "report.run"]
     ok_by_day: Counter[str] = Counter(r.created_at[:10] for r in succeeded)

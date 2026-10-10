@@ -45,7 +45,13 @@ export type Route =
   // #/home -- everyone's own dashboard (HomePage.tsx), where an empty hash lands.
   | { view: "home" }
   | { view: "gallery" }
+  // #/templates/new[/<id>] -- the New report wizard (NewReportWizard.tsx); with an id, continuing that draft.
+  | { view: "new-report"; id?: string }
   | { view: "reports" }
+  // #/runs and #/starred -- a person's own run history and starred reports (top-bar pages, MyRunsPage /
+  // StarredPage).
+  | { view: "runs" }
+  | { view: "starred" }
   // #/reports/<id>/run -- the end-user run page (RunReportPage.tsx).
   | { view: "run"; id: string }
   // `tab` is the tab's URL slug (#/reports/<id>/history); absent means the
@@ -75,7 +81,11 @@ function parseHash(hash: string): Route {
   // Resources (folders and images) moved into the Admin console; keep the old link working.
   if (path === "resources") return { view: "admin", section: "resources" };
   if (path === "home") return { view: "home" };
+  if (path === "runs") return { view: "runs" };
+  if (path === "starred") return { view: "starred" };
   if (path === "templates") return { view: "gallery" };
+  const newReportMatch = /^templates\/new(?:\/([^/]+))?\/?$/.exec(path);
+  if (newReportMatch) return { view: "new-report", id: newReportMatch[1] && decodeURIComponent(newReportMatch[1]) };
   const docsMatch = /^docs(?:\/([^/]+)(?:\/([^/]+))?)?\/?$/.exec(path);
   if (docsMatch) {
     return {
@@ -129,8 +139,14 @@ export function useHashRoute(): [Route, (route: Route, options?: { replace?: boo
                 ? "#/schedules"
                 : next.view === "home"
                   ? "#/home"
+                  : next.view === "runs"
+                    ? "#/runs"
+                  : next.view === "starred"
+                    ? "#/starred"
                   : next.view === "gallery"
                     ? "#/templates"
+                  : next.view === "new-report"
+                    ? `#/templates/new${next.id ? `/${encodeURIComponent(next.id)}` : ""}`
                     : next.view === "docs"
                     ? `#/docs${next.slug ? `/${encodeURIComponent(next.slug)}` : ""}${next.slug && next.anchor ? `/${encodeURIComponent(next.anchor)}` : ""}`
                     : next.view === "admin"

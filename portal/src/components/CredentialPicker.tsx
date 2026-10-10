@@ -63,7 +63,7 @@ export default function CredentialPicker({
             value={value.source}
             onChange={(e) => onChange({ ...value, source: e.target.value as CredentialSource })}
           >
-            <option value="secret">A saved credential (Admin → Secrets)</option>
+            <option value="secret">A saved credential (Manage → Secrets)</option>
             <option value="env">Environment variable on the server</option>
           </select>
         </label>
@@ -114,7 +114,7 @@ export default function CredentialPicker({
           <p className="field-hint">No credentials exist yet — ask someone who manages secrets to create one.</p>
         ) : (
           <p className="field-hint">
-            Rotating or revoking it (Admin → Secrets) applies to every report or connection that names it, on their
+            Rotating or revoking it (Manage → Secrets) applies to every report or connection that names it, on their
             next run — no restart.
           </p>
         )

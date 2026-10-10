@@ -56,6 +56,8 @@ export interface ReportMeta {
   is_public: boolean;
   /** Optional code: usable in place of report_id in any /reports/{ref}/... path and in #/embed/{ref}. */
   code: string | null;
+  /** Made with the New report wizard and not published yet: only people who manage it see or run it. */
+  is_draft?: boolean;
 }
 
 export type ReportAccessLevel = "view" | "render" | "manage";
@@ -77,6 +79,8 @@ export interface AccessibleReport {
   folder_path: { id: string; name: string }[];
   /** Other folders it is listed in -- links to this report, carrying its access and no more. */
   shortcuts: { id: string; folder_path: { id: string; name: string }[] }[];
+  /** Not published yet -- only listed for people who manage it. */
+  is_draft?: boolean;
 }
 
 /** A report listed in a second folder (see api/app/db/folders.py's ReportShortcut). */
@@ -482,6 +486,9 @@ export interface AuthEvent {
   is_new_device: boolean;
   created_at: string;
   last_seen_at: string;
+  /** The session this sign-in opened (portal sign-ins only), and whether it is still signed in. */
+  session_id?: string | null;
+  session_active?: boolean;
 }
 
 export interface EffectivePermissions {
@@ -962,4 +969,40 @@ export interface TemplateFont {
   name: string;
   status: "uploaded" | "installed" | "substituted" | "missing";
   resolved_to: string | null;
+}
+
+// --- The New report wizard -- see api/app/routers/report_wizard.py -----------
+
+export type DataFieldKind = "text" | "number" | "date" | "boolean" | "list" | "object" | "empty";
+
+/** One path a template can use in a report's data: `invoices[].total_usd` (`[]` = the items of a list). */
+export interface DataField {
+  path: string;
+  kind: DataFieldKind;
+  example: string | null;
+  /** list: how many items the run returned. */
+  count: number | null;
+  depth: number;
+}
+
+/** POST /reports/data-preview -- a data source run once, unsaved. */
+export interface DataPreview {
+  data: Record<string, unknown>;
+  fields: DataField[];
+  /** The filters the source uses: the ones sent plus any it found (`:month`, `{{ month }}`). */
+  parameters: ReportParameter[];
+  elapsed_ms: number;
+  truncated: boolean;
+  /** Filters still without a test value -- nothing was fetched; ask for them and run again. */
+  missing: string[];
+}
+
+/** GET /reports/{id}/template-check -- the template compared with the report's sample data. */
+export interface TemplateCheck {
+  checked: boolean;
+  reason: string | null;
+  matched: string[];
+  unknown: { placeholder: string; suggestion: string | null }[];
+  unused: string[];
+  fields: DataField[];
 }

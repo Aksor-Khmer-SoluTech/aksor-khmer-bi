@@ -7,11 +7,14 @@ per-template rendering ("Preview"), auto-generated integration snippets
 (curl/JavaScript/Python) with the real `report_id` filled in, best-effort
 parameter detection, and batch (many-contexts-at-once) rendering.
 
-Signed-in users who hold at least one `*:manage` permission also get an
-**Admin** mode (a mode switch appears in the header): users, dynamic
-per-organization roles and permission grants, organizations, an embedded
-Swagger/OpenAPI explorer, live host resource monitoring (CPU/RAM/disk/
-threads), and a reserved Plugins page. See `src/admin/` for that half of
+Everyday pages -- Home, Reports, My runs, Starred -- are links in the top
+bar, with no sidebar. Someone with anything to manage also gets a **Manage**
+button there, which opens a sidebar grouped by job (Authoring, Scheduling,
+Data sources, People & access, Operations), showing only the pages their
+permissions allow: templates, schedules and jobs, connections and secrets,
+users, roles, organizations, an embedded Swagger/OpenAPI explorer, live host
+resource monitoring and more. See `src/admin/sections.tsx` (`manageItems`)
+for what appears for whom, and `src/admin/` for that half of
 the app — it's a client of the same `api` service's `/api/v1/{users,
 roles,organizations,grants,permissions,system}` endpoints, following the
 exact same fetch-client pattern as the template gallery (`src/api.ts`).

@@ -153,6 +153,9 @@ def test_auth_log_includes_success_and_failure(make_local_user):
 
 def test_new_device_signin_surfaces_as_notification_then_can_be_acked(make_local_user):
     _, headers = make_local_user("sess5", "pw12345", role_names=())
+    # An account's very first sign-in has nothing to compare with -- no alert. The next, from another browser, is new.
+    client.get("/api/v1/auth/verify", headers={**headers, "User-Agent": FIREFOX_LINUX})
+    assert client.get("/api/v1/users/me/notifications", headers=headers).json() == []
     headers = {**headers, "User-Agent": CHROME_WINDOWS}
     client.get("/api/v1/auth/verify", headers=headers)
 

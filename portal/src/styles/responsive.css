@@ -80,9 +80,6 @@
     width: auto;
     height: 2px;
   }
-  .resources-page {
-    padding: 20px 16px 64px;
-  }
   .resources-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;

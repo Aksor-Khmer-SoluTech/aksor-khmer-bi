@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Search, TriangleAlert, Type, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Check, FileType, Search, TriangleAlert, Type, Upload, X } from "lucide-react";
 import { api, ApiError } from "../api";
+import { useDialogRef } from "../hooks";
 import type { FontResource, InstalledFont } from "../types";
 import FontDetail from "./FontDetail";
+import ModalClose from "./ModalClose";
 import { TableSkeleton } from "./Skeletons";
 
 /** Resources > Fonts: add a font to the whole server without redeploying anything, check it before a template
@@ -13,8 +15,8 @@ export default function FontsPanel({ canManage }: { canManage: boolean }) {
   const [installed, setInstalled] = useState<InstalledFont[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [note, setNote] = useState("");
+  // The file picked with "Add font", waiting in the dialog for its (optional) source / license note.
+  const [picked, setPicked] = useState<File | null>(null);
   const [justAdded, setJustAdded] = useState<FontResource | null>(null);
   const [query, setQuery] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -25,24 +27,20 @@ export default function FontsPanel({ canManage }: { canManage: boolean }) {
   }
   useEffect(load, []);
 
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    if (fileInput.current) fileInput.current.value = "";
     if (!file) return;
-    setUploading(true);
     setError(null);
     setJustAdded(null);
-    try {
-      const added = await api.fonts.upload(file, note);
-      setJustAdded(added);
-      setNote("");
-      setSelectedId(added.id);
-      load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't add the font");
-    } finally {
-      setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
-    }
+    setPicked(file);
+  }
+
+  function onAdded(added: FontResource) {
+    setPicked(null);
+    setJustAdded(added);
+    setSelectedId(added.id);
+    load();
   }
 
   const selected = fonts?.find((f) => f.id === selectedId) ?? null;
@@ -65,10 +63,9 @@ export default function FontsPanel({ canManage }: { canManage: boolean }) {
           {canManage && (
             <div className="fonts-upload">
               <input ref={fileInput} type="file" accept=".ttf,.otf" style={{ display: "none" }} onChange={onFile} />
-              <button type="button" className="btn btn-primary" disabled={uploading} onClick={() => fileInput.current?.click()}>
-                {uploading ? <span className="spinner" /> : <Upload size={15} aria-hidden="true" />} Add font
+              <button type="button" className="btn btn-primary" onClick={() => fileInput.current?.click()}>
+                <Upload size={15} aria-hidden="true" /> Add font
               </button>
-              <input className="fonts-note" type="text" placeholder="Note: source / license approval (optional)" maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
           )}
         </div>
@@ -130,6 +127,8 @@ export default function FontsPanel({ canManage }: { canManage: boolean }) {
         )}
       </div>
 
+      <AddFontDialog file={picked} onClose={() => setPicked(null)} onAdded={onAdded} />
+
       {selected && <FontDetail font={selected} canManage={canManage} onClose={() => setSelectedId(null)} onChanged={() => { setSelectedId(null); load(); }} />}
 
       <details className="panel fonts-installed">
@@ -160,5 +159,76 @@ export function Coverage({ value }: { value: number }) {
       <span className="fonts-coverage-bar"><span style={{ width: `${Math.max(2, value)}%` }} /></span>
       <span className="mono">{value}%</span>
     </span>
+  );
+}
+
+/** Step two of "Add font": the chosen file, and a note on where it came from and who cleared its license -- kept
+ * with the font (shown in its details) so whoever looks later knows it may be used. */
+function AddFontDialog({ file, onClose, onAdded }: { file: File | null; onClose: () => void; onAdded: (font: FontResource) => void }) {
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ref = useDialogRef(file !== null, () => {
+    setNote("");
+    setError(null);
+  });
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!file) return;
+    setSaving(true);
+    setError(null);
+    try {
+      onAdded(await api.fonts.upload(file, note.trim()));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't add the font");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <dialog ref={ref} className="modal" onCancel={onClose}>
+      <ModalClose />
+      <h2 className="panel-title">Add font</h2>
+      <form onSubmit={submit} className="stack">
+        {file && (
+          <div className="fonts-picked">
+            <FileType size={20} aria-hidden="true" />
+            <div style={{ minWidth: 0 }}>
+              <div className="fonts-picked-name">{file.name}</div>
+              <div className="muted" style={{ fontSize: "0.78rem" }}>
+                {(file.size / 1024).toFixed(0)} KB · installed for the whole server, used from the next render
+              </div>
+            </div>
+          </div>
+        )}
+        <label>
+          <span>
+            Source and license <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+          </span>
+          <textarea
+            rows={2}
+            maxLength={300}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. Google Fonts, SIL Open Font License — or: bought by Finance, licence #1234"
+          />
+        </label>
+        <p className="field-hint" style={{ marginTop: -6 }}>
+          Where the font came from and who cleared its license. Some fonts can't be used freely; this note stays with
+          the font so whoever checks later knows it's allowed.
+        </p>
+        {error && <p className="alert alert-error">{error}</p>}
+        <div className="dialog-actions">
+          <button type="button" className="btn" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {saving ? <span className="spinner" /> : <Upload size={15} aria-hidden="true" />} Add font
+          </button>
+        </div>
+      </form>
+    </dialog>
   );
 }

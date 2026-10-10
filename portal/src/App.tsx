@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import AdminShell from "./admin/AdminShell";
-import { canManageTemplates, has } from "./admin/sections";
+import { canManageTemplates, has, isManageRoute, manageItems } from "./admin/sections";
 import { api, onPasswordChangeRequired, onUnauthorized } from "./api";
 import AppSidebar from "./components/AppSidebar";
 import { BATCH_RENDER_ENABLED } from "./features";
@@ -9,11 +9,15 @@ import EmbedPage from "./components/EmbedPage";
 import ForcePasswordChange from "./components/ForcePasswordChange";
 import Footer from "./components/Footer";
 import Gallery from "./components/Gallery";
+import { TourHost } from "./components/GuidedTour";
 import Login from "./components/Login";
 import ReportsPage from "./components/ReportsPage";
 import RunReportPage from "./components/RunReportPage";
 import HomePage from "./components/HomePage";
+import MyRunsPage from "./components/MyRunsPage";
+import NewReportWizard from "./components/NewReportWizard";
 import SchedulesPage from "./components/SchedulesPage";
+import StarredPage from "./components/StarredPage";
 import TemplateDetail from "./components/TemplateDetail";
 import TopBar from "./components/TopBar";
 import { useHashRoute, type Route } from "./hooks";
@@ -23,16 +27,14 @@ import { UserSettingsProvider } from "./userSettings";
 // Markdown renderer + the guides are only needed on the docs route.
 const DocsPage = lazy(() => import("./components/DocsPage"));
 
-function canAccessAdmin(auth: AuthInfo): boolean {
-  return auth.isSuperuser || auth.permissions.some((p) => p.endsWith(":manage"));
-}
-
 const SIDEBAR_COLLAPSED_KEY = "portal_sidebar_collapsed";
 
 export default function App() {
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   const [checkedSession, setCheckedSession] = useState(false);
   const [route, navigate] = useHashRoute();
+  // The everyday page you were last on, so leaving Manage takes you back there (Home if you came straight in).
+  const lastEveryday = useRef<Route>({ view: "home" });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
 
   useEffect(() => {
@@ -83,35 +85,42 @@ export default function App() {
     );
   }
 
-  const canAdmin = canAccessAdmin(auth);
+  const canOpenAdmin = manageItems(auth).some((i) => i.route.view === "admin");
   // Home -- the person's own dashboard -- is everyone's landing page, whatever else they can manage.
   // A stale #/admin/..., #/schedules or #/templates link for a since-demoted or never-privileged user
   // renders this instead: no redirect side-effect needed, just don't take that branch below.
   const home: Route = { view: "home" };
   const effectiveRoute: Route =
-    route.view === "admin" && !canAdmin
+    route.view === "admin" && !canOpenAdmin
       ? home
       : route.view === "schedules" && !has(auth, "job:view")
         ? home
-        : (route.view === "batch" && !BATCH_RENDER_ENABLED) || ((route.view === "gallery" || route.view === "batch") && !canManageTemplates(auth))
+        : (route.view === "batch" && !BATCH_RENDER_ENABLED) || ((route.view === "gallery" || route.view === "batch" || route.view === "new-report") && !canManageTemplates(auth))
             ? home
             : route;
+
+  if (!isManageRoute(effectiveRoute)) lastEveryday.current = effectiveRoute;
 
   return (
     <UserSettingsProvider>
       <div className="app-root">
         <div className="bg-texture" />
         <div className="bg-grain" />
-        <TopBar auth={auth} canAdmin={canAdmin} inAdmin={effectiveRoute.view === "admin"} navigate={navigate} />
+        <TopBar auth={auth} route={effectiveRoute} navigate={navigate} />
+        <TourHost route={effectiveRoute} />
 
         <div className="app-shell">
-          <AppSidebar
-            route={effectiveRoute}
-            navigate={navigate}
-            auth={auth}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-          />
+          {/* Only Manage pages have a sidebar; the everyday pages are all in the top bar. */}
+          {isManageRoute(effectiveRoute) && (
+            <AppSidebar
+              route={effectiveRoute}
+              backTo={lastEveryday.current}
+              navigate={navigate}
+              auth={auth}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+            />
+          )}
 
           <div className="app-main">
             <div className="app-content">
@@ -137,15 +146,16 @@ export default function App() {
                 // wants every row of a small monitor), so it trims the top pad.
                 <div className={`shell${effectiveRoute.view === "run" ? " shell-tight" : ""}`}>
                   {effectiveRoute.view === "gallery" && (
-                    <Gallery auth={auth} onOpenReport={(id) => navigate({ view: "detail", id })} />
+                    <Gallery auth={auth} onOpenReport={(id) => navigate({ view: "detail", id })} onNewReport={() => navigate({ view: "new-report" })} />
+                  )}
+                  {effectiveRoute.view === "new-report" && (
+                    <NewReportWizard auth={auth} reportId={effectiveRoute.id} navigate={navigate} />
                   )}
                   {effectiveRoute.view === "home" && (
-                    <HomePage
-                      auth={auth}
-                      canAdmin={canAdmin}
-                      navigate={navigate}
-                    />
+                    <HomePage auth={auth} navigate={navigate} />
                   )}
+                  {effectiveRoute.view === "runs" && <MyRunsPage navigate={navigate} />}
+                  {effectiveRoute.view === "starred" && <StarredPage username={auth.username} navigate={navigate} />}
                   {effectiveRoute.view === "reports" && (
                     <ReportsPage
                       username={auth.username}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ArrowDownAZ, ArrowUpAZ, Check, Copy, FileCode, FileSpreadsheet, FileText, History, Plus, Search, SearchX, X } from "lucide-react";
+import { ArrowDownAZ, ArrowUpAZ, Check, Copy, FileCode, FileSpreadsheet, FileText, History, Plus, Search, SearchX, Upload, X } from "lucide-react";
 import { api } from "../api";
 import { useCopy } from "../hooks";
 import { versionName, type AuthInfo, type ReportMeta, type TemplateExt } from "../types";
@@ -52,6 +52,7 @@ function TemplateCard({ report, index, onOpen }: { report: ReportMeta; index: nu
       <div className="card-top">
         <h3 className="card-name">{report.name}</h3>
         <span className="card-top-badges">
+          {report.is_draft && <span className="badge badge-draft">Draft</span>}
           {report.is_public && <span className="badge badge-public">Public</span>}
           <span className={`badge badge-${report.template_ext}`}>{report.template_ext}</span>
         </span>
@@ -91,6 +92,7 @@ function TemplateRow({ report, index, onOpen }: { report: ReportMeta; index: num
       <div className="list-row-main">
         <div className="list-row-title">
           <h3>{report.name}</h3>
+          {report.is_draft && <span className="badge badge-draft">Draft</span>}
           {report.is_public && <span className="badge badge-public">Public</span>}
         </div>
         <p className="list-row-desc" title={report.description || undefined} aria-hidden={report.description ? undefined : true}>
@@ -108,7 +110,7 @@ function TemplateRow({ report, index, onOpen }: { report: ReportMeta; index: num
   );
 }
 
-export default function Gallery({ auth, onOpenReport }: { auth: AuthInfo; onOpenReport: (id: string) => void }) {
+export default function Gallery({ auth, onOpenReport, onNewReport }: { auth: AuthInfo; onOpenReport: (id: string) => void; onNewReport: () => void }) {
   const [reports, setReports] = useState<ReportMeta[] | null>(null);
   const [query, setQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -286,9 +288,15 @@ export default function Gallery({ auth, onOpenReport }: { auth: AuthInfo; onOpen
               a single-line, fixed-height control at any width instead of its
               text wrapping onto a second line and making it taller than the
               segmented controls beside it. */}
-          <button type="button" className="btn btn-primary btn-register" onClick={() => setRegisterOpen(true)} data-tip="Register template" aria-label="Register template">
-            <Plus size={16} aria-hidden="true" />
+          {/* Two ways in: start from the data (the wizard designs the template against it), or register a
+              template that's already finished. */}
+          <button type="button" className="btn btn-register" onClick={() => setRegisterOpen(true)} data-tip="Register a finished template" aria-label="Register a finished template">
+            <Upload size={15} aria-hidden="true" />
             <span className="btn-register-label">Register template</span>
+          </button>
+          <button type="button" className="btn btn-primary btn-register" onClick={onNewReport} data-tip="New report — start from your data" aria-label="New report">
+            <Plus size={16} aria-hidden="true" />
+            <span className="btn-register-label">New report</span>
           </button>
         </div>
       </div>

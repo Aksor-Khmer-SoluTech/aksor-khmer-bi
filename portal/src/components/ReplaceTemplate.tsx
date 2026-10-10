@@ -24,13 +24,13 @@ function suggestLabel(current: string | null): string {
   return "1.0";
 }
 
-// What POST/PUT .../file accepts. An .html template can't be replaced in place
-// (the server only takes docx/xlsx here), so it isn't offered.
-const ACCEPT = ".docx,.xlsx";
-type Ext = "docx" | "xlsx";
+// What PUT .../file accepts. An .html replacement is checked like a new html template, against the
+// resources this report already has mapped -- one that uses an unmapped resource() is refused with that reason.
+const ACCEPT = ".docx,.xlsx,.html,.htm";
+type Ext = "docx" | "xlsx" | "html";
 const extOf = (name: string): Ext | null => {
   const lower = name.toLowerCase();
-  return lower.endsWith(".docx") ? "docx" : lower.endsWith(".xlsx") ? "xlsx" : null;
+  return lower.endsWith(".docx") ? "docx" : lower.endsWith(".xlsx") ? "xlsx" : /\.html?$/.test(lower) ? "html" : null;
 };
 
 /** Replace a template's file: choose it, say what changed, confirm. Picking a
@@ -69,12 +69,7 @@ export default function ReplaceTemplate({
   function stage(f: File) {
     setUploaded(null);
     if (extOf(f.name) === null) {
-      const html = /\.html?$/i.test(f.name);
-      setError(
-        html
-          ? "An HTML template can't replace this file — register it as a new template instead."
-          : "Only a .docx or .xlsx file can replace this template.",
-      );
+      setError("Only a .docx, .xlsx or .html file can replace this template.");
       return;
     }
     if (f.size === 0) {

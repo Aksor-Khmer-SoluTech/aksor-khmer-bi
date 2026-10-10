@@ -14,6 +14,9 @@ interface UserSettings {
    * row to save to (404) -- that isn't a failure, the value just lasts for
    * this session. */
   set: (code: string, value: unknown) => Promise<void>;
+  /** The saved settings have been fetched (or there are none to fetch) -- before this, `get` answers undefined for
+   * everything, so a "has this person already seen X" check has to wait for it. */
+  loaded: boolean;
 }
 
 const UserSettingsContext = createContext<UserSettings | null>(null);
@@ -23,6 +26,7 @@ const UserSettingsContext = createContext<UserSettings | null>(null);
  * shell, so it fetches once per sign-in and is discarded on sign-out. */
 export function UserSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [loaded, setLoaded] = useState(false);
   // `set` reads the pre-change value to roll back to; a ref keeps that
   // read current without making `set` (and so every consumer) re-created
   // on every settings change.
@@ -42,6 +46,9 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         // A break-glass login (404, no account row) or a network blip:
         // there's nothing to load, so everything stays at its default.
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -70,7 +77,7 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ get, set }), [get, set]);
+  const value = useMemo(() => ({ get, set, loaded }), [get, set, loaded]);
   return <UserSettingsContext.Provider value={value}>{children}</UserSettingsContext.Provider>;
 }
 

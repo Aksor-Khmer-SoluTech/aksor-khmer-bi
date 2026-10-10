@@ -31,6 +31,7 @@ from .routers import (
     me,
     organizations,
     protected_term_sets,
+    report_wizard,
     reports,
     roles,
     secrets,
@@ -85,7 +86,7 @@ app = FastAPI(
         "line-breaking/justify hold up regardless of field length. Swagger "
         "UI at /docs, ReDoc at /redoc. See docs/building-a-report.md."
     ),
-    version="1.0.0-beta.2",
+    version="1.0.0-beta.3",
     lifespan=_lifespan,
 )
 
@@ -108,13 +109,14 @@ if _cors_origins:
         allow_origins=_cors_origins,
         allow_credentials="*" not in _cors_origins,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "X-Aksor-Client"],
+        allow_headers=["Authorization", "Content-Type", "X-Aksor-Client", "X-Aksor-Browser"],
         # Not readable cross-origin unless exposed: the portal reads the
         # download's file name and how many files a split report has.
         expose_headers=["Content-Disposition", "X-Report-Parts", "X-Report-Part", "X-Report-Name", "X-Report-Ext"],
     )
 
 app.include_router(example_lookups.router)
+app.include_router(report_wizard.router)  # before reports: its literal paths (/drafts, /data-preview) come first
 app.include_router(reports.router)
 app.include_router(auth.router)
 app.include_router(organizations.router)

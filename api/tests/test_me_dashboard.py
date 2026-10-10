@@ -49,3 +49,21 @@ def test_a_database_user_sees_their_own_rows_by_user_id(make_local_user):
     _run(audit.Actor(username="demo", user_id="a-different-account"), "a")  # same name, other account
     body = http.get("/api/v1/me/dashboard", headers=headers).json()
     assert body["runs_30d"] == 1
+
+
+def test_my_runs_lists_only_the_callers_runs_newest_first_and_further_back(auth_headers):
+    me = http.get("/api/v1/auth/me", headers=auth_headers).json()
+    mine = audit.Actor(username=me["username"], user_id=me.get("user_id"), org_id=me.get("org_id"))
+    for i in range(12):
+        _run(mine, f"r{i}", ok=i != 11)
+    _run(audit.Actor(username="someone-else", user_id="not-me"), "theirs")
+
+    runs = http.get("/api/v1/me/runs", headers=auth_headers).json()
+    assert len(runs) == 12  # beyond the dashboard's 8
+    assert [r["report_id"] for r in runs[:2]] == ["r11", "r10"]
+    assert runs[0]["ok"] is False and runs[0]["reason"] == "boom"
+    assert "theirs" not in {r["report_id"] for r in runs}
+
+    assert len(http.get("/api/v1/me/runs?limit=3", headers=auth_headers).json()) == 3
+    assert http.get("/api/v1/me/runs?limit=500", headers=auth_headers).status_code == 422
+    assert http.get("/api/v1/me/runs").status_code == 401

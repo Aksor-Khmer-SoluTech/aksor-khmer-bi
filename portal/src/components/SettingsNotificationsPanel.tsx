@@ -29,7 +29,7 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
  * channel to speak of yet (see NotificationsMenu.tsx's own history), so
  * the only notification honest to ship is the one already fully wired
  * end to end: an in-app alert (the bell in TopBar) when app/auth_events.py
- * notices a sign-in from a device/location it's never seen for this
+ * notices a sign-in from a browser that has never signed in to this
  * account before. */
 export default function SettingsNotificationsPanel({ user, onUpdated }: { user: User; onUpdated: (u: User) => void }) {
   const [saving, setSaving] = useState(false);
@@ -55,8 +55,9 @@ export default function SettingsNotificationsPanel({ user, onUpdated }: { user: 
           <div>
             <div className="text-[0.9rem] font-medium text-text">New sign-in alerts</div>
             <p className="mt-1 mb-0 text-[0.8rem] leading-snug text-text-faint">
-              Get an alert from the bell in the top bar when this account signs in from a device or location we
-              haven't seen before. Shows up in-app only — there's no email or push channel wired up yet.
+              When this account signs in on a browser it hasn't used before, the bell in the top bar asks you —
+              on your other signed-in browsers — whether it was you. If it wasn't, one click signs that device out.
+              In the portal only; there's no email or push yet.
             </p>
           </div>
         </div>

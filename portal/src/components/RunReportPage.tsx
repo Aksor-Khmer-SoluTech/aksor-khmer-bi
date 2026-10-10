@@ -131,7 +131,16 @@ export function ParameterField({
  * including each export-menu format, goes through the authenticated /run
  * route, which re-checks the values server-side before it fetches any data;
  * nothing here is the enforcement, it just reflects it. */
-export default function RunReportPage({ reportId, onBack }: { reportId: string; onBack: () => void }) {
+export default function RunReportPage({
+  reportId,
+  onBack,
+  backLabel = "Reports",
+}: {
+  reportId: string;
+  onBack: () => void;
+  /** Where the back link goes, in a word -- "Design" when the New report wizard shows this page. */
+  backLabel?: string;
+}) {
   const [form, setForm] = useState<RunForm | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -272,9 +281,9 @@ export default function RunReportPage({ reportId, onBack }: { reportId: string; 
           The back link renders straight away; only the title waits on the
           form. */}
       <div className="page-header page-header-compact">
-        <button type="button" className="run-back" onClick={onBack} aria-label="Back to Reports">
+        <button type="button" className="run-back" onClick={onBack} aria-label={`Back to ${backLabel}`}>
           <ArrowLeft size={15} aria-hidden="true" />
-          Reports
+          {backLabel}
         </button>
         {form ? (
           <div className="page-header-text">

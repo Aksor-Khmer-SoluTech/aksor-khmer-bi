@@ -1133,6 +1133,25 @@ export default function TemplateDetail({
         <span className={`badge badge-${report.template_ext}`}>{report.template_ext}</span>
       </div>
 
+      {report.is_draft && (
+        <div className="draft-banner" role="status">
+          <span className="badge badge-draft">Draft</span>
+          <span className="draft-banner-text">Only people who manage this report can see or run it until it's published.</span>
+          <a className="btn btn-sm" href={`#/templates/new/${encodeURIComponent(report.report_id)}`}>
+            Continue setup
+          </a>
+          {has(auth, "report:manage") && (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => api.wizard.publish(report.report_id).then(setReport).catch(() => {})}
+            >
+              Publish
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="detail-layout">
         <div className="vtabs" role="tablist" aria-orientation="vertical" aria-label="Template sections" onKeyDown={onTabKeyDown}>
           {tabs.map(({ id, label, icon: Icon }) => (

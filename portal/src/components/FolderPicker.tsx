@@ -5,7 +5,7 @@ import type { Folder } from "../types";
 /** Which Resources folder a report is filed in. Shows every folder the person can see, as its full path
  * ("Finance / Q2 2026 / Drafts"), and only lets them pick the ones they may file into -- the server checks
  * the same thing again, so this just saves them an error. "Root" puts the report at the top level, outside any folder.
- * Folders themselves are created and arranged in Admin → Resources. */
+ * Folders themselves are created and arranged in Manage → Resources. */
 export default function FolderPicker({
   value,
   onChange,
@@ -71,7 +71,7 @@ export default function FolderPicker({
           {hint ??
             (nothingToPick
               ? "You don't have manage access to any folder yet, so this stays in Root. Ask an administrator."
-              : "Where this report appears in the Reports tree. Folders are created in Admin → Resources.")}
+              : "Where this report appears in the Reports tree. Folders are created in Manage → Resources.")}
         </span>
       )}
     </label>

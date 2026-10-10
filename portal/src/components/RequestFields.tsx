@@ -195,7 +195,7 @@ export default function RequestFields({
           <Cable size={14} aria-hidden="true" />
           <span>
             Authentication comes from the connection{selected ? ` — ${AUTH_LABEL[selected.auth_type]}` : ""}.
-            {canManageConnections ? " Change it under Admin → Connections." : ""}
+            {canManageConnections ? " Change it under Manage → Connections." : ""}
           </span>
         </p>
       ) : (

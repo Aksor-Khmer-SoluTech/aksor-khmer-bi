@@ -7,7 +7,7 @@ import { has } from "../sections";
 import DeploymentTermsPanel from "./DeploymentTermsPanel";
 import TermSetDialog from "./TermSetDialog";
 
-/** Admin → Protected Terms. Khmer word-breaking never splits a "protected
+/** Manage → Protected Terms. Khmer word-breaking never splits a "protected
  * term" (a brand name, a proper noun); this is where the organization keeps
  * its shared lists of them, so a report selects a set rather than every
  * author retyping the same names. Anyone who can manage reports can *see*

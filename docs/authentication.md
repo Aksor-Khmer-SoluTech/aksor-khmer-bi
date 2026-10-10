@@ -117,6 +117,7 @@ again.
 | You change your password | Every **other** session ends; this one carries on |
 | An administrator resets your password, deactivates or locks your account, or clears your 2FA | **Every** session ends |
 | An administrator changes your roles | Nothing ends; the new permissions apply on your next request |
+| You answer a new-sign-in alert with **Not me** | That session ends (see below) |
 | A refresh token is replayed | That session ends (see above) |
 | The session's lifetime runs out | You sign in again |
 
@@ -124,12 +125,31 @@ A **locked** account can't sign in at all (it used to be recorded but not enforc
 LDAP directory keeps working until their session ends or an administrator deactivates them here — the
 directory is consulted when someone signs in, not on every request.
 
+## New sign-in alerts
+
+When your account signs in on a browser that has never signed in to it before, the bell in the top bar asks you
+**Was this you?** It asks on your *other* signed-in browsers only; whoever is on the new one never sees the
+question and can't dismiss it.
+
+- **It was me** dismisses the alert.
+- **Not me — sign it out** ends that session at once. The portal then offers **Change password**, which keeps
+  whoever it was from simply signing in again, and **Review sign-in activity** (Settings → Authentication Log).
+
+A browser is recognised by a random id in a long-lived cookie (`aksor_device`, HttpOnly, sent only to `/api/v1/auth`;
+the server keeps just its SHA-256), not by its IP address or browser version. A new network or a browser update is
+not a new device, but a private window, another browser profile, or cleared cookies are. An account's very first
+sign-in raises no alert. The bell checks again every minute and whenever you return to the tab.
+
+Alerts are on by default; each person can turn them off under **Settings → Notifications**. They appear in the
+portal only: Aksor doesn't send email. Answers are recorded in the audit log (`auth.signin_confirmed`,
+`auth.signin_disowned`).
+
 ## Two-factor authentication
 
 The authenticator-app secret is stored **encrypted** (the same Fernet key as saved credentials — see
 `SECRETS_ENCRYPTION_KEY` in [Deployment](deployment.md)). Secrets saved by an older version are encrypted in place
 the next time the API starts. If the key is ever lost, those accounts can't pass the code check until an
-administrator clears their 2FA (Admin → Users → reset), and the user enrols again.
+administrator clears their 2FA (Manage → Users → reset), and the user enrols again.
 
 An account with 2FA is asked for the code at sign-in: `POST /auth/login` answers `401` with
 `{"detail": "2FA_REQUIRED"}`, and you send the same request again with `"totp_code": "123456"`.
@@ -210,7 +230,7 @@ unless you set `JWT_SECRET`. Losing either only signs people out.
 | A script injected into the page (XSS) reads the credential | The access token is only in memory and lives minutes; the refresh token is in an `HttpOnly` cookie JavaScript can't read. (XSS can still *act* as the user while the page is open, so keep untrusted HTML out of the console — React escapes what it renders) |
 | Another site makes the browser call refresh/logout (CSRF) | Those two routes need a custom header (forces a CORS preflight), an allowed `Origin`, and the cookie is `SameSite=Lax`. Every other route needs the `Authorization` header, which a foreign page can't attach |
 | A refresh cookie is stolen | Rotation: using it second revokes the session. Only its hash is stored. It is scoped to `/api/v1/auth` |
-| A leaked database | Refresh tokens are stored as SHA-256 hashes and passwords as bcrypt, so neither can be replayed or read. Authenticator-app (2FA) secrets and saved credentials are **encrypted** with `SECRETS_ENCRYPTION_KEY` (or `data/secrets/master.key`), which is not in the database — a copy of the database alone yields none of them. Back the key up with the database; lose it and users must re-enrol 2FA (an administrator clears it under Admin → Users) |
+| A leaked database | Refresh tokens are stored as SHA-256 hashes and passwords as bcrypt, so neither can be replayed or read. Authenticator-app (2FA) secrets and saved credentials are **encrypted** with `SECRETS_ENCRYPTION_KEY` (or `data/secrets/master.key`), which is not in the database — a copy of the database alone yields none of them. Back the key up with the database; lose it and users must re-enrol 2FA (an administrator clears it under Manage → Users) |
 | A forged or altered token | HS256 only — the header's `alg` is never trusted (`none` and key-confusion tricks are refused); the signature, issuer, type and expiry are all checked |
 | Someone keeps access after being removed | Every request re-checks the session and the user (active, unlocked, current roles) |
 | Password guessing | `/auth/login` (and `/auth/verify`) are throttled to `LOGIN_ATTEMPTS_PER_MINUTE` (10) per client address and user name, and 5× that per address; over it, `429` with `Retry-After`. Failed sign-ins are logged (Authentication Log; the security feed). The counters are per API process, and HTTP Basic on *other* routes is not throttled — so on an internet-facing API also set `AUTH_ALLOW_BASIC=false` and rate-limit `/auth/login` at the proxy |
@@ -230,6 +250,9 @@ can read the signing key and the encryption key).
 | `DELETE /api/v1/auth/sessions/{id}` | a token | Sign one of your sessions out |
 | `POST /api/v1/auth/sessions/revoke-others` | a token | Sign out all but this one |
 | `GET /api/v1/auth/verify` | Basic | Check a username and password (for scripts); no session |
+| `GET /api/v1/users/me/notifications` | a token | Your unanswered new-sign-in alerts (never the one about this session) |
+| `POST /api/v1/users/me/notifications/{id}/ack` | a token | "It was me" |
+| `POST /api/v1/users/me/notifications/{id}/sign-out` | a token | "Not me": signs that session out |
 
 Swagger (`/docs`): **Authorize** offers both schemes. Sign in with `/auth/login` there, then paste the
 `access_token` into *HTTPBearer*.
@@ -256,5 +279,5 @@ Swagger (`/docs`): **Authorize** offers both schemes. Sign in with `/auth/login`
 | `401 … two-factor authentication` on a script | The account has 2FA, so it can't use Basic. Use a service account, or `/auth/login` with a code |
 | `401 Username/password authentication is turned off` | `AUTH_ALLOW_BASIC=false`: sign in with `/auth/login` and use the token |
 | Everyone was signed out after a deploy | `JWT_SECRET` changed (or the key file wasn't kept). Expected once; keep it stable |
-| `401 This account is locked` | An administrator locked it: Admin → Users |
+| `401 This account is locked` | An administrator locked it: Manage → Users |
 | `429 Too many sign-in attempts` | More than `LOGIN_ATTEMPTS_PER_MINUTE` tries from one address for one user name; wait the `Retry-After` seconds |

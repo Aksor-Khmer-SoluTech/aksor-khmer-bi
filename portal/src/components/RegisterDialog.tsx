@@ -297,7 +297,7 @@ export default function RegisterDialog({
   }
 
   return (
-    <dialog ref={ref} className="modal" onCancel={onDialogCancel(onClose)}>
+    <dialog ref={ref} className="modal register-dialog" onCancel={onDialogCancel(onClose)}>
       <ModalClose />
       <h2 className="panel-title">Register a template</h2>
       <p className="panel-subtitle">
@@ -308,86 +308,95 @@ export default function RegisterDialog({
         </a>
       </p>
       <form onSubmit={handleSubmit}>
-        <label>
-          <span className="field-label-row">
-            <span>
-              Name <span className="required-mark">*</span>
+        {/* Two columns, two rows on a normal screen, so the dialog is wide and short rather than one long stack:
+            Name + Folder beside the file, then Code beside Description (their labels level, the description box
+            as tall as the code field and its hint). One column again on a narrow screen (.register-grid). */}
+        <div className="register-grid">
+          <div className="register-fields">
+            <label>
+              <span className="field-label-row">
+                <span>
+                  Name <span className="required-mark">*</span>
+                </span>
+                <span className={`char-counter${name.length >= NAME_MAX ? " char-counter-limit" : ""}`}>
+                  {name.length}/{NAME_MAX}
+                </span>
+              </span>
+              <input type="text" required maxLength={NAME_MAX} value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+
+            <FolderPicker value={folderId} onChange={setFolderId} />
+          </div>
+
+          <div className="field-block register-file">
+            <span className="field-label">
+              Template file <span className="required-mark">*</span>
             </span>
-            <span className={`char-counter${name.length >= NAME_MAX ? " char-counter-limit" : ""}`}>
-              {name.length}/{NAME_MAX}
-            </span>
-          </span>
-          <input type="text" required maxLength={NAME_MAX} value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
+            <label
+              className={`dropzone${isDragging ? " dropzone-active" : ""}`}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".docx,.xlsx,.html,.htm"
+                className="sr-only-input"
+                onChange={handleFileInput}
+              />
+              {file ? (
+                <div className="dropzone-file">
+                  <FileText size={22} strokeWidth={1.6} />
+                  <div className="dropzone-file-info">
+                    <span className="dropzone-file-name">{file.name}</span>
+                    <span className="dropzone-file-size">{formatBytes(file.size)}</span>
+                  </div>
+                  <button type="button" className="dropzone-remove" onClick={removeFile} title="Remove file">
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div className="dropzone-empty">
+                  <UploadCloud size={26} strokeWidth={1.5} />
+                  <p className="dropzone-title">Drag & drop your template here</p>
+                  <p className="dropzone-sub">or click to browse</p>
+                  <div className="dropzone-exts">
+                    <span className="badge badge-docx">docx</span>
+                    <span className="badge badge-xlsx">xlsx</span>
+                    <span className="badge badge-html">html</span>
+                  </div>
+                </div>
+              )}
+            </label>
+          </div>
 
-        <FolderPicker value={folderId} onChange={setFolderId} />
-
-        <ReportCodeField
-          value={code}
-          onChange={(v) => {
-            setCode(v);
-            setCodeError(null);
-          }}
-          suggestion={suggestCode(name)}
-          serverError={codeError}
-        />
-
-        <label>
-          <span className="field-label-row">
-            <span>Description</span>
-            <span className={`char-counter${description.length >= DESCRIPTION_MAX ? " char-counter-limit" : ""}`}>
-              {description.length}/{DESCRIPTION_MAX}
-            </span>
-          </span>
-          <textarea
-            rows={3}
-            maxLength={DESCRIPTION_MAX}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-
-        <div className="field-block">
-          <span className="field-label">
-            Template file <span className="required-mark">*</span>
-          </span>
-          <label
-            className={`dropzone${isDragging ? " dropzone-active" : ""}`}
-            onDragEnter={handleDragEnter}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".docx,.xlsx,.html,.htm"
-              className="sr-only-input"
-              onChange={handleFileInput}
+          <div className="register-code">
+            <ReportCodeField
+              value={code}
+              onChange={(v) => {
+                setCode(v);
+                setCodeError(null);
+              }}
+              suggestion={suggestCode(name)}
+              serverError={codeError}
             />
-            {file ? (
-              <div className="dropzone-file">
-                <FileText size={22} strokeWidth={1.6} />
-                <div className="dropzone-file-info">
-                  <span className="dropzone-file-name">{file.name}</span>
-                  <span className="dropzone-file-size">{formatBytes(file.size)}</span>
-                </div>
-                <button type="button" className="dropzone-remove" onClick={removeFile} title="Remove file">
-                  <X size={14} />
-                </button>
-              </div>
-            ) : (
-              <div className="dropzone-empty">
-                <UploadCloud size={26} strokeWidth={1.5} />
-                <p className="dropzone-title">Drag & drop your template here</p>
-                <p className="dropzone-sub">or click to browse</p>
-                <div className="dropzone-exts">
-                  <span className="badge badge-docx">docx</span>
-                  <span className="badge badge-xlsx">xlsx</span>
-                  <span className="badge badge-html">html</span>
-                </div>
-              </div>
-            )}
+          </div>
+
+          <label className="register-description">
+            <span className="field-label-row">
+              <span>Description</span>
+              <span className={`char-counter${description.length >= DESCRIPTION_MAX ? " char-counter-limit" : ""}`}>
+                {description.length}/{DESCRIPTION_MAX}
+              </span>
+            </span>
+            <textarea
+              rows={4}
+              maxLength={DESCRIPTION_MAX}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </label>
         </div>
 

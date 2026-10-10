@@ -82,3 +82,7 @@ class AuthEventOut(BaseModel):
     is_new_device: bool
     created_at: str
     last_seen_at: str
+    session_id: str | None = Field(None, description="The sign-in session this sign-in opened (portal sign-ins only)")
+    session_active: bool = Field(
+        False, description="That session is still signed in -- so a new-device alert can offer to sign it out"
+    )

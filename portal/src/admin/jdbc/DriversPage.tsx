@@ -20,6 +20,7 @@ export default function DriversPage({ auth }: { auth: AuthInfo }) {
   const [engines, setEngines] = useState<JdbcEngine[] | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [orgFilter, setOrgFilter] = useState("");
+  const [query, setQuery] = useState("");
   const [drivers, setDrivers] = useState<JdbcDriver[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -44,6 +45,13 @@ export default function DriversPage({ auth }: { auth: AuthInfo }) {
   useEffect(load, [orgFilter]);
 
   const labels = useMemo(() => Object.fromEntries((engines ?? []).map((e) => [e.id, e.label])), [engines]);
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || !drivers) return drivers;
+    return drivers.filter((d) =>
+      [d.name, d.filename, d.driver_class, labels[d.engine] ?? d.engine].some((v) => v.toLowerCase().includes(q)),
+    );
+  }, [drivers, query, labels]);
 
   async function download(d: JdbcDriver) {
     setActionError(null);
@@ -89,16 +97,22 @@ export default function DriversPage({ auth }: { auth: AuthInfo }) {
         )}
       </div>
 
-      {auth.isSuperuser && organizations.length > 1 && (
+      {/* Kept while an organization filter is on, even with nothing in that organization -- it's the way back. */}
+      {drivers !== null && (drivers.length > 0 || orgFilter !== "") && (
         <div className="gallery-toolbar">
-          <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)} style={{ maxWidth: 220 }}>
-            <option value="">All organizations</option>
-            {organizations.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
+          <div className="search">
+            <input type="text" placeholder="Search drivers…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          {auth.isSuperuser && organizations.length > 1 && (
+            <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)} style={{ maxWidth: 220 }}>
+              <option value="">All organizations</option>
+              {organizations.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       )}
 
@@ -126,7 +140,13 @@ export default function DriversPage({ auth }: { auth: AuthInfo }) {
         </div>
       )}
 
-      {drivers !== null && drivers.length > 0 && (
+      {shown !== null && drivers !== null && drivers.length > 0 && shown.length === 0 && (
+        <div className="empty-state">
+          <p>No drivers match that search.</p>
+        </div>
+      )}
+
+      {shown !== null && shown.length > 0 && (
         <table className="data-table">
           <thead>
             <tr>
@@ -139,7 +159,7 @@ export default function DriversPage({ auth }: { auth: AuthInfo }) {
             </tr>
           </thead>
           <tbody>
-            {drivers.map((d) => (
+            {shown.map((d) => (
               <tr key={d.id}>
                 <td>
                   <span className="jdbc-driver-name">
