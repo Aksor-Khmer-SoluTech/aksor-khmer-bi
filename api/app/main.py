@@ -86,7 +86,7 @@ app = FastAPI(
         "line-breaking/justify hold up regardless of field length. Swagger "
         "UI at /docs, ReDoc at /redoc. See docs/building-a-report.md."
     ),
-    version="1.0.0-beta.3",
+    version="1.0.0-beta.4",
     lifespan=_lifespan,
 )
 

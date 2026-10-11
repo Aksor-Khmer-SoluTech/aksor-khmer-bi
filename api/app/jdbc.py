@@ -828,7 +828,8 @@ def worker_settings() -> tuple[str, str]:
     return url, token
 
 
-def _run_via_worker(conn: dict, sql: str, params: dict[str, str], root_key: str) -> dict:
+def _worker_post(conn: dict, statements: list[tuple[str, list]]) -> httpx.Response:
+    """Send one request to the jdbc-worker: one statement as `sql`/`args`, several as `queries`."""
     url, token = worker_settings()
     if not url or not token:
         _log.error("A JDBC driver upload was used but JDBC_WORKER_URL / JDBC_WORKER_TOKEN aren't set")
@@ -837,41 +838,80 @@ def _run_via_worker(conn: dict, sql: str, params: dict[str, str], root_key: str)
             "Choose the built-in driver if the engine has one, or ask whoever runs the server to enable it"
         )
     driver = conn["driver"]
-    compiled, args = compile_query(sql, "qmark", params)
-    payload = {
+    payload: dict[str, Any] = {
         "driver_file": driver["file"],
         "driver_sha256": driver["sha256"],
         "driver_class": driver["class_name"],
         "jdbc_url": conn["jdbc_url"],
         "username": conn["username"],
         "password": conn["password"],
-        "sql": compiled,
-        "args": args,
         "timeout_seconds": TIMEOUT_SECONDS,
         "max_rows": MAX_ROWS,
     }
+    if len(statements) == 1:
+        payload.update(sql=statements[0][0], args=statements[0][1])
+    else:
+        payload["queries"] = [{"sql": sql, "args": args} for sql, args in statements]
     try:
-        response = httpx.post(f"{url}/query", json=payload, headers={"X-Worker-Token": token}, timeout=TIMEOUT_SECONDS + 20)
+        return httpx.post(
+            f"{url}/query", json=payload, headers={"X-Worker-Token": token}, timeout=TIMEOUT_SECONDS * len(statements) + 20
+        )
     except httpx.HTTPError as exc:
         _log.error("JDBC worker unreachable: %s", exc)
         raise DataSourceError("Couldn't reach the JDBC driver service -- ask whoever runs the server") from exc
+
+
+def _worker_error(response: httpx.Response) -> tuple[DataSourceError, int | None]:
+    """The worker's failure as a message safe to show, and which statement of a batch it was (if it says)."""
+    # The worker's message is already safe, but it can still name hosts: log it, say less.
+    _log.warning("JDBC worker answered HTTP %s: %s", response.status_code, response.text[:500])
+    body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+    kind = body.get("kind") if isinstance(body, dict) else None
+    index = body.get("index") if isinstance(body, dict) and isinstance(body.get("index"), int) else None
+    if kind == "too_many_rows":
+        error = DataSourceError(f"The report's query returned more than {MAX_ROWS:,} rows -- narrow it with a filter or a LIMIT")
+    elif kind == "connect":
+        error = DataSourceError("Couldn't connect to the report's database. Tell whoever runs the server.")
+    elif kind == "timeout":
+        error = DataSourceError("The report's query took too long and was stopped")
+    elif kind == "driver":
+        error = DataSourceError("The report's database driver can't be loaded -- ask whoever manages connections")
+    else:
+        error = DataSourceError("The report's database rejected the query")
+    return error, index
+
+
+def _run_via_worker(conn: dict, sql: str, params: dict[str, str], root_key: str) -> dict:
+    compiled, args = compile_query(sql, "qmark", params)
+    response = _worker_post(conn, [(compiled, args)])
     if response.status_code != 200:
-        # The worker's message is already safe, but it can still name hosts: log it, say less.
-        _log.warning("JDBC worker answered HTTP %s: %s", response.status_code, response.text[:500])
-        kind = response.json().get("kind") if response.headers.get("content-type", "").startswith("application/json") else None
-        if kind == "too_many_rows":
-            raise DataSourceError(f"The report's query returned more than {MAX_ROWS:,} rows -- narrow it with a filter or a LIMIT")
-        if kind == "connect":
-            raise DataSourceError("Couldn't connect to the report's database. Tell whoever runs the server.")
-        if kind == "timeout":
-            raise DataSourceError("The report's query took too long and was stopped")
-        if kind == "driver":
-            raise DataSourceError("The report's database driver can't be loaded -- ask whoever manages connections")
-        raise DataSourceError("The report's database rejected the query")
+        raise _worker_error(response)[0]
     if len(response.content) > MAX_RESULT_BYTES:
         raise DataSourceError("The report's query result is too large")
     body = response.json()
     return _rows_to_data(body["columns"], body["rows"], root_key)
+
+
+def run_batch_via_worker(conn: dict, queries: list[tuple[str, str]], params: dict[str, str]) -> dict[str, list[dict]]:
+    """Several queries of one report on an uploaded driver: one worker request -- one JVM, one connection, run in
+    order -- instead of a JVM each. Returns {name: rows}. A failing query is named in the error. A worker from
+    before batches existed answers 422; then each query is sent on its own, as before."""
+    conn = {**conn, "jdbc_url": resolved_url(conn)}
+    assert_resolves_safely(conn["host"])
+    statements = [compile_query(sql, "qmark", params) for _, sql in queries]
+    response = _worker_post(conn, statements)
+    if response.status_code == 422:
+        _log.warning("The JDBC worker doesn't take several queries per request (an older image?); sending them one by one")
+        return {name: _run_via_worker(conn, sql, params, name)[name] for name, sql in queries}
+    if response.status_code != 200:
+        error, index = _worker_error(response)
+        if index is not None and 0 <= index < len(queries):
+            raise DataSourceError(f"The query {queries[index][0]!r}: {error}") from None
+        raise error
+    if len(response.content) > MAX_RESULT_BYTES:
+        raise DataSourceError("The report's query results are too large")
+    results = response.json()["results"]
+    return {name: _rows_to_data(r["columns"], r["rows"], name)[name] for (name, _), r in zip(queries, results)}
 
 
 def resolved_url(conn: dict) -> str:

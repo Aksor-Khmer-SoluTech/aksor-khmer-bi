@@ -2,27 +2,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { TableSkeleton } from "../../components/Skeletons";
-import type { Job, JobRun, TriggerType } from "../../types";
+import type { Job, JobRun } from "../../types";
+import JobFields, { draftFromJob, draftToBody, type JobDraft } from "./JobFields";
 
 type Tab = "settings" | "runs";
-
-function isoToDatetimeLocal(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function isoToDateInput(iso: string | null): string {
-  return iso ? iso.slice(0, 10) : "";
-}
-
-function toStartIso(date: string): string | null {
-  return date ? `${date}T00:00:00Z` : null;
-}
-function toEndIso(date: string): string | null {
-  return date ? `${date}T23:59:59Z` : null;
-}
 
 export default function JobDetailPanel({
   job,
@@ -37,16 +20,8 @@ export default function JobDetailPanel({
 
   const [name, setName] = useState(job.name);
   const [description, setDescription] = useState(job.description ?? "");
-  const [configText, setConfigText] = useState(JSON.stringify(job.config, null, 2));
-  const [triggerType, setTriggerType] = useState<TriggerType>(job.trigger_type);
-  const [cronExpression, setCronExpression] = useState(job.cron_expression ?? "0 * * * *");
-  const [intervalSeconds, setIntervalSeconds] = useState(job.interval_seconds ?? 3600);
-  const [runAt, setRunAt] = useState(isoToDatetimeLocal(job.run_at));
-  const [startDate, setStartDate] = useState(isoToDateInput(job.start_date));
-  const [endDate, setEndDate] = useState(isoToDateInput(job.end_date));
   const [isEnabled, setIsEnabled] = useState(job.is_enabled);
-  const [maxRetries, setMaxRetries] = useState(job.max_retries);
-  const [retryBackoffSeconds, setRetryBackoffSeconds] = useState(job.retry_backoff_seconds);
+  const [draft, setDraft] = useState<JobDraft>(() => draftFromJob(job));
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -71,11 +46,9 @@ export default function JobDetailPanel({
     setSettingsError(null);
     setSettingsSaved(false);
 
-    let config: Record<string, unknown>;
-    try {
-      config = JSON.parse(configText);
-    } catch {
-      setSettingsError("Config must be valid JSON");
+    const body = draftToBody(draft);
+    if ("error" in body) {
+      setSettingsError(body.error);
       return;
     }
 
@@ -84,16 +57,8 @@ export default function JobDetailPanel({
       const updated = await api.jobs.update(job.id, {
         name,
         description: description || null,
-        config,
-        trigger_type: triggerType,
-        cron_expression: triggerType === "cron" ? cronExpression : null,
-        interval_seconds: triggerType === "interval" ? intervalSeconds : null,
-        run_at: triggerType === "one_off" && runAt ? new Date(runAt).toISOString() : null,
-        start_date: toStartIso(startDate),
-        end_date: toEndIso(endDate),
         is_enabled: isEnabled,
-        max_retries: maxRetries,
-        retry_backoff_seconds: retryBackoffSeconds,
+        ...body,
       });
       onUpdated(updated);
       setSettingsSaved(true);
@@ -152,72 +117,7 @@ export default function JobDetailPanel({
             </label>
           </div>
 
-          <label>
-            <span>Config (JSON)</span>
-            <textarea className="mono-input" value={configText} onChange={(e) => setConfigText(e.target.value)} spellCheck={false} />
-          </label>
-
-          <div className="row">
-            <label>
-              <span>Trigger</span>
-              <select value={triggerType} onChange={(e) => setTriggerType(e.target.value as TriggerType)}>
-                <option value="cron">Cron schedule</option>
-                <option value="interval">Fixed interval</option>
-                <option value="one_off">One-off</option>
-              </select>
-            </label>
-            {triggerType === "cron" && (
-              <label>
-                <span>Cron expression</span>
-                <input type="text" required value={cronExpression} onChange={(e) => setCronExpression(e.target.value)} className="mono" />
-              </label>
-            )}
-            {triggerType === "interval" && (
-              <label>
-                <span>Interval (seconds)</span>
-                <input
-                  type="number"
-                  required
-                  min={1}
-                  value={intervalSeconds}
-                  onChange={(e) => setIntervalSeconds(Number(e.target.value))}
-                />
-              </label>
-            )}
-            {triggerType === "one_off" && (
-              <label>
-                <span>Run at</span>
-                <input type="datetime-local" required value={runAt} onChange={(e) => setRunAt(e.target.value)} />
-              </label>
-            )}
-          </div>
-
-          <div className="row">
-            <label>
-              <span>Valid from</span>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </label>
-            <label>
-              <span>Valid until</span>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </label>
-          </div>
-
-          <div className="row">
-            <label>
-              <span>Max retries</span>
-              <input type="number" min={0} value={maxRetries} onChange={(e) => setMaxRetries(Number(e.target.value))} />
-            </label>
-            <label>
-              <span>Retry backoff (seconds)</span>
-              <input
-                type="number"
-                min={0}
-                value={retryBackoffSeconds}
-                onChange={(e) => setRetryBackoffSeconds(Number(e.target.value))}
-              />
-            </label>
-          </div>
+          <JobFields draft={draft} onChange={setDraft} canChangeType={false} />
 
           <label className="checkbox-label">
             <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} /> Enabled

@@ -14,14 +14,14 @@ from __future__ import annotations
 import copy
 from datetime import datetime, timezone
 
-from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 
-from .. import audit, db
+from .. import audit, db, report_data, report_store
 from ..auth import ensure_org_scope, require_permission
 from ..celery_app import celery_app
-from ..models import JobCreate, JobOut, JobRunOut, JobsSummary, JobUpdate
+from ..cron import cron_trigger
+from ..models import JobCreate, JobOut, JobRunOut, JobsSummary, JobUpdate, SchedulePreview, SchedulePreviewRequest
 from ..rbac import AuthContext
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
@@ -95,7 +95,7 @@ def _validate_trigger_fields(trigger_type: str, cron_expression, interval_second
         if not cron_expression:
             raise HTTPException(status_code=400, detail="trigger_type='cron' requires cron_expression")
         try:
-            CronTrigger.from_crontab(cron_expression)
+            cron_trigger(cron_expression)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid cron_expression: {exc}") from exc
     elif trigger_type == "interval":
@@ -110,6 +110,65 @@ def _validate_trigger_fields(trigger_type: str, cron_expression, interval_second
             raise HTTPException(status_code=400, detail=f"Invalid run_at: {exc}") from exc
 
 
+def _renders_report(job_type: str, config: dict) -> bool:
+    return job_type == "render_report" or (job_type == "file_output" and config.get("source") == "render_report")
+
+
+def _check_report_config(context: AuthContext, org_id: str, job_type: str, config: dict) -> None:
+    """A job that renders a report runs it later, unattended, with no one's grants in force -- so it may only do what
+    its creator could do now: run that report (in the job's organization), in a format it has, with filter values
+    their grants allow. Checked on every save of the config; the executor then trusts the stored values."""
+    if not _renders_report(job_type, config):
+        return
+    from . import reports  # the run page's own checks, so a job can never be allowed more than a person
+
+    report_id = config.get("report_id")
+    if not report_id or not isinstance(report_id, str):
+        raise HTTPException(status_code=400, detail="Choose the report to run")
+    try:
+        report_id = report_store.resolve_ref(report_id)
+    except report_store.ReportNotFoundError:
+        raise HTTPException(status_code=404, detail="Report not found") from None
+    meta, _level, definitions, limits = reports._authorize_run(report_id, context)
+    if meta["org_id"] != org_id:
+        raise HTTPException(status_code=400, detail="That report belongs to another organization than the job")
+    allowed = reports._ALLOWED_FORMATS[meta["template_ext"]]
+    if config.get("format") not in allowed:
+        raise HTTPException(status_code=400, detail=f"This report gives {', '.join(sorted(allowed))}, not {config.get('format')!r}")
+    if job_type == "render_report" and not config.get("destination_path"):
+        raise HTTPException(status_code=400, detail="Say where to save the file (destination_path)")
+    if "parameters" in config:
+        if not isinstance(config["parameters"], dict) or not all(isinstance(v, str) for v in config["parameters"].values()):
+            raise HTTPException(status_code=400, detail="parameters must map each filter's name to a text value")
+        try:
+            report_data.resolve_run_parameters(definitions, limits, config["parameters"])
+        except report_data.ParameterError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.post(
+    "/schedule-preview",
+    summary="When a cron schedule would fire next -- the scheduler's own reading of it, in its time zone",
+    response_model=SchedulePreview,
+)
+def preview_schedule(body: SchedulePreviewRequest, context: AuthContext = Depends(require_permission("job:view"))) -> SchedulePreview:  # noqa: ARG001
+    try:
+        trigger = cron_trigger(body.cron_expression, body.start_date, body.end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid cron_expression: {exc}") from exc
+    runs: list[str] = []
+    previous = None
+    now = datetime.now(trigger.timezone)
+    while len(runs) < body.count:
+        fire = trigger.get_next_fire_time(previous, previous or now)
+        if fire is None:
+            break
+        runs.append(fire.isoformat())
+        previous = fire
+        now = fire
+    return SchedulePreview(timezone=str(trigger.timezone), next_runs=runs)
+
+
 @router.post("", summary="Create a scheduled job", response_model=JobOut)
 def create_job(
     body: JobCreate,
@@ -119,6 +178,7 @@ def create_job(
 ) -> JobOut:
     ensure_org_scope(context, org_id)
     _validate_trigger_fields(body.trigger_type, body.cron_expression, body.interval_seconds, body.run_at)
+    _check_report_config(context, org_id, body.job_type, body.config)
 
     now = _now_iso()
     with db.SessionLocal() as session:
@@ -252,6 +312,8 @@ def update_job(
                 setattr(row, field, value)
 
         _validate_trigger_fields(row.trigger_type, row.cron_expression, row.interval_seconds, row.run_at)
+        if body.config is not None:
+            _check_report_config(context, row.org_id, row.job_type, row.config)
         row.updated_at = _now_iso()
         session.commit()
         changes = audit.diff(before, _snapshot(row), list(_AUDITED_FIELDS))

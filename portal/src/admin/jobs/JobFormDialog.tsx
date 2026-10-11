@@ -1,46 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../../api";
 import { useDialogRef } from "../../hooks";
-import type { Job, JobType, Organization, TriggerType } from "../../types";
+import type { Job, Organization } from "../../types";
 
 import ModalClose from "../../components/ModalClose";
-const CONFIG_PLACEHOLDERS: Record<JobType, object> = {
-  render_report: {
-    report_id: "",
-    format: "pdf",
-    context: {},
-    destination_path: "/data/output/{job_id}-{timestamp}.pdf",
-  },
-  rest_call: {
-    url: "https://example.com/webhook",
-    method: "POST",
-    headers: {},
-    body_template: {},
-    context: {},
-    auth: null,
-  },
-  soap_call: {
-    wsdl_url: "https://example.com/service?wsdl",
-    operation: "DoSomething",
-    params: {},
-    auth: null,
-  },
-  file_output: {
-    destination_path: "/data/output/{job_id}-{timestamp}.txt",
-    source: "static",
-    content: "",
-  },
-};
-
-/** Bare <input type="date"> values are pinned to a full-day ISO instant —
- * see UserDetailPanel.tsx's toExpiresAt for why a bare date can't be
- * compared directly against a timestamp. */
-function toStartIso(date: string): string | null {
-  return date ? `${date}T00:00:00Z` : null;
-}
-function toEndIso(date: string): string | null {
-  return date ? `${date}T23:59:59Z` : null;
-}
+import JobFields, { draftToBody, newDraft, type JobDraft } from "./JobFields";
 
 export default function JobFormDialog({
   open,
@@ -60,17 +24,10 @@ export default function JobFormDialog({
   const [orgId, setOrgId] = useState(defaultOrgId);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [jobType, setJobType] = useState<JobType>("render_report");
-  const [configText, setConfigText] = useState(JSON.stringify(CONFIG_PLACEHOLDERS.render_report, null, 2));
-  const [triggerType, setTriggerType] = useState<TriggerType>("cron");
-  const [cronExpression, setCronExpression] = useState("0 * * * *");
-  const [intervalSeconds, setIntervalSeconds] = useState(3600);
-  const [runAt, setRunAt] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
   const [isEnabled, setIsEnabled] = useState(true);
-  const [maxRetries, setMaxRetries] = useState(3);
-  const [retryBackoffSeconds, setRetryBackoffSeconds] = useState(60);
+  const [draft, setDraft] = useState<JobDraft>(newDraft);
+  // Remounts the fields on each open, so the schedule picker re-reads its fresh expression.
+  const [generation, setGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -78,53 +35,28 @@ export default function JobFormDialog({
     setOrgId(defaultOrgId);
     setName("");
     setDescription("");
-    setJobType("render_report");
-    setConfigText(JSON.stringify(CONFIG_PLACEHOLDERS.render_report, null, 2));
-    setTriggerType("cron");
-    setCronExpression("0 * * * *");
-    setIntervalSeconds(3600);
-    setRunAt("");
-    setStartDate("");
-    setEndDate("");
     setIsEnabled(true);
-    setMaxRetries(3);
-    setRetryBackoffSeconds(60);
+    setDraft(newDraft());
+    setGeneration((g) => g + 1);
     setError(null);
   });
-
-  function changeJobType(next: JobType) {
-    setJobType(next);
-    setConfigText(JSON.stringify(CONFIG_PLACEHOLDERS[next], null, 2));
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-
-    let config: Record<string, unknown>;
-    try {
-      config = JSON.parse(configText);
-    } catch {
-      setError("Config must be valid JSON");
+    const body = draftToBody(draft);
+    if ("error" in body) {
+      setError(body.error);
       return;
     }
-
     setPending(true);
     try {
       const job = await api.jobs.create(orgId, {
         name,
         description: description || null,
-        job_type: jobType,
-        config,
-        trigger_type: triggerType,
-        cron_expression: triggerType === "cron" ? cronExpression : null,
-        interval_seconds: triggerType === "interval" ? intervalSeconds : null,
-        run_at: triggerType === "one_off" && runAt ? new Date(runAt).toISOString() : null,
-        start_date: toStartIso(startDate),
-        end_date: toEndIso(endDate),
+        job_type: draft.jobType,
         is_enabled: isEnabled,
-        max_retries: maxRetries,
-        retry_backoff_seconds: retryBackoffSeconds,
+        ...body,
       });
       onCreated(job);
       onClose();
@@ -136,120 +68,45 @@ export default function JobFormDialog({
   }
 
   return (
-    <dialog ref={ref} className="modal" onCancel={onClose}>
+    <dialog ref={ref} className="modal modal-wide" onCancel={onClose}>
       <ModalClose />
       <h2 className="panel-title">New job</h2>
-      <p className="panel-subtitle">Runs by schedule, or on demand from its detail panel or the API.</p>
-      <form onSubmit={handleSubmit}>
-        <div className="row">
+      <p className="panel-subtitle">Runs on its schedule — or any time from its panel, or the API.</p>
+      <form onSubmit={handleSubmit} className="mt-4">
+        <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
           <label>
-            <span>Name</span>
-            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} />
+            <span>
+              Name <span className="required-mark" aria-hidden="true">*</span>
+            </span>
+            <input type="text" required maxLength={200} value={name} placeholder="Daily sales to finance" onChange={(e) => setName(e.target.value)} />
           </label>
-          <label>
-            <span>Description</span>
+          {isSuperuser ? (
+            <label>
+              <span>Organization</span>
+              <select value={orgId} onChange={(e) => setOrgId(e.target.value)}>
+                {organizations.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span className="hidden sm:block" />
+          )}
+          <label className="sm:col-span-2">
+            <span>
+              Description <span className="run-field-optional">(optional)</span>
+            </span>
             <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} />
           </label>
         </div>
 
-        {isSuperuser && (
-          <label>
-            <span>Organization</span>
-            <select value={orgId} onChange={(e) => setOrgId(e.target.value)}>
-              {organizations.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        <label>
-          <span>Job type</span>
-          <select value={jobType} onChange={(e) => changeJobType(e.target.value as JobType)}>
-            <option value="render_report">Render report</option>
-            <option value="rest_call">REST call</option>
-            <option value="soap_call">SOAP call</option>
-            <option value="file_output">File output</option>
-          </select>
-        </label>
-
-        <label>
-          <span>Config (JSON)</span>
-          <textarea className="mono-input" value={configText} onChange={(e) => setConfigText(e.target.value)} spellCheck={false} />
-          <p className="field-hint">
-            {"{job_id}"} and {"{timestamp}"} are substituted in destination_path so repeated firings don't overwrite each other.
-          </p>
-        </label>
-
-        <div className="row">
-          <label>
-            <span>Trigger</span>
-            <select value={triggerType} onChange={(e) => setTriggerType(e.target.value as TriggerType)}>
-              <option value="cron">Cron schedule</option>
-              <option value="interval">Fixed interval</option>
-              <option value="one_off">One-off, at a specific time</option>
-            </select>
-          </label>
-          {triggerType === "cron" && (
-            <label>
-              <span>Cron expression</span>
-              <input type="text" required value={cronExpression} onChange={(e) => setCronExpression(e.target.value)} className="mono" />
-            </label>
-          )}
-          {triggerType === "interval" && (
-            <label>
-              <span>Interval (seconds)</span>
-              <input
-                type="number"
-                required
-                min={1}
-                value={intervalSeconds}
-                onChange={(e) => setIntervalSeconds(Number(e.target.value))}
-              />
-            </label>
-          )}
-          {triggerType === "one_off" && (
-            <label>
-              <span>Run at</span>
-              <input type="datetime-local" required value={runAt} onChange={(e) => setRunAt(e.target.value)} />
-            </label>
-          )}
-        </div>
-        {triggerType === "cron" && (
-          <p className="field-hint">5-field crontab: minute hour day-of-month month day-of-week. "0 * * * *" = every hour.</p>
-        )}
-
-        <div className="row">
-          <label>
-            <span>Valid from (optional)</span>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </label>
-          <label>
-            <span>Valid until (optional)</span>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </label>
-        </div>
-
-        <div className="row">
-          <label>
-            <span>Max retries</span>
-            <input type="number" min={0} value={maxRetries} onChange={(e) => setMaxRetries(Number(e.target.value))} />
-          </label>
-          <label>
-            <span>Retry backoff (seconds)</span>
-            <input
-              type="number"
-              min={0}
-              value={retryBackoffSeconds}
-              onChange={(e) => setRetryBackoffSeconds(Number(e.target.value))}
-            />
-          </label>
-        </div>
+        <JobFields key={generation} draft={draft} onChange={setDraft} canChangeType />
 
         <label className="checkbox-label">
-          <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} /> Enabled
+          <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} /> Turn it on now (otherwise it waits until
+          you enable it)
         </label>
 
         {error && <p className="alert alert-error">{error}</p>}

@@ -126,6 +126,7 @@ def verify_totp_code(secret: str, code: str, last_used_step: int | None) -> int 
     for step in range(current_step - _WINDOW_STEPS, current_step + _WINDOW_STEPS + 1):
         if last_used_step is not None and step <= last_used_step:
             continue
-        if hmac.compare_digest(totp.at(step * _STEP_SECONDS), code):
+        # Bytes, so a code typed in Khmer digits (or anything non-ASCII) is just wrong instead of a TypeError.
+        if hmac.compare_digest(totp.at(step * _STEP_SECONDS).encode(), code.encode()):
             return step
     return None

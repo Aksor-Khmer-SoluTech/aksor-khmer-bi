@@ -1280,6 +1280,7 @@ def get_run_form(report_id: str, context: AuthContext = Depends(get_current_user
         "template_ext": meta["template_ext"],
         "access_level": level,
         "formats": [f for f in _ORDERED_FORMATS if f in allowed],
+        "has_data_source": bool(meta.get("data_source")),
         "parameters": [
             {
                 "name": d["name"],

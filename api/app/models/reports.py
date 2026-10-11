@@ -150,6 +150,18 @@ class ReportParameter(BaseModel):
     options_source: OptionsSource | None = None
 
 
+class DataSourceQuery(BaseModel):
+    """One query of a database source with several: its rows go under `name` in the data the template gets."""
+
+    name: str = Field(..., description="The key its result is under -- letters, digits and underscores, e.g. rows, info")
+    shape: Literal["list", "object", "value"] = Field(
+        "list",
+        description="list: every row, as a list (none is []); object: the one row it returns, as an object; value: that "
+        "row's first column. For the last two, no row is null and more than one fails the run.",
+    )
+    query: str = Field(..., description="One SELECT (or WITH ... SELECT); `:name` binds a filter parameter's value")
+
+
 class DataSource(BaseModel):
     """Where the server gets a report's data when a user runs it, by `type`:
 
@@ -175,6 +187,11 @@ class DataSource(BaseModel):
     auth: DataSourceAuth | None = Field(None, description="Not allowed with a connection: authentication comes from the connection")
     query: str | None = Field(None, description="jdbc: one SELECT (or WITH ... SELECT); `:name` binds a filter parameter's value")
     root_key: str | None = Field(None, description="jdbc: the key the rows are returned under for the template to loop over (default rows)")
+    queries: list[DataSourceQuery] | None = Field(
+        None,
+        description="jdbc, instead of `query`/`root_key`: several queries on the connection, run at the same time and merged "
+        "into one object, each result under its own name -- e.g. {rows: [...], info: {...}}. Every name is always present.",
+    )
     typed_binding: bool = Field(
         False,
         description="jdbc: hand a built-in driver each filter as its declared type (a real date or number) instead of text, "
@@ -220,6 +237,7 @@ class RunForm(BaseModel):
     access_level: Literal["render", "manage"]
     formats: list[str]
     parameters: list[RunFormParameter]
+    has_data_source: bool = Field(False, description="Whether running it fetches data (a scheduled job's form needs to know)")
 
 
 class RunRequest(BaseModel):

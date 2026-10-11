@@ -23,7 +23,7 @@ filtered anything.
 
 Data source config shape (`Report.data_source`):
 
-  {"type": "rest",                       # the only kind today; a JDBC one would slot in beside it
+  {"type": "rest",
    "connection": "erp" | None,           # a named connection (app/connections.py): its base URL,
                                          # headers and authentication are used, and `url` is just the path
    "url": "https://erp.example/api/sales?branch={{ p_branch }}"   # (or "/api/sales?branch=..." with a connection)
@@ -33,6 +33,16 @@ Data source config shape (`Report.data_source`):
    "auth": {"type": "bearer", "token_env": "ERP_TOKEN"} | {"type": "bearer", "token_secret": "erp-token"}
          | {"type": "basic", "username": "svc", "password_env": "ERP_PASSWORD"}
          | {"type": "basic", "username": "svc", "password_secret": "erp-password"} | None}
+
+  {"type": "jdbc", "connection": "erp", "typed_binding": False,
+   "query": "SELECT ... WHERE branch = :p_branch", "root_key": "rows" | None}     # one query: {rows: [...]}
+  {"type": "jdbc", "connection": "erp", "typed_binding": False,
+   "queries": [{"name": "rows", "shape": "list",   "query": "SELECT ..."},       # several, run at the same time
+               {"name": "info", "shape": "object", "query": "SELECT ..."},       # and merged into one object:
+               {"name": "total", "shape": "value", "query": "SELECT COUNT(*) ..."}]}   # {rows: [...], info: {...}|null,
+                                                                                         #  total: 3|null}
+
+  {"type": "static", "static_data": {...}}          # fixed sample data
 
 A credential is never a value here: either the *name* of an environment
 variable on the API server (same convention scheduled jobs' rest_call,
@@ -57,7 +67,9 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timezone
+from time import monotonic
 from typing import Any, Callable
 from urllib.parse import quote
 from xml.sax.saxutils import escape as xml_escape
@@ -108,6 +120,10 @@ MAX_HEADERS = 20
 MAX_HEADER_VALUE_LENGTH = 1000
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 TIMEOUT_SECONDS = 15.0
+# A database source may have several queries, merged into one object (see _run_queries).
+MAX_QUERIES = 10
+QUERY_SHAPES = ("list", "object", "value")
+DEFAULT_PARALLEL_QUERIES = 4
 
 # Headers httpx (or the connection) owns; letting a config set them only
 # invites request-smuggling-shaped surprises.
@@ -305,7 +321,12 @@ def source_parameter_names(data_source: dict | None) -> list[str]:
     if kind == "jdbc":
         from . import jdbc
 
-        return jdbc.validate_query(data_source.get("query"))
+        names: list[str] = []
+        for query in jdbc_queries(data_source):
+            for name in jdbc.validate_query(query.get("query") if isinstance(query, dict) else None):
+                if name not in names:
+                    names.append(name)
+        return names
     if kind != "rest":
         return []
     names: list[str] = []
@@ -479,26 +500,70 @@ def _validate_jdbc_source(
         raise DataConfigError("A database source needs a connection -- choose one, or create it under Admin > Connections")
     if connection_kinds is not None and connection_kinds.get(connection) not in (None, "jdbc"):
         raise DataConfigError(f"The connection {connection!r} isn't a database connection")
-    query = raw.get("query")
-    used = jdbc.validate_query(query)
-    unknown = sorted(set(used) - parameter_names)
-    if unknown:
-        raise DataConfigError(
-            "The query uses "
-            + ", ".join(":" + name for name in unknown)
-            + " but no filter parameter with that name is defined"
-        )
-    root_key = (raw.get("root_key") or "").strip() or None
-    if root_key is not None and not jdbc.ROOT_KEY_RE.match(root_key):
-        raise DataConfigError("The result name must be letters, digits and underscores, starting with a letter (e.g. rows)")
-    return {
+    common = {
         "type": "jdbc",
         "connection": connection,
-        "query": query.strip(),
-        "root_key": root_key,
         # Off unless asked for: switching it on changes what an existing CAST / TO_DATE receives.
         "typed_binding": raw.get("typed_binding") is True,
     }
+    if raw.get("queries") is None:
+        # One query, saved the way it always was: its rows under `root_key` (default rows).
+        query = _validate_one_query(raw.get("query"), parameter_names, "The query")
+        root_key = (raw.get("root_key") or "").strip() or None
+        if root_key is not None and not jdbc.ROOT_KEY_RE.match(root_key):
+            raise DataConfigError("The result name must be letters, digits and underscores, starting with a letter (e.g. rows)")
+        if root_key is not None and root_key in parameter_names:
+            raise DataConfigError(f"The result name {root_key!r} is also a filter's name -- the filter's value would replace it; rename one")
+        return {**common, "query": query, "root_key": root_key}
+
+    queries = raw["queries"]
+    if not isinstance(queries, list) or not queries:
+        raise DataConfigError("Add at least one query")
+    if len(queries) > MAX_QUERIES:
+        raise DataConfigError(f"A report can have at most {MAX_QUERIES} queries")
+    cleaned: list[dict] = []
+    for index, item in enumerate(queries, start=1):
+        if not isinstance(item, dict):
+            raise DataConfigError(f"Query {index} isn't valid")
+        name = (item.get("name") or "").strip()
+        if not jdbc.ROOT_KEY_RE.match(name):
+            raise DataConfigError(
+                f"Query {index}'s result name must be letters, digits and underscores, starting with a letter (e.g. rows, info)"
+            )
+        if any(q["name"] == name for q in cleaned):
+            raise DataConfigError(f"Two queries are named {name!r} -- each needs its own result name")
+        if name in parameter_names:
+            raise DataConfigError(f"The result name {name!r} is also a filter's name -- the filter's value would replace it; rename one")
+        shape = item.get("shape") or "list"
+        if shape not in QUERY_SHAPES:
+            raise DataConfigError(f"Query {name!r}: its result is a list, one row (object) or one value -- not {shape!r}")
+        cleaned.append({"name": name, "shape": shape, "query": _validate_one_query(item.get("query"), parameter_names, f"Query {name!r}")})
+    return {**common, "queries": cleaned}
+
+
+def _validate_one_query(query: Any, parameter_names: set[str], where: str) -> str:
+    from . import jdbc
+
+    try:
+        used = jdbc.validate_query(query)
+    except DataConfigError as exc:
+        raise DataConfigError(f"{where}: {exc}" if where != "The query" else str(exc)) from exc
+    unknown = sorted(set(used) - parameter_names)
+    if unknown:
+        raise DataConfigError(
+            f"{where} uses "
+            + ", ".join(":" + name for name in unknown)
+            + " but no filter parameter with that name is defined"
+        )
+    return query.strip()
+
+
+def jdbc_queries(data_source: dict) -> list[dict]:
+    """A database source's queries as [{name, shape, query}], whichever way it was saved: a single query is one
+    list named after its root_key (default rows)."""
+    if data_source.get("queries") is not None:
+        return data_source["queries"]
+    return [{"name": data_source.get("root_key") or "rows", "shape": "list", "query": data_source.get("query")}]
 
 
 def _validate_data_source(
@@ -827,13 +892,7 @@ def fetch_report_data(data_source: dict, params: dict[str, str], types: dict[str
 
         if data_source.get("jdbc") is None:
             raise DataSourceError("The report's database connection wasn't resolved -- ask whoever manages this report")
-        return jdbc.run_query(
-            data_source["jdbc"],
-            data_source["query"],
-            params,
-            data_source.get("root_key"),
-            types=(types or {}) if data_source.get("typed_binding") else None,
-        )
+        return _run_queries(data_source, params, (types or {}) if data_source.get("typed_binding") else None)
     env = _env()
     # Values dropped into the URL are percent-encoded so a value can never
     # add a query parameter or path segment; the body gets the raw values
@@ -883,6 +942,72 @@ def fetch_report_data(data_source: dict, params: dict[str, str], types: dict[str
     if not isinstance(data, dict):
         raise DataSourceError("The report's data source must return a JSON object")
     return data
+
+
+def _shaped(name: str, shape: str, rows: list[dict]) -> Any:
+    """A query's rows as its result: the list itself, its one row (an object), or that row's first column. No row is
+    null for the last two -- the template decides what to print -- and more than one is an error rather than a
+    silent pick: a receipt's header must never quietly be some other receipt's."""
+    if shape == "list":
+        return rows
+    if len(rows) > 1:
+        raise DataSourceError(f"The query {name!r} returned {len(rows):,} rows, but it's set to give one row")
+    if not rows:
+        return None
+    return rows[0] if shape == "object" else next(iter(rows[0].values()), None)
+
+
+def _run_queries(data_source: dict, params: dict[str, str], types: dict[str, str] | None) -> dict:
+    """Every query of a database source, at the same time (up to JDBC_MAX_PARALLEL), merged into one object -- each
+    under its own name, always present. All or nothing: if one fails the run fails, naming that query, since a
+    report printed with part of its data missing is worse than an error."""
+    from . import jdbc
+
+    queries = jdbc_queries(data_source)
+
+    def run(query: dict) -> Any:
+        started = monotonic()
+        rows = jdbc.run_query(data_source["jdbc"], query["query"], params, query["name"], types=types)[query["name"]]
+        _log.info("Query %r: %d row(s) in %d ms", query["name"], len(rows), (monotonic() - started) * 1000)
+        return _shaped(query["name"], query["shape"], rows)
+
+    if len(queries) == 1:
+        return {queries[0]["name"]: run(queries[0])}
+
+    if data_source["jdbc"].get("driver"):
+        # An uploaded driver: all of them in one worker request (one JVM, one connection) -- starting a JVM per
+        # query would cost more than the queries. Errors there already name the query.
+        rows = jdbc.run_batch_via_worker(data_source["jdbc"], [(q["name"], q["query"]) for q in queries], params)
+        results = {q["name"]: _shaped(q["name"], q["shape"], rows[q["name"]]) for q in queries}
+        _check_total(results)
+        return results
+
+    results: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=min(len(queries), _max_parallel()), thread_name_prefix="report-query") as pool:
+        futures = {query["name"]: pool.submit(run, query) for query in queries}
+        for name, future in futures.items():  # in the order they were defined, so the first failure named is stable
+            try:
+                results[name] = future.result()
+            except DataSourceError as exc:
+                for other in futures.values():
+                    other.cancel()  # not started yet: don't (one already running finishes, and is discarded)
+                message = str(exc) if repr(name) in str(exc) else f"The query {name!r}: {exc}"
+                raise type(exc)(message) from exc
+    _check_total(results)
+    return results
+
+
+def _check_total(results: dict[str, Any]) -> None:
+    from . import jdbc
+
+    total = sum(len(v) for v in results.values() if isinstance(v, list))
+    if total > jdbc.MAX_ROWS:
+        raise DataSourceError(f"The report's queries returned {total:,} rows together -- more than {jdbc.MAX_ROWS:,}; narrow them with a filter")
+
+
+def _max_parallel() -> int:
+    raw = os.environ.get("JDBC_MAX_PARALLEL", "").strip()
+    return max(1, min(int(raw), MAX_QUERIES)) if raw.isdigit() else DEFAULT_PARALLEL_QUERIES
 
 
 def fetch_parameter_options(source: dict) -> list[dict]:

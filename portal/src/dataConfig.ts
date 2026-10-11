@@ -18,6 +18,7 @@ import type {
   DataConfig,
   DataSource,
   DataSourceAuth,
+  DataSourceQuery,
   DataSourceType,
   OptionsSource,
   ParameterType,
@@ -130,18 +131,46 @@ function parseBody(e: EditableRequest): DataSource["body_template"] {
 
 // --- data source ---------------------------------------------------------------------
 
-/** A database source: which connection (Admin > Connections), and the SELECT to run. */
+/** One query of a database source: its SELECT, the name its result has in the template, and its shape. */
+export interface EditableQuery {
+  /** A stable React key -- names can be edited, or blank. */
+  key: string;
+  /** Blank on a lone list query means `rows`. */
+  name: string;
+  shape: DataSourceQuery["shape"];
+  query: string;
+}
+
+/** A database source: which connection (Admin > Connections), and the SELECTs to run on it -- usually one; several
+ * run at the same time and are merged into one object, each under its name. */
 export interface EditableJdbc {
   connection: string;
-  query: string;
-  /** What the rows are called in the template; blank = `rows`. */
-  rootKey: string;
+  queries: EditableQuery[];
   /** Hand the database each filter as its declared type, so the query needs no CAST. */
   typedBinding: boolean;
 }
 
+/** The most queries one database source may have (the API's report_data.MAX_QUERIES). */
+export const MAX_QUERIES = 10;
+
+let queryKeys = 0;
+export const newQuery = (patch: Partial<EditableQuery> = {}): EditableQuery => ({
+  key: `q${++queryKeys}`,
+  name: "",
+  shape: "list",
+  query: "",
+  ...patch,
+});
+
 // A new source binds by type; a saved one keeps what it had (absent = text, as before this existed).
-export const EMPTY_JDBC: EditableJdbc = { connection: "", query: "", rootKey: "", typedBinding: true };
+export const EMPTY_JDBC: EditableJdbc = { connection: "", queries: [newQuery()], typedBinding: true };
+
+function toEditableJdbc(s: DataSource): EditableJdbc {
+  const queries = s.queries?.length
+    ? s.queries.map((q) => newQuery({ name: q.name, shape: q.shape, query: q.query }))
+    : [newQuery({ name: s.root_key ?? "", query: s.query ?? "" })];
+  return { connection: s.connection ?? "", queries, typedBinding: s.typed_binding === true };
+}
 
 /** The three kinds of source share one editable shape; only `type`'s own part is
  * sent. Switching type clears the other parts (see DataConfigDraft.setSourceType). */
@@ -160,7 +189,7 @@ export function toEditableSource(s: DataSource): EditableSource {
   return {
     type,
     request: type === "rest" ? toEditableRequest(s, s.body_template) : EMPTY_REQUEST,
-    jdbc: type === "jdbc" ? { connection: s.connection ?? "", query: s.query ?? "", rootKey: s.root_key ?? "", typedBinding: s.typed_binding === true } : EMPTY_JDBC,
+    jdbc: type === "jdbc" ? toEditableJdbc(s) : EMPTY_JDBC,
     staticText: type === "static" && s.static_data ? JSON.stringify(s.static_data, null, 2) : "",
   };
 }
@@ -183,14 +212,13 @@ const NO_REQUEST = { url: "", method: "GET" as const, headers: null, body_templa
 
 export function toDataSource(e: EditableSource): DataSource {
   if (e.type === "jdbc") {
-    return {
-      type: "jdbc",
-      connection: e.jdbc.connection || null,
-      ...NO_REQUEST,
-      query: e.jdbc.query.trim(),
-      root_key: e.jdbc.rootKey.trim() || null,
-      typed_binding: e.jdbc.typedBinding,
-    };
+    const base = { type: "jdbc" as const, connection: e.jdbc.connection || null, ...NO_REQUEST, typed_binding: e.jdbc.typedBinding };
+    const [first] = e.jdbc.queries;
+    // One list query is saved the way it always was, so a report that never uses several looks the same.
+    if (e.jdbc.queries.length === 1 && first.shape === "list") {
+      return { ...base, query: first.query.trim(), root_key: first.name.trim() || null };
+    }
+    return { ...base, queries: e.jdbc.queries.map((q) => ({ name: q.name.trim(), shape: q.shape, query: q.query.trim() })) };
   }
   if (e.type === "static") {
     return { type: "static", connection: null, ...NO_REQUEST, static_data: parseStaticData(e.staticText).value };
@@ -200,7 +228,7 @@ export function toDataSource(e: EditableSource): DataSource {
 
 /** Whether the chosen type holds anything worth warning about before it's thrown away. */
 export function sourceConfigured(e: EditableSource): boolean {
-  if (e.type === "jdbc") return Boolean(e.jdbc.connection || e.jdbc.query.trim());
+  if (e.type === "jdbc") return Boolean(e.jdbc.connection || e.jdbc.queries.some((q) => q.query.trim()));
   if (e.type === "static") return e.staticText.trim() !== "";
   const r = e.request;
   return Boolean(r.connection || r.url.trim() || r.headersText.trim() || r.bodyText.trim() || r.authType !== "none");

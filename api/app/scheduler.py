@@ -39,13 +39,13 @@ from datetime import datetime, timezone
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from . import db
 from .celery_app import celery_app
+from .cron import cron_trigger
 from .db import Job, JobRun
 from .logging_config import configure_logging
 
@@ -64,9 +64,7 @@ def _parse_iso(value: str | None):
 
 def _build_trigger(job: Job):
     if job.trigger_type == "cron":
-        return CronTrigger.from_crontab(
-            job.cron_expression, start_date=_parse_iso(job.start_date), end_date=_parse_iso(job.end_date)
-        )
+        return cron_trigger(job.cron_expression, job.start_date, job.end_date)
     if job.trigger_type == "interval":
         return IntervalTrigger(
             seconds=job.interval_seconds, start_date=_parse_iso(job.start_date), end_date=_parse_iso(job.end_date)
@@ -147,7 +145,7 @@ def reconcile(scheduler: BlockingScheduler) -> None:
 
         try:
             trigger = _build_trigger(job)
-        except (ValueError, KeyError) as exc:
+        except (ValueError, KeyError, TypeError) as exc:  # one bad job must never stop the others being scheduled
             _log.error("Skipping malformed job_id=%r: %s", job.id, exc)
             continue
         scheduler.add_job(fire_job, trigger=trigger, id=job.id, args=[job.id], replace_existing=True, misfire_grace_time=60)

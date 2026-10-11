@@ -7,10 +7,18 @@ string (stored in `JobRun.result_summary`) or raise.
 Config shapes, one per job_type (`Job.config`, a JSON dict):
 
   render_report -- {"report_id": str, "format": "docx"|"pdf"|"png"|"xlsx",
-                    "context": dict, "destination_path": str}
-      Renders exactly like POST /api/v1/reports/{id}/render (same
-      doc_engine.render() call, same report_store lookup), then writes
-      the bytes to `destination_path`. The common "just run this report
+                    "parameters": dict, "context": dict, "destination_path": str}
+      Runs the report like its Run button: the report's own data source is
+      called with `parameters` (its filters, by name -- left out, a filter
+      takes its default, so a date filter defaulting to now() is the day the
+      job fires), and the result is rendered and written to
+      `destination_path`. `context` is optional extra data laid over what the
+      source returned. A report with no data source renders `context` as
+      is. An older job that gives `context` but no `parameters` key renders
+      just that `context`, as it always did (the data source isn't called).
+      The parameters were checked against the creator's grants when the job
+      was saved (routers/jobs.py), so here every value of a choice list is
+      allowed. The common "just run this report
       on a schedule and drop the result somewhere" case -- see
       `file_output`'s source="render_report" for the same rendering
       logic reached through the more general action type instead.
@@ -38,7 +46,7 @@ Config shapes, one per job_type (`Job.config`, a JSON dict):
 
   file_output -- {"destination_path": str, "source": "static"|"render_report",
                   "content": str,  # source="static" only, written as-is (UTF-8)
-                  "report_id": str, "format": str, "context": dict  # source="render_report" only
+                  "report_id": str, "format": str, "parameters": dict, "context": dict  # source="render_report" only
                  }
       The general "write bytes to a configured location" action --
       either a static payload (e.g. a plain semaphore/flag file for a
@@ -94,7 +102,33 @@ def _resolve_secret(env_var_name: str) -> str:
     return value
 
 
-def _render_bytes(report_id: str, fmt: str, context: dict) -> bytes:
+def _fetch_context(meta: dict, parameters: dict | None, context: dict) -> dict:
+    """The data a scheduled run renders: the report's data source called with
+    `parameters`, the job's `context` over it, the resolved parameter values
+    over both (as on the run page, so the document states what was asked)."""
+    from . import connections, report_data
+
+    if not meta.get("data_source") or (parameters is None and context):
+        return context
+    try:
+        definitions = report_data.resolve_parameter_definitions(
+            meta.get("parameters") or [], materialize=lambda source: connections.materialize(source, meta["org_id"])
+        )
+        params = report_data.resolve_run_parameters(definitions, {d["name"]: None for d in definitions}, parameters or {})
+    except report_data.ParameterError as exc:
+        raise PermanentJobError(f"Report {meta['report_id']!r}: {exc}") from exc
+    except report_data.DataSourceError as exc:
+        raise RetryableJobError(f"Report {meta['report_id']!r}: couldn't load a filter's choices: {exc}") from exc
+    try:
+        source = connections.materialize(meta["data_source"], meta["org_id"])
+        fetched = report_data.fetch_report_data(source, params, {d["name"]: d.get("type") or "text" for d in definitions})
+    except report_data.DataSourceError as exc:
+        # The database or API being down is the usual cause, and the next attempt may well work.
+        raise RetryableJobError(f"Report {meta['report_id']!r}: the data source failed: {exc}") from exc
+    return {**fetched, **context, **params}
+
+
+def _render_bytes(report_id: str, fmt: str, context: dict, parameters: dict | None = None) -> bytes:
     """Shared by `render_report` and `file_output(source="render_report")`
     -- exactly the same lookup + render call POST /reports/{id}/render
     makes (app/routers/reports.py's `_render_one`), so a scheduled render
@@ -116,6 +150,7 @@ def _render_bytes(report_id: str, fmt: str, context: dict) -> bytes:
     if fmt not in allowed:
         raise PermanentJobError(f"Report {report_id!r} is a .{meta['template_ext']} template; format {fmt!r} unsupported")
 
+    context = _fetch_context(meta, parameters, context)
     try:
         context = resolve_image_refs(context, meta["org_id"])
     except ImageResolutionError as exc:
@@ -144,9 +179,9 @@ def _write_file(destination_path: str, content: bytes) -> str:
 def execute_render_report(config: dict, job_id: str) -> str:
     report_id = config["report_id"]
     fmt = config["format"]
-    context = config.get("context", {})
+    context = config.get("context") or {}
     destination_path = config["destination_path"].format(job_id=job_id, timestamp=_now_stamp())
-    content = _render_bytes(report_id, fmt, context)
+    content = _render_bytes(report_id, fmt, context, config.get("parameters"))
     return _write_file(destination_path, content)
 
 
@@ -157,7 +192,7 @@ def execute_file_output(config: dict, job_id: str) -> str:
     if source == "static":
         content = config.get("content", "").encode("utf-8")
     elif source == "render_report":
-        content = _render_bytes(config["report_id"], config["format"], config.get("context", {}))
+        content = _render_bytes(config["report_id"], config["format"], config.get("context", {}), config.get("parameters"))
     else:
         raise PermanentJobError(f"Unknown file_output source: {source!r}")
 

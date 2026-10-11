@@ -162,6 +162,14 @@ export type DataSourceType = "static" | "rest" | "jdbc";
  * data, a REST API, or a read-only SQL query against a database connection.
  * See api/app/models/reports.py's DataSource -- fields that don't belong to the
  * chosen type come back null/empty. */
+/** One query of a database source with several. list: every row ([] when none); object: its one row; value: that
+ * row's first column -- null when there is no row, and more than one fails the run. */
+export interface DataSourceQuery {
+  name: string;
+  shape: "list" | "object" | "value";
+  query: string;
+}
+
 export interface DataSource {
   type: DataSourceType;
   /** Name of a connection (Admin > Connections). rest: `url` is then just the path. jdbc: the database to query. */
@@ -175,6 +183,8 @@ export interface DataSource {
   query?: string | null;
   /** jdbc: the key the rows are returned under for the template to loop over (default `rows`). */
   root_key?: string | null;
+  /** jdbc, instead of query/root_key: several queries, run at the same time, merged into one object by name. */
+  queries?: DataSourceQuery[] | null;
   /** jdbc: bind each filter as its declared type (a built-in driver gets a real date / number). */
   typed_binding?: boolean;
   /** static: the JSON object the template is rendered with. */
@@ -339,6 +349,8 @@ export interface RunForm {
   access_level: "render" | "manage";
   formats: RenderFormat[];
   parameters: RunFormParameter[];
+  /** Running it fetches data from its data source (otherwise the data is whatever the caller gives). */
+  has_data_source: boolean;
 }
 
 export interface ReportSchema {
@@ -727,6 +739,14 @@ export interface Job {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** POST /jobs/schedule-preview: when a cron schedule fires next, read the scheduler's way. */
+export interface SchedulePreview {
+  /** The zone the schedule's times are in (the server's REPORT_TIMEZONE). */
+  timezone: string;
+  /** ISO 8601 instants with that zone's offset, earliest first. */
+  next_runs: string[];
 }
 
 export interface JobRun {

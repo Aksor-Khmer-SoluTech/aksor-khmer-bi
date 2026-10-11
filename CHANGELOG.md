@@ -3,7 +3,7 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-beta.4] - 2026-10-11
 
 ### Added
 - **Excel (tables)** for `.docx` reports: the run page's Export menu (and the API, embeds, jobs and batches with
@@ -15,11 +15,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   with a frozen, filterable header row. Images aren't copied; for a spreadsheet designed cell by cell, use an
   `.xlsx` template.
 
+- **Several queries in one database source.** A report's database source can have up to 10 queries — line
+  items, a receipt's header, a count — each named, and each a *list*, *one row* or *one value*. They run at the
+  same time and are merged into one object the template reads (`{{ info.receiptCode }}`, `{%tr for r in rows %}`),
+  every name always present: no row is `null` (an empty list is `[]`). One failing query fails the run and is
+  named. In the Data source tab and the New Template wizard, **Add query** turns the one query into cards — each
+  with its result name, List / One row / One value, its SQL and its own filter buttons; the wizard's Run shows the
+  one-row and one-value results above the table of rows. A source with one query is
+  saved and runs exactly as before. On an uploaded driver (Oracle, SQL Server, Db2) a report's queries go to the
+  jdbc-worker as **one request** — one JVM, one connection — instead of a JVM each. **Upgrade note:** update the
+  `jdbc-worker` image with the others; an older worker still works, the queries are then sent one by one.
+
 ### Fixed
 - New Template's starter no longer adds a Total under identifier columns (card numbers, ids, codes) — only under
   amounts.
+- Typing Khmer (or any non-ASCII character) into the sign-in form — say, with the keyboard still in Khmer — failed
+  with a server error instead of "Invalid credentials"; a two-factor code typed in Khmer digits did the same.
+- **Scheduled cron jobs never ran:** the scheduler crashed building a cron trigger, and since one bad job stopped
+  the whole pass, interval and one-off jobs stopped with it. Cron weekdays are now read the crontab way too —
+  `1-5` is Monday to Friday (it would have been Tuesday to Saturday).
+- A scheduled **Render report** job rendered only the JSON typed into it: a report fed by SQL, a JDBC database or
+  a REST API came out empty. It now runs the report like its Run button (see Changed).
 
 ### Changed
+- **New job, redone.** A *Render report* job is a form: pick the report and format, set its filters (the run
+  page's own — a date left empty is the day the job runs), and where the file goes; each run fetches the report's
+  data from its data source. Extra JSON is optional, laid over the fetched data. The schedule is picked in words —
+  every hour, every day, weekdays, chosen days of the week, a day of the month, or a custom cron expression — with
+  the next three run times shown as you choose. The report and filter values are checked against your own access
+  when you save. The other job types keep their JSON, now in the JSON editor.
+- **Scheduled jobs run in `REPORT_TIMEZONE`** (UTC when unset) — set it to `Asia/Phnom_Penh` and a job for 08:00
+  runs at 08:00 in Phnom Penh. **Upgrade note:** a cron job already scheduled keeps its expression, which is now
+  read in that zone.
 - **The run page fits the window:** the report viewer, the footer and an even 24px margin around them, with no
   scrolling — so the Run panel stays level with the viewer instead of drifting when the page scrolled.
 - **Templates' two buttons are New Template** (start from your data, in the wizard) **and Upload Template** (a file

@@ -444,6 +444,10 @@ doesn't depend on the same process that decides *when* things fire:
   create/edit/pause/delete without a separate signaling protocol. On
   fire, it does **not** run the job — it enqueues a Celery task and
   returns.
+- **Cron expressions** are standard crontab (`app/cron.py`): 0 or 7 is
+  Sunday, so `1-5` is Monday–Friday, and the times are read in
+  `REPORT_TIMEZONE` (UTC when unset) — the zone a `now()` filter default
+  reads "today" in.
 - **`app/celery_app.py`**'s `run_job` task (consumed by the `worker`
   service, horizontally scalable) does the actual work
   (`app/job_executors.py`) and retries — with the *job's own*
@@ -454,8 +458,12 @@ doesn't depend on the same process that decides *when* things fire:
 
 Four `job_type`s, each with its own `config` shape (see
 `app/job_executors.py`'s module docstring for the exact keys):
-`render_report` (render a registered template and write it to a file —
-the common "just run this report on a schedule" case), `rest_call`
+`render_report` (run a report the way its Run button does — its data
+source called with the job's `parameters`, a filter left out taking its
+default, so a `now()` date is the day the job fires — and write the file;
+`context` is optional extra data laid over the fetched data; the report,
+format and filter values are checked against the job creator's own access
+when the job is saved), `rest_call`
 (Jinja2-templated body/headers, optional basic/bearer auth via an
 env-var-referenced secret), `soap_call` (via
 [zeep](https://docs.python-zeep.org/) — the "thin adapter" this
@@ -468,9 +476,13 @@ downstream system counts).
 curl -X POST "http://localhost:8000/api/v1/jobs?org_id=acme" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "Nightly invoice run", "job_type": "render_report",
-       "config": {"report_id": "<report_id>", "format": "pdf", "context": {"customer_name": "Acme"},
+       "config": {"report_id": "<report_id>", "format": "pdf", "parameters": {"p_branch": "BR01"},
                    "destination_path": "/data/scheduled/{job_id}/{timestamp}.pdf"},
-       "trigger_type": "cron", "cron_expression": "0 2 * * *"}'
+       "trigger_type": "cron", "cron_expression": "0 2 * * 1-5"}'
+
+# When would that fire? The scheduler's own reading, in its time zone (REPORT_TIMEZONE):
+curl -X POST http://localhost:8000/api/v1/jobs/schedule-preview -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"cron_expression": "0 2 * * 1-5", "count": 3}'
 
 # Fire it right now -- a person clicking "run now," or any external
 # system calling this same route with a job:trigger credential.

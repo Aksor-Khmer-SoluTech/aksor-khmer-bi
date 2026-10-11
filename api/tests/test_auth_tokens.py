@@ -163,6 +163,21 @@ def test_the_break_glass_login_works_and_stops_with_its_configuration(http, monk
     assert http.get("/api/v1/auth/me", headers=headers).status_code == 401
 
 
+def test_a_non_ascii_username_or_password_is_just_wrong_not_a_crash(http, make_local_user):
+    # The break-glass check compares against the .env credentials; a str with Khmer in it used to raise TypeError.
+    assert _login(http, "testadmin", "ពាក្យសម្ងាត់", expect=401).json()["detail"] == "Invalid credentials"
+    assert _login(http, "អ្នកប្រើ", "testpass123", expect=401).json()["detail"] == "Invalid credentials"
+    make_local_user("សុខា", "ពាក្យ-សម្ងាត់-1", ())
+    assert _login(http, "សុខា", "ពាក្យ-សម្ងាត់-1").json()["user"]["username"] == "សុខា"
+    assert _login(http, "សុខា", "testpass123", expect=401).json()["detail"] == "Invalid credentials"
+
+
+def test_a_2fa_code_in_khmer_digits_is_just_wrong(http, make_local_user):
+    _, basic = make_local_user("alice", "pw-alice-1", ())
+    _enable_2fa(http, basic)
+    assert _login(http, "alice", "pw-alice-1", totp_code="១២៣៤៥៦", expect=401).json()["detail"] == "Invalid or expired code"
+
+
 # --- two-factor authentication ---------------------------------------------------------------------
 
 

@@ -431,7 +431,7 @@ top to bottom once. Edit `.env`, then apply it:
 | change the portal's name, logo or API address | the file `PORTAL_CONFIG_FILE` points to (default `portal/public/config.js`) | `… up -d portal` |
 | keep people signed in longer / shorter | `REFRESH_TOKEN_SESSION_HOURS`, `REFRESH_TOKEN_TTL_DAYS`, `ACCESS_TOKEN_TTL_SECONDS` | `… up -d` |
 | allow more or fewer sign-in attempts | `LOGIN_ATTEMPTS_PER_MINUTE` | `… up -d` |
-| read dates in my time zone when a run omits them | `REPORT_TIMEZONE` (e.g. `Asia/Phnom_Penh`) | `… up -d` |
+| read dates, and run scheduled jobs, in my time zone | `REPORT_TIMEZONE` (e.g. `Asia/Phnom_Penh`) | `… up -d` |
 | raise or lower report size and speed limits | `MAX_ROWS_PER_FILE`, `MAX_REPORT_PARTS`, `MAX_BATCH_*`, `JDBC_MAX_ROWS`, `JDBC_TIMEOUT_SECONDS` | `… up -d` |
 | lock database connections to certain hosts | `JDBC_ALLOWED_HOSTS` | `… up -d` |
 | log more or less | `LOG_LEVEL` (`DEBUG` while investigating), `LOG_MAX_BYTES` | `… up -d` |
@@ -840,7 +840,8 @@ sane defaults), the mount just lets you override them live.
 | `JDBC_ALLOWED_HOSTS` | No | Comma-separated hosts, `*.suffix` patterns or CIDRs that a database connection may point at; unset allows any host except link-local and cloud-metadata addresses (always refused). Set on `api`. |
 | `JDBC_MAX_ROWS` / `JDBC_TIMEOUT_SECONDS` / `JDBC_DRIVER_MAX_MB` | No | Largest result a report query may return (20000 rows), how long it may run (30 s), and the largest driver upload (80 MB). |
 | `CLIENT_RUN_LIMIT_PER_MINUTE` | No | Most `embed-run` calls per minute one **API client** (client id + secret, Manage → API Clients) may make; over it, `429`. Default 120. Clients themselves are created in the portal -- no environment variable per report. See [Running a report as an API client](building-a-report.md#running-a-report-as-an-api-client-client-id--secret). |
-| `REPORT_TIMEZONE` | No | IANA time zone (e.g. `Asia/Phnom_Penh`; default `UTC`) that a parameter's `now()` default is read in when a run leaves that parameter out -- an API call or an embed. The portal's own run form fills `now()` from the viewer's browser clock instead. An unknown name is logged and falls back to UTC. See [Filters and a data source](building-a-report.md#filters-a-data-source-and-connections). Set on `api` |
+| `JDBC_MAX_PARALLEL` | No | How many of one report's database queries run at the same time (default 4, at most 10). A report with several queries (see [Filters and a data source](building-a-report.md#filters-a-data-source-and-connections)) opens one database connection per query running. Set on `api` and `worker` |
+| `REPORT_TIMEZONE` | No | IANA time zone (e.g. `Asia/Phnom_Penh`; default `UTC`) that a parameter's `now()` default is read in when a run leaves that parameter out -- an API call, an embed or a scheduled job -- and that scheduled jobs' times are in (a job set for 08:00 runs at 08:00 there). The portal's own run form fills `now()` from the viewer's browser clock instead. An unknown name is logged and falls back to UTC. See [Filters and a data source](building-a-report.md#filters-a-data-source-and-connections). Set on `api` |
 | `AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE` / `AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE` | No | Extra Khmer terms this deployment has observed ICU mis-splitting, on top of the shared package's built-ins — see [`protected-terms-guide.md`](protected-terms-guide.md) |
 | `AKSOR_KHMER_OCR_PROTECTED_TERMS_DIR` / `AKSOR_KHMER_OCR_EXCLUDED_TERMS_DIR` | No | Directory form of the row above — every `*.txt` file inside is merged in |
 | `DATABASE_URL` | No | Report metadata database connection string — `docker-compose.yml` sets this to the `postgres` service automatically; unset falls back to a local SQLite file (`api/aksor_khmer_bi.db`). See `api/app/db.py` |
@@ -881,8 +882,9 @@ docker compose --profile jdbc up -d jdbc-worker api     # pulls the released jdb
 The `jdbc-worker` service has no published port, a read-only filesystem and read-only drivers, no
 capabilities, capped memory/CPU/processes, and its own network (`aksor-jdbc`, shared only with `api`) —
 so a driver can't reach PostgreSQL or Redis. It holds no database credentials or encryption key: each
-query carries the one connection's login, used and forgotten. Every query runs in a fresh JVM that is
-killed at the timeout, and a driver is loaded only if its SHA-256 still matches the one recorded at
+query carries the one connection's login, used and forgotten. Every request runs in a fresh JVM that is
+killed at the timeout — a report with several queries sends them as one request, run in order over one
+connection, since starting a JVM costs more than a query — and a driver is loaded only if its SHA-256 still matches the one recorded at
 upload. The files live in `data/jdbc_drivers/` (mounted into both services — back it up with `data/`).
 
 The worker can reach whatever the host's network can, because that is how it reaches your databases;

@@ -113,9 +113,10 @@ def resolve_auth_context(credentials: HTTPBasicCredentials) -> AuthContext:
         if break_glass is not None:
             expected_username, expected_password = break_glass
             # compare_digest on both independently (not the tuple) to avoid
-            # leaking username-correctness via early-exit timing.
-            username_ok = secrets.compare_digest(credentials.username, expected_username)
-            password_ok = secrets.compare_digest(credentials.password, expected_password)
+            # leaking username-correctness via early-exit timing. As UTF-8 bytes: compare_digest refuses a str with
+            # any non-ASCII character (a Khmer username or password would crash the sign-in).
+            username_ok = secrets.compare_digest(credentials.username.encode(), expected_username.encode())
+            password_ok = secrets.compare_digest(credentials.password.encode(), expected_password.encode())
             # Once a database account holds this name (the first-run setup creates it), the generated .env password
             # is retired for it: only the account's own password signs in. Recovery is a *different* PORTAL_USERNAME.
             if username_ok and password_ok and user is None:

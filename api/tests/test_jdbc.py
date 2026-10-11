@@ -777,3 +777,204 @@ def test_a_run_binds_real_types_only_when_the_source_asks_for_it(auth_headers, m
     assert saved["data_source"]["typed_binding"] is True
     http.post(f"/api/v1/reports/{report_id}/run", json={"parameters": {"from": "2026-09-30"}, "format": "docx"}, headers=auth_headers)
     assert seen["bound"] == {"from": dt.date(2026, 9, 30)}
+
+
+# --- several queries in one source, merged into one object -------------------------------------------------------
+
+import threading  # noqa: E402
+
+from app import report_data  # noqa: E402
+
+_KHMER_TITLE = "របាយការណ៍លក់ប្រចាំថ្ងៃ"  # "daily sales report", unspaced as Khmer is written
+_QUERIES = [
+    {"name": "rows", "shape": "list", "query": "SELECT name, total FROM sales ORDER BY name"},
+    {"name": "info", "shape": "object", "query": "SELECT branch AS code, name AS branch_name FROM sales WHERE branch = :branch"},
+    {"name": "title", "shape": "value", "query": f"SELECT '{_KHMER_TITLE}' AS title"},
+    {"name": "count", "shape": "value", "query": "SELECT COUNT(*) FROM sales"},
+]
+
+
+def _source(queries=None):
+    return {"type": "jdbc", "connection": "sales-db", "queries": queries if queries is not None else _QUERIES}
+
+
+def _fetch(queries, params=None):
+    return report_data.fetch_report_data({**_source(queries), "jdbc": _resolved()}, params or {"branch": "sr"})
+
+
+def test_several_queries_render_as_one_object(auth_headers, sqlite_as_postgres):
+    _secret(auth_headers)
+    _connection(auth_headers)
+    doc = Document()
+    doc.add_paragraph("{{ title }}")
+    doc.add_paragraph("{{ info.code }} {{ info.branch_name }}: {{ count }} branches, {{ rows | map(attribute='name') | join(', ') }}")
+    buf = BytesIO()
+    doc.save(buf)
+    report_id = http.post(
+        "/api/v1/reports", files={"file": ("t.docx", buf.getvalue(), "application/octet-stream")}, data={"name": "Branch"}, headers=auth_headers
+    ).json()["report_id"]
+    saved = _configure(auth_headers, report_id, [_BRANCH], _source())
+    assert [(q["name"], q["shape"]) for q in saved["data_source"]["queries"]] == [("rows", "list"), ("info", "object"), ("title", "value"), ("count", "value")]
+
+    run = http.post(f"/api/v1/reports/{report_id}/run", json={"parameters": {"branch": "sr"}, "format": "docx"}, headers=auth_headers)
+    assert run.status_code == 200, run.text
+    assert _text(run.content) == f"{_KHMER_TITLE}\nsr Siem Reap: 2 branches, Phnom Penh, Siem Reap"
+
+
+def test_every_query_is_always_in_the_result_empty_is_null_or_an_empty_list(sqlite_as_postgres):
+    data = _fetch(_QUERIES[:2] + [{"name": "none", "shape": "value", "query": "SELECT total FROM sales WHERE branch = :branch"}], {"branch": "kp"})
+    assert data == {"rows": [{"name": "Phnom Penh", "total": 42}, {"name": "Siem Reap", "total": 7.5}], "info": None, "none": None}
+    assert _fetch([{"name": "rows", "shape": "list", "query": _QUERY}], {"branch": "kp"}) == {"rows": []}
+
+
+def test_a_one_row_query_that_returns_several_fails_naming_it(sqlite_as_postgres):
+    with pytest.raises(DataSourceError, match=r"'info' returned 2 rows, but it's set to give one row"):
+        _fetch([_QUERIES[0], {"name": "info", "shape": "object", "query": "SELECT name FROM sales"}])
+
+
+def test_one_failing_query_fails_the_run_and_is_named(sqlite_as_postgres):
+    broken = {"name": "extra", "shape": "list", "query": "SELECT nonexistent_column FROM sales"}
+    with pytest.raises(DataSourceError) as caught:
+        _fetch(_QUERIES + [broken])
+    assert str(caught.value) == "The query 'extra': The report's database rejected the query"
+    assert "nonexistent_column" not in str(caught.value)
+
+
+def test_the_queries_run_at_the_same_time(sqlite_as_postgres, monkeypatch):
+    # Each query waits at a barrier for all four to have connected: run one after another, the first would time out.
+    barrier = threading.Barrier(len(_QUERIES), timeout=5)
+    connect, style = jdbc._NATIVE["postgresql"]
+
+    def connect_together(config, password):
+        barrier.wait()
+        return connect(config, password)
+
+    monkeypatch.setitem(jdbc._NATIVE, "postgresql", (connect_together, style))
+    assert set(_fetch(_QUERIES)) == {"rows", "info", "title", "count"}
+
+    monkeypatch.setenv("JDBC_MAX_PARALLEL", "2")  # four queries, two at a time: the barrier of four can't be met
+    barrier.reset()
+    with pytest.raises(Exception):
+        _fetch(_QUERIES)
+
+
+def test_the_row_limit_covers_all_the_queries_together(sqlite_as_postgres, monkeypatch):
+    monkeypatch.setattr(jdbc, "MAX_ROWS", 3)
+    two = {"name": "more", "shape": "list", "query": "SELECT name FROM sales"}
+    with pytest.raises(DataSourceError, match="4 rows together"):
+        _fetch([_QUERIES[0], two])
+
+
+def test_several_queries_validation(auth_headers):
+    _secret(auth_headers)
+    _connection(auth_headers)
+    report_id = _register(auth_headers)
+    one = {"name": "rows", "query": _QUERY}
+    for queries, fragment in (
+        ([], "at least one query"),
+        ([one, {**one}], "Two queries are named 'rows'"),
+        ([{**one, "name": "not valid"}], "result name must be letters"),
+        ([{**one, "name": "branch"}], "also a filter's name"),
+        ([{**one, "query": "DELETE FROM sales"}], "Query 'rows'"),
+        ([{**one, "query": "SELECT 1 WHERE a = :nope"}], "Query 'rows' uses :nope"),
+        ([{"name": f"q{i}", "query": "SELECT 1"} for i in range(11)], "at most 10 queries"),
+    ):
+        detail = _configure(auth_headers, report_id, [_BRANCH], _source(queries), expect=400)["detail"]
+        assert fragment in detail, detail
+    with pytest.raises(DataConfigError, match="list, one row"):
+        report_data.validate_data_config([_BRANCH], _source([{**one, "shape": "table"}]))
+    # A single query's result name can't shadow a filter either.
+    detail = _configure(auth_headers, report_id, [_BRANCH], {"type": "jdbc", "connection": "sales-db", "query": _QUERY, "root_key": "branch"}, expect=400)["detail"]
+    assert "also a filter's name" in detail
+
+
+def test_the_filters_of_every_query_are_found(auth_headers):
+    source = _source([
+        {"name": "rows", "query": "SELECT * FROM t WHERE d >= :from_date AND b = :branch"},
+        {"name": "info", "shape": "object", "query": "SELECT * FROM b WHERE b = :branch AND x = :extra"},
+    ])
+    assert report_data.source_parameter_names(source) == ["from_date", "branch", "extra"]
+
+
+# --- several queries on an uploaded driver: one worker request ---------------------------------------------------
+
+
+def _oracle_report(auth_headers, monkeypatch, queries) -> str:
+    monkeypatch.setenv("JDBC_WORKER_URL", "http://jdbc-worker:9000")
+    monkeypatch.setenv("JDBC_WORKER_TOKEN", "worker-token")
+    _secret(auth_headers)
+    oracle = _upload(auth_headers)
+    _connection(
+        auth_headers, name="ora-db",
+        config=_pg(engine="oracle", port=1521, database="ORCLPDB1", service_type="service_name", driver_id=oracle["id"]),
+    )
+    doc = Document()
+    doc.add_paragraph("{{ info.TITLE }} — {{ rows | map(attribute='NAME') | join(', ') }}")
+    buf = BytesIO()
+    doc.save(buf)
+    report_id = http.post(
+        "/api/v1/reports", files={"file": ("t.docx", buf.getvalue(), "application/octet-stream")}, data={"name": "Ora"}, headers=auth_headers
+    ).json()["report_id"]
+    _configure(auth_headers, report_id, [_BRANCH], {"type": "jdbc", "connection": "ora-db", "queries": queries})
+    return report_id
+
+
+_ORA_QUERIES = [
+    {"name": "rows", "shape": "list", "query": "SELECT name FROM sales WHERE branch = :branch"},
+    {"name": "info", "shape": "object", "query": "SELECT title FROM branches WHERE code = :branch"},
+]
+
+
+def _run(auth_headers, report_id):
+    return http.post(f"/api/v1/reports/{report_id}/run", json={"parameters": {"branch": "sr"}, "format": "docx"}, headers=auth_headers)
+
+
+def test_several_queries_on_an_uploaded_driver_are_one_worker_request(auth_headers, monkeypatch):
+    report_id = _oracle_report(auth_headers, monkeypatch, _ORA_QUERIES)
+    sent = []
+
+    def fake_post(url, json, headers, timeout):
+        sent.append(json)
+        return httpx.Response(200, json={"results": [
+            {"columns": ["NAME"], "rows": [["Siem Reap"], ["Angkor"]]},
+            {"columns": ["TITLE"], "rows": [[_KHMER_TITLE]]},
+        ]})
+
+    monkeypatch.setattr(jdbc.httpx, "post", fake_post)
+    run = _run(auth_headers, report_id)
+    assert run.status_code == 200, run.text
+    assert len(sent) == 1 and "sql" not in sent[0]
+    assert sent[0]["queries"] == [
+        {"sql": "SELECT name FROM sales WHERE branch = ?", "args": ["sr"]},
+        {"sql": "SELECT title FROM branches WHERE code = ?", "args": ["sr"]},
+    ]
+    assert _text(run.content) == f"{_KHMER_TITLE} — Siem Reap, Angkor"
+
+
+def test_a_failing_query_in_a_worker_batch_is_named(auth_headers, monkeypatch):
+    report_id = _oracle_report(auth_headers, monkeypatch, _ORA_QUERIES)
+    monkeypatch.setattr(jdbc.httpx, "post", lambda url, json, headers, timeout: httpx.Response(500, json={"kind": "query", "index": 1}))
+    run = _run(auth_headers, report_id)
+    assert run.status_code == 502
+    assert run.json()["detail"] == "The query 'info': The report's database rejected the query"
+
+
+def test_an_older_worker_gets_the_queries_one_by_one(auth_headers, monkeypatch):
+    report_id = _oracle_report(auth_headers, monkeypatch, _ORA_QUERIES)
+    sent = []
+
+    def fake_post(url, json, headers, timeout):
+        sent.append(json)
+        if "queries" in json:
+            return httpx.Response(422, json={"detail": [{"loc": ["body", "sql"], "msg": "Field required"}]})
+        if "sales" in json["sql"]:
+            return httpx.Response(200, json={"columns": ["NAME"], "rows": [["Siem Reap"]]})
+        return httpx.Response(200, json={"columns": ["TITLE"], "rows": [["Branch"]]})
+
+    monkeypatch.setattr(jdbc.httpx, "post", fake_post)
+    run = _run(auth_headers, report_id)
+    assert run.status_code == 200, run.text
+    assert [("queries" in s, s.get("sql")) for s in sent] == [
+        (True, None), (False, "SELECT name FROM sales WHERE branch = ?"), (False, "SELECT title FROM branches WHERE code = ?"),
+    ]
+    assert _text(run.content) == "Branch — Siem Reap"

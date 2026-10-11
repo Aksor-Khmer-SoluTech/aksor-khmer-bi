@@ -11,8 +11,10 @@ is where that happens, and it is deliberately boring and powerless --
   platform's PostgreSQL or Redis;
 * the filesystem is read-only, it runs as an unprivileged user with capped
   memory/CPU/processes (docker-compose.yml), and drivers are mounted read-only;
-* every query runs in a fresh JVM that is killed at the timeout, so a driver
-  can't keep state between queries or between organizations;
+* every request runs in a fresh JVM that is killed at the timeout, so a driver
+  can't keep state between requests or between organizations (a report with
+  several queries sends them as one request: one JVM, one connection, run in
+  order -- starting a JVM costs far more than a query);
 * a driver is loaded only if its SHA-256 still matches what was recorded at
   upload, so a file swapped on the volume afterwards is refused.
 
@@ -53,6 +55,11 @@ CLASS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)+$"
 app = FastAPI(title="Aksor Khmer BI JDBC driver service", docs_url=None, redoc_url=None, openapi_url=None)
 
 
+class Statement(BaseModel):
+    sql: str = Field(..., max_length=20_000)
+    args: list[str] = Field(default_factory=list, max_length=200)
+
+
 class Query(BaseModel):
     driver_file: str
     driver_sha256: str = Field(..., min_length=64, max_length=64)
@@ -60,9 +67,12 @@ class Query(BaseModel):
     jdbc_url: str = Field(..., max_length=1000)
     username: str
     password: str
-    sql: str = Field(..., max_length=20_000)
+    # One statement (sql + args, answered with {columns, rows}) or several (`queries`, answered with
+    # {results: [{columns, rows}, ...]} in the same order).
+    sql: str | None = Field(None, max_length=20_000)
     args: list[str] = Field(default_factory=list, max_length=200)
-    timeout_seconds: float = Field(30, gt=0, le=300)
+    queries: list[Statement] | None = Field(None, min_length=1, max_length=10)
+    timeout_seconds: float = Field(30, gt=0, le=300, description="Per statement")
     max_rows: int = Field(20000, gt=0, le=1_000_000)
 
 
@@ -90,6 +100,8 @@ def query(body: Query, x_worker_token: str = Header("")) -> JSONResponse:
         raise HTTPException(status_code=401, detail="Unauthorized")
     if not FILE_RE.match(body.driver_file) or not CLASS_RE.match(body.driver_class):
         raise HTTPException(status_code=400, detail="Invalid driver")
+    if (body.sql is None) == (body.queries is None):
+        raise HTTPException(status_code=400, detail="Send either sql or queries")
     jar = DRIVER_DIR / body.driver_file
     if not jar.is_file() or jar.resolve().parent != DRIVER_DIR.resolve():
         return _fail("driver", f"driver file {body.driver_file} not found", body.password)
@@ -98,8 +110,10 @@ def query(body: Query, x_worker_token: str = Header("")) -> JSONResponse:
 
     job = {
         "jar": str(jar), "class": body.driver_class, "url": body.jdbc_url, "user": body.username, "password": body.password,
-        "sql": body.sql, "args": body.args, "max_rows": body.max_rows,
+        "max_rows": body.max_rows,
+        "queries": [{"sql": q.sql, "args": q.args} for q in body.queries] if body.queries else [{"sql": body.sql, "args": body.args}],
     }
+    statements = len(job["queries"])
     # A minimal environment: nothing of this service's own reaches the driver's JVM.
     env = {"PATH": os.environ.get("PATH", ""), "HOME": "/tmp", "LANG": "C.UTF-8", "JAVA_TOOL_OPTIONS": "-Xmx384m"}
     if os.environ.get("JAVA_HOME"):
@@ -107,7 +121,7 @@ def query(body: Query, x_worker_token: str = Header("")) -> JSONResponse:
     try:
         done = subprocess.run(
             [sys.executable, str(RUNNER)], input=json.dumps(job), capture_output=True, text=True,
-            timeout=body.timeout_seconds + 10, env=env, cwd="/tmp",
+            timeout=body.timeout_seconds * statements + 10, env=env, cwd="/tmp",
         )
     except subprocess.TimeoutExpired:
         return _fail("timeout", "the query ran past its time limit and was stopped", body.password)
@@ -117,5 +131,10 @@ def query(body: Query, x_worker_token: str = Header("")) -> JSONResponse:
     except (IndexError, ValueError):
         return _fail("query", f"runner exited {done.returncode}: {done.stderr[-800:]}", body.password)
     if "error" in result:
-        return _fail(result["error"], result.get("detail", ""), body.password)
+        response = _fail(result["error"], result.get("detail", ""), body.password)
+        if body.queries is not None and isinstance(result.get("index"), int):
+            response = JSONResponse(status_code=500, content={"kind": result["error"], "index": result["index"]})
+        return response
+    if body.queries is None:
+        return JSONResponse(content=result["results"][0])
     return JSONResponse(content=result)

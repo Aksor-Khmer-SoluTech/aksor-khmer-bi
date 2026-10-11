@@ -20,8 +20,12 @@ const nameOf = (type: DataSourceType) => TYPES.find((t) => t.id === type)?.name 
 /** What would be lost, in a few words -- shown in the warning before a source is switched away from. */
 function describeLoss(source: EditableSource): string {
   if (source.type === "jdbc") {
-    const query = source.jdbc.query.trim().replace(/\s+/g, " ");
-    return [source.jdbc.connection && `connection “${source.jdbc.connection}”`, query && `the query “${query.length > 48 ? `${query.slice(0, 48)}…` : query}”`]
+    const queries = source.jdbc.queries;
+    const query = queries[0].query.trim().replace(/\s+/g, " ");
+    return [
+      source.jdbc.connection && `connection “${source.jdbc.connection}”`,
+      queries.length > 1 ? `its ${queries.length} queries` : query && `the query “${query.length > 48 ? `${query.slice(0, 48)}…` : query}”`,
+    ]
       .filter(Boolean)
       .join(" and ");
   }

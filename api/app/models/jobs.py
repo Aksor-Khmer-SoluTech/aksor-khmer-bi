@@ -67,3 +67,15 @@ class JobRunOut(BaseModel):
     result_summary: str | None = None
     triggered_by_user_id: str | None = None
     created_at: str
+
+
+class SchedulePreviewRequest(BaseModel):
+    cron_expression: str
+    start_date: str | None = Field(None, description="ISO 8601; as the job's own start_date")
+    end_date: str | None = Field(None, description="ISO 8601; as the job's own end_date")
+    count: int = Field(3, ge=1, le=10)
+
+
+class SchedulePreview(BaseModel):
+    timezone: str = Field(..., description="The time zone the scheduler reads the expression in")
+    next_runs: list[str] = Field(..., description="ISO 8601 instants, earliest first; fewer than `count` when end_date comes first")

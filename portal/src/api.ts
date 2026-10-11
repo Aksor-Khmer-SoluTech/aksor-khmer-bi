@@ -36,6 +36,7 @@ import type {
   ImageResource,
   Job,
   JobRun,
+  SchedulePreview,
   JobsSummary,
   JdbcConnectionConfig,
   JdbcDriver,
@@ -1251,6 +1252,9 @@ export const api = {
     },
     delete(id: string): Promise<void> {
       return del(`/jobs/${id}`, "Delete failed");
+    },
+    previewSchedule(body: { cron_expression: string; start_date?: string | null; end_date?: string | null; count?: number }): Promise<SchedulePreview> {
+      return sendJSON("/jobs/schedule-preview", "POST", body);
     },
     run(id: string): Promise<JobRun> {
       return apiFetch(`/jobs/${id}/run`, { method: "POST" }).then((r) => asJson<JobRun>(r));

@@ -836,6 +836,21 @@ function firstTable(data: Record<string, unknown>): { key: string; rows: Record<
   return null;
 }
 
+const show = (v: unknown) => (v === null || v === undefined ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v));
+
+/** Everything in the data besides the table's list -- a database source's one-row and one-value queries (`info`,
+ * `count`), other lists by size -- as path: value lines, so the table view leaves nothing out. */
+function otherValues(data: Record<string, unknown>, tableKey: string): { path: string; value: string }[] {
+  const lines: { path: string; value: string }[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (key === tableKey) continue;
+    if (Array.isArray(value)) lines.push({ path: key, value: `${value.length} item${value.length === 1 ? "" : "s"} (see JSON)` });
+    else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) lines.push({ path: `${key}.${k}`, value: show(v) });
+    else lines.push({ path: key, value: show(value) });
+  }
+  return lines.slice(0, 24);
+}
+
 function DataResult({ preview, running, view, onView }: { preview: DataPreview | null; running: boolean; view: "table" | "json"; onView: (v: "table" | "json") => void }) {
   const table = useMemo(() => (preview ? firstTable(preview.data) : null), [preview]);
   if (!preview || preview.missing.length) {
@@ -885,6 +900,16 @@ function DataResult({ preview, running, view, onView }: { preview: DataPreview |
       </div>
       {shown === "table" && table ? (
         <div className="nrw-result-table">
+          {otherValues(preview.data, table.key).length > 0 && (
+            <dl className="mb-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-sm border border-border-soft bg-bg-panel px-3 py-2 text-[0.8rem]">
+              {otherValues(preview.data, table.key).map((line) => (
+                <div key={line.path} className="contents">
+                  <dt className="mono text-text-faint">{line.path}</dt>
+                  <dd className="m-0 truncate text-text">{line.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           <table className="data-table">
             <thead>
               <tr>

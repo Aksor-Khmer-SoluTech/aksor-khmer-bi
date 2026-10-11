@@ -427,6 +427,35 @@ limit (20,000 by default) is an error, not a silent cut-off. That guard is a saf
 **point the connection at a read-only database account**, which is the real limit on what a report's SQL
 can do.
 
+**Several queries.** A database source can have up to 10 queries on its connection — the line items, a receipt's
+header, a count — each under its own name, and each giving one of three shapes:
+
+| Shape | The template gets | No row | More than one row |
+|---|---|---|---|
+| **List** | every row, as a list | `[]` | fine (up to the row limit) |
+| **One row** | that row, as an object | `null` | the run fails, naming the query |
+| **One value** | that row's first column | `null` | the run fails, naming the query |
+
+They run at the same time (4 at once by default, `JDBC_MAX_PARALLEL`) and are merged into one object, every name
+always present — `{"rows": [...], "info": {"receiptCode": "R-0012", "ref": "A/77"}, "count": 2}` — so the template
+reads `{{ info.receiptCode }}` and loops `{%tr for r in rows %}`; `{% if info %}` covers a header that may be
+missing. A result name can't also be a filter's name (the filter's value would replace it). If any query fails,
+the run fails and says which one: a report printed with part of its data missing is worse than an error. The row
+limit applies to all the lists together. On an uploaded driver (Oracle, SQL Server, Db2) the queries go to the
+driver service as one request — one start-up, one connection — and run in order rather than at the same time.
+Oracle and Db2 return unquoted column names in capitals (`info.TITLE`); alias a column in double quotes
+(`SELECT title AS "title"`) to name it exactly. Sample data and REST sources are unchanged — each is already one object.
+
+In the Data source tab (and the New Template wizard), **Add query** turns the one query into cards, each with its
+result name, its shape (List / One row / One value) and its SQL. Through the API, `queries` replaces `query` /
+`root_key`:
+
+```json
+{"type": "jdbc", "connection": "erp",
+ "queries": [{"name": "rows", "shape": "list",   "query": "SELECT ... WHERE receipt_id = :id"},
+             {"name": "info", "shape": "object", "query": "SELECT receipt_code AS \"receiptCode\", ref FROM receipts WHERE id = :id"}]}
+```
+
 **Connections** (Manage → Connections; permission `connection:manage`, held by system
 administrators and each organization's `ROLE_ORG_ADMIN`) are named, reusable
 `base URL + headers + authentication`. A report picks one and adds only a path, so when an API moves —
