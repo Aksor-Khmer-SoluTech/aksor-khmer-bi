@@ -154,32 +154,6 @@
   }
 }
 
-/* Templates toolbar's "Register template" button: below this, the type
-   filter + view toggle + sort control (all fixed-size, see .segmented and
-   .btn-register in pages.css) already crowd the row it shares -- the label
-   drops out and it becomes an icon button, same treatment its view-toggle
-   and sort siblings already have, rather than the row running out of room
-   and the button's own text wrapping onto a second line. 1250px, not a
-   tighter number closer to where the row actually runs out of room --
-   150% browser zoom on an ordinary ~1728px-wide screen only leaves ~1152px
-   of effective layout width, and that's a real, common way to hit this
-   page narrow, not just an actual small display. */
-@media (max-width: 1250px) {
-  .btn-register-label {
-    display: none;
-  }
-  /* Square, height-matched to the segmented controls and search button
-     beside it (both 42px -- see .segmented and .search-submit in
-     pages.css), the same way .search-submit sizes itself rather than
-     relying on text padding for its height. */
-  .btn-register {
-    height: 42px;
-    width: 42px;
-    padding: 0;
-    justify-content: center;
-  }
-}
-
 /* True small-screen safety net. Below this, the type filter's count
    badges drop (the number's redundant the moment you're looking at that
    filter's own results) and its pills tighten up -- shrinking its four
@@ -204,6 +178,9 @@
 @media (max-width: 640px) {
   .shell {
     padding: 20px 16px 80px;
+  }
+  .shell-tight {
+    padding: 16px 16px 24px;
   }
   .card-grid {
     grid-template-columns: 1fr;

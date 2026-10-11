@@ -5,6 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+- **Excel (tables)** for `.docx` reports: the run page's Export menu (and the API, embeds, jobs and batches with
+  `format=xlsx`) gives the report as a workbook that reads like it — a sheet per table (or per page, when the
+  template has page breaks, as in Oracle BI Publisher), named after the heading above it; the title and lines around
+  each table come along; numbers are real numbers *and* keep their look (`1,240.00`, `12.5%`, `(1,240.00)`); the
+  table's look comes too — fonts, colours (theme colours included), cell shading, Word's built-in table styles
+  (header and banded rows), mixed formatting within a cell, alignment, real merged cells, borders and column widths —
+  with a frozen, filterable header row. Images aren't copied; for a spreadsheet designed cell by cell, use an
+  `.xlsx` template.
+
+### Fixed
+- New Template's starter no longer adds a Total under identifier columns (card numbers, ids, codes) — only under
+  amounts.
+
+### Changed
+- **The run page fits the window:** the report viewer, the footer and an even 24px margin around them, with no
+  scrolling — so the Run panel stays level with the viewer instead of drifting when the page scrolled.
+- **Templates' two buttons are New Template** (start from your data, in the wizard) **and Upload Template** (a file
+  you've already designed) — were *New report* and *Register template*, which read like two names for the same
+  thing. The upload dialog is titled to match, and the wizard's "already have a template?" link opens it right there. Both now sit
+  top right in the page header, like every other page's actions.
+- Connections' buttons read **New Database** and **New REST API** (were *+ Database* / *+ REST API*), with icons.
+- **Upload driver** names the driver after the chosen file (`mssql-jdbc-13.6.0.jre11`) unless a name was typed, and
+  refuses a `-sources` or `-javadoc` jar straight away, pointing at the driver jar beside it.
+- In the database connection dialog the **JDBC URL** sits right under Database and Organization — the fields it's
+  built from — instead of after Security and Driver.
+- **Sample data is edited in a real JSON editor** (the SQL editor's look): line numbers, folding, coloured keys and
+  values, matching and auto-closing brackets, Tab to indent — in New report and a report's Data source tab.
+- **New report:** Name and Folder side by side, Description full width below them; Name and Description show how
+  many characters are left, like Code. The page uses the full width, and what a source returns is shown below its
+  settings at full width, so a query's columns have room.
+
 ## [1.0.0-beta.3] - 2026-10-10
 
 ### Changed

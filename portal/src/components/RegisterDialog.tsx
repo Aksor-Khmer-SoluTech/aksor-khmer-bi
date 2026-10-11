@@ -299,7 +299,7 @@ export default function RegisterDialog({
   return (
     <dialog ref={ref} className="modal register-dialog" onCancel={onDialogCancel(onClose)}>
       <ModalClose />
-      <h2 className="panel-title">Register a template</h2>
+      <h2 className="panel-title">Upload Template</h2>
       <p className="panel-subtitle">
         A .docx, .xlsx, or .html file with {"{{ field }}"} placeholders — an html template can also reference an
         uploaded image or stylesheet via {"{{ resource('name') }}"}.{" "}
@@ -452,7 +452,7 @@ export default function RegisterDialog({
           </button>
           <button type="submit" className="btn btn-primary" disabled={pending || blockedByHtmlValidation || checkCode(code) !== null}>
             {pending && <span className="spinner" />}
-            Register
+            Upload
           </button>
         </div>
       </form>

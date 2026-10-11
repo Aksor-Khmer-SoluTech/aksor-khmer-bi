@@ -28,6 +28,8 @@ export default function DriverUploadDialog({
   // Start on an engine that has no built-in driver: that's what most uploads are for.
   const [engine, setEngine] = useState<JdbcEngine>(engines.find((e) => !e.built_in) ?? engines[0]);
   const [name, setName] = useState("");
+  // Typed by hand: a file chosen afterwards no longer renames it.
+  const [nameEdited, setNameEdited] = useState(false);
   const [driverClass, setDriverClass] = useState(engine.driver_class);
   const [classEdited, setClassEdited] = useState(false);
   const [orgId, setOrgId] = useState(defaultOrgId);
@@ -90,7 +92,10 @@ export default function DriverUploadDialog({
                 maxLength={NAME_MAX}
                 placeholder={`${engine.label} — ojdbc11 23.4`}
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setNameEdited(e.target.value !== "");
+                  setName(e.target.value);
+                }}
               />
             </label>
             <label>
@@ -112,8 +117,15 @@ export default function DriverUploadDialog({
               <FileDropzone
                 file={file}
                 onFile={(f) => {
+                  // Vendors ship the driver next to its source and documentation jars; only the plain one runs.
+                  if (/-(sources|javadoc)\.jar$/i.test(f.name)) {
+                    setError(`${f.name} holds the driver's ${/sources/i.test(f.name) ? "source code" : "documentation"}, not the driver — choose ${f.name.replace(/-(sources|javadoc)\.jar$/i, ".jar")}.`);
+                    return;
+                  }
                   setError(null);
                   setFile(f);
+                  // Name it after the file (mssql-jdbc-13.6.0.jre11), unless a name was typed.
+                  if (!nameEdited) setName(f.name.replace(/\.jar$/i, "").slice(0, NAME_MAX));
                 }}
                 onClear={() => setFile(null)}
                 onReject={setError}

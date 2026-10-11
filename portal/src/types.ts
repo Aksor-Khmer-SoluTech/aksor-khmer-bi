@@ -24,7 +24,8 @@ export interface RenderResult {
 }
 
 export const FORMATS_BY_EXT: Record<TemplateExt, RenderFormat[]> = {
-  docx: ["pdf", "png", "docx"],
+  // xlsx from a docx report is its tables as sheets -- "Excel (tables)", not a designed spreadsheet.
+  docx: ["pdf", "png", "docx", "xlsx"],
   xlsx: ["xlsx"],
   html: ["pdf", "png"],
 };

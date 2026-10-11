@@ -9,6 +9,7 @@ import { suggestCode } from "../reportCode";
 import type { AuthInfo, ConnectionSummary, DataField, DataPreview, DataSourceType, ParameterType, ReportMeta, ReportParameter, TemplateCheck, TemplateExt } from "../types";
 import FolderPicker from "./FolderPicker";
 import JdbcSourceFields from "./JdbcSourceFields";
+import RegisterDialog from "./RegisterDialog";
 import ReportCodeField from "./ReportCodeField";
 import RequestFields from "./RequestFields";
 import RunReportPage from "./RunReportPage";
@@ -29,6 +30,9 @@ const KINDS: { id: DataSourceType; label: string; blurb: string; icon: typeof Ca
   { id: "jdbc", label: "Database", blurb: "A saved connection plus a SQL query. Filters go in as :name.", icon: Database },
 ];
 
+// The same limits as registering a template (RegisterDialog) and the API's DraftCreate.
+const NAME_MAX = 100;
+const DESCRIPTION_MAX = 500;
 const FILTER_TYPES: ParameterType[] = ["text", "number", "date", "datetime", "time"];
 const INPUT_TYPE: Record<ParameterType, string> = { text: "text", number: "number", date: "date", datetime: "datetime-local", time: "time" };
 const STARTER_TYPES: TemplateExt[] = ["docx", "xlsx", "html"];
@@ -190,6 +194,7 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const publishedBanner = useRef<HTMLDivElement>(null);
 
@@ -466,11 +471,11 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
     <div className="nrw">
       <div className="page-header">
         <div>
-          <h1 className="page-title">{report ? report.name : "New report"}</h1>
+          <h1 className="page-title">{report ? report.name : "New Template"}</h1>
           <p className="page-subtitle">
             Start from your data: see exactly what it returns, design the look against those fields, then test it and publish. Already have a finished template?{" "}
-            <button type="button" className="link-btn" onClick={() => navigate({ view: "gallery" })}>
-              Register it directly
+            <button type="button" className="link-btn" onClick={() => setUploadOpen(true)}>
+              Upload it instead
             </button>
             .
           </p>
@@ -508,21 +513,31 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
       {/* ===================== 1. Data ===================== */}
       {step === 1 && (
         <section className="nrw-card">
-          <div className="nrw-grid-3">
+          <div className="nrw-grid-2">
             <label>
-              <span>
-                Name <span className="required-mark">*</span>
+              <span className="field-label-row">
+                <span>
+                  Name <span className="required-mark">*</span>
+                </span>
+                <span className={`char-counter${name.length >= NAME_MAX ? " char-counter-limit" : ""}`}>
+                  {name.length}/{NAME_MAX}
+                </span>
               </span>
-              <input type="text" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} placeholder="e.g. Monthly invoices" />
+              <input type="text" value={name} maxLength={NAME_MAX} onChange={(e) => setName(e.target.value)} placeholder="e.g. Monthly invoices" />
             </label>
             <FolderPicker value={folderId} onChange={setFolderId} hint={null} />
-            <label>
+          </div>
+          <label>
+            <span className="field-label-row">
               <span>
                 Description <span className="muted">(optional)</span>
               </span>
-              <input type="text" value={description} maxLength={500} onChange={(e) => setDescription(e.target.value)} />
-            </label>
-          </div>
+              <span className={`char-counter${description.length >= DESCRIPTION_MAX ? " char-counter-limit" : ""}`}>
+                {description.length}/{DESCRIPTION_MAX}
+              </span>
+            </span>
+            <textarea rows={2} value={description} maxLength={DESCRIPTION_MAX} onChange={(e) => setDescription(e.target.value)} placeholder="What it shows, and who it's for" />
+          </label>
           {!report && (
             <ReportCodeField
               value={code}
@@ -776,6 +791,8 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
           </div>
         </section>
       )}
+
+      <RegisterDialog open={uploadOpen} auth={auth} onClose={() => setUploadOpen(false)} onCreated={(r) => navigate({ view: "detail", id: r.report_id })} />
 
       <div className="nrw-footer">
         <div className="nrw-footer-left">

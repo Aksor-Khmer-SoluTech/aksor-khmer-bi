@@ -523,8 +523,14 @@ export default function ReportViewer({
           {exportMenuOpen && (
             <div className="report-viewer-menu report-viewer-menu-right" role="menu">
               {formats.map((f) => (
-                <button key={f} type="button" className="report-viewer-menu-item" onClick={() => handleExport(f)}>
-                  {FORMAT_LABEL[f]}
+                <button
+                  key={f}
+                  type="button"
+                  className="report-viewer-menu-item"
+                  title={f === "xlsx" && templateExt === "docx" ? "The report's tables, one sheet each" : undefined}
+                  onClick={() => handleExport(f)}
+                >
+                  {f === "xlsx" && templateExt === "docx" ? "Excel tables (.xlsx)" : FORMAT_LABEL[f]}
                   {parts > 1 && <span className="report-viewer-menu-note">{parts} files, as a ZIP</span>}
                 </button>
               ))}

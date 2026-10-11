@@ -1,5 +1,6 @@
 import { FlaskConical } from "lucide-react";
 import { parseStaticData } from "../dataConfig";
+import JsonEditor from "./JsonEditor";
 
 const EXAMPLE = {
   organization: "Sample Organization",
@@ -35,15 +36,12 @@ export default function StaticSourceFields({ text, onChange, error }: { text: st
           </button>
         </div>
       </div>
-      <textarea
-        className="mono-input static-source-text"
-        rows={16}
-        spellCheck={false}
-        aria-label="Sample data"
-        aria-invalid={error !== null}
-        placeholder={'{\n  "rows": [ { "name": "…", "total": 0 } ]\n}'}
+      <JsonEditor
         value={text}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
+        ariaLabel="Sample data"
+        invalid={error !== null}
+        placeholder={'{\n  "rows": [ { "name": "…", "total": 0 } ]\n}'}
       />
       {error && <p className="alert alert-error">{error}</p>}
       <p className="field-hint">

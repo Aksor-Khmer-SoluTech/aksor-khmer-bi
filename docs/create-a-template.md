@@ -18,7 +18,7 @@ images, long-table splitting, filters/data sources and embedding. This page is t
 
 | You want | Use | Renders to |
 |---|---|---|
-| A letter, certificate, invoice, form — laid out in Word | **`.docx`** | `docx`, `pdf`, `png` |
+| A letter, certificate, invoice, form — laid out in Word | **`.docx`** | `docx`, `pdf`, `png`, and `xlsx` = its tables (below) |
 | A spreadsheet the recipient will keep editing / a data export | **`.xlsx`** | `xlsx` |
 | Pixel-level print layout with CSS (badges, cards, columns) | **`.html`** | `pdf`, `png` |
 
@@ -28,11 +28,31 @@ Use `.html` when you need CSS control Word can't give you.
 
 An `.xlsx` template can only produce `.xlsx` (see [architecture](architecture.md)).
 
+**Excel (tables)** — a `.docx` report also renders to `xlsx`: its data, laid out to read like the report (the way
+Oracle BI Publisher turns a Word layout into Excel):
+
+- **Sheets** — each table gets its own sheet, named after the heading (or line) above it. If the template has
+  **page breaks** (an inserted page break, *page break before*, or a section break), each **page** becomes a sheet
+  instead — so you choose the split in Word.
+- **Text comes along** — the title and lines like *Company: …* sit above their table, headings in bold; lines after
+  the last table go below it. A document with no table gives its lines, one per row.
+- **Numbers are numbers and keep their look** — `1,240.00` is stored as 1240 and shown as `1,240.00`; `12.5%` as
+  0.125 shown `12.5%`; `(1,240.00)` as −1240. So format numbers in the template the way you want them in Excel too.
+  IDs with leading zeros (`00123`), phone numbers and dates stay text.
+- **The table's look comes along** — bold, italic, font size and colour; cell shading (a navy header row stays
+  navy); horizontal and vertical alignment; merged cells as real Excel merges; thin borders when the Word table has
+  them; the column widths you set in Word. Word's built-in table styles (*Table Design*) carry their header row and
+  banded rows, theme colours become the colours Word shows, and a cell with mixed formatting (one word bold or red)
+  keeps it. The first table on a sheet gets a frozen, filterable header row — the row under a full-width title row
+  ("September 2026") when there is one.
+
+Not copied: images and page positions. For a spreadsheet designed cell by cell, use an `.xlsx` template.
+
 ---
 
 ## 2. The workflow, end to end
 
-### 2.1 Start from your data (recommended): **Templates → New report**
+### 2.1 Start from your data (recommended): **Templates → New Template**
 
 Design against the data you actually have, instead of guessing placeholder names first. Four steps:
 
@@ -54,9 +74,9 @@ the API or an embed, until it's published. Its own page says so and has **Contin
 where you left off (`#/templates/new/<report id>`). The starter is the report's first version, so the history keeps
 it next to your design.
 
-### 2.2 Register a finished template
+### 2.2 Upload a finished template
 
-Already have the file? **Templates → Register template**:
+Already have the file? **Templates → Upload Template** (the API calls this *registering* a template):
 
 1. **Write** the file with `{{ placeholders }}` where data goes (sections 4–6).
 2. **Register** it (section 3). Aksor reads the file and lists the fields it found. It is published straight away.
@@ -74,7 +94,7 @@ You need the `report:manage` permission.
 
 ### 3.1 In the portal
 
-**Templates → Register template**, then fill in:
+**Templates → Upload Template**, then fill in:
 
 | Field | Required | Notes |
 |---|---|---|

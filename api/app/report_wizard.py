@@ -36,6 +36,9 @@ STARTER_MAX_COLUMNS = 8
 STARTER_FONT = "Khmer OS Siemreap"
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Numbers that identify rather than count -- a card number, an id, a code. Shown right-aligned like other numbers,
+# but never totalled: adding up card numbers means nothing.
+_ID_LIKE = re.compile(r"(^|_)(id|no|num|number|code|ref|year|phone|tel)$", re.IGNORECASE)
 
 
 # --- the data's fields --------------------------------------------------------------------------------------------
@@ -181,7 +184,7 @@ def _plan(data: dict, parameters: list[str]) -> _Plan:
                             keys.append(key)
                 for key in keys[:STARTER_MAX_COLUMNS]:
                     numeric = all(isinstance(r.get(key), (int, float)) and not isinstance(r.get(key), bool) for r in rows if key in r)
-                    table.columns.append((_label(key), _ref(var, key), numeric))
+                    table.columns.append((_label(key), _ref(var, key), numeric and not _ID_LIKE.search(key)))
             elif value:
                 table.columns.append((label, var, all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)))
             if table.columns:

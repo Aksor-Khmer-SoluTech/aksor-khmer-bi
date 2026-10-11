@@ -380,9 +380,13 @@ a.account-item {
 }
 
 /* For pages whose content is the point and wants the vertical room
-   (the run page's report viewer). */
+   (the run page's report viewer). The viewer is sized to the window, so the
+   bottom gets the side padding, not the long-page 64px -- which made the
+   page a little taller than the window, scroll, and pull the sticky Run
+   panel out of line with the viewer. */
 .shell-tight {
   padding-top: 16px;
+  padding-bottom: 24px;
 }
 
 .glyph-img {

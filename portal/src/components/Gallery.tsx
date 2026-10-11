@@ -183,7 +183,25 @@ export default function Gallery({ auth, onOpenReport, onNewReport }: { auth: Aut
       <div className="page-header">
         <div>
           <h1 className="page-title">Templates</h1>
-          <p className="page-subtitle">Register, integrate, and manage the templates this console can render.</p>
+          <p className="page-subtitle">Start a new report from your data, or upload a template you've already designed — then integrate and manage them here.</p>
+        </div>
+        {/* Two ways in, named by where you start: from your data (the wizard -- see the data, get its fields or a
+            starter file, design, publish), or from a template that's already finished. Top right, like every page's
+            own actions. */}
+        <div className="page-header-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onNewReport}
+            data-tip="Start from your data: pick a source, see what it returns, then design the template against it"
+          >
+            <Plus size={16} aria-hidden="true" />
+            New Template
+          </button>
+          <button type="button" className="btn" onClick={() => setRegisterOpen(true)} data-tip="You already have a designed .docx, .xlsx or .html file">
+            <Upload size={15} aria-hidden="true" />
+            Upload Template
+          </button>
         </div>
       </div>
 
@@ -282,22 +300,6 @@ export default function Gallery({ auth, onOpenReport, onNewReport }: { auth: Aut
               );
             })}
           </div>
-
-          {/* Icon + label, not a literal "+" -- the label itself drops out below
-              .btn-register's own breakpoint (see responsive.css) so this stays
-              a single-line, fixed-height control at any width instead of its
-              text wrapping onto a second line and making it taller than the
-              segmented controls beside it. */}
-          {/* Two ways in: start from the data (the wizard designs the template against it), or register a
-              template that's already finished. */}
-          <button type="button" className="btn btn-register" onClick={() => setRegisterOpen(true)} data-tip="Register a finished template" aria-label="Register a finished template">
-            <Upload size={15} aria-hidden="true" />
-            <span className="btn-register-label">Register template</span>
-          </button>
-          <button type="button" className="btn btn-primary btn-register" onClick={onNewReport} data-tip="New report — start from your data" aria-label="New report">
-            <Plus size={16} aria-hidden="true" />
-            <span className="btn-register-label">New report</span>
-          </button>
         </div>
       </div>
 

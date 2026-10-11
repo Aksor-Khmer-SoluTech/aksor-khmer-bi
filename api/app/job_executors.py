@@ -111,7 +111,8 @@ def _render_bytes(report_id: str, fmt: str, context: dict) -> bytes:
     except report_store.ReportNotFoundError as exc:
         raise PermanentJobError(f"Report {report_id!r} not found") from exc
 
-    allowed = {"docx": {"docx", "pdf", "png"}, "xlsx": {"xlsx"}}[meta["template_ext"]]
+    # xlsx from a docx report: its tables as sheets ("Excel (tables)", doc_engine/engines/docx_tables.py).
+    allowed = {"docx": {"docx", "pdf", "png", "xlsx"}, "xlsx": {"xlsx"}}[meta["template_ext"]]
     if fmt not in allowed:
         raise PermanentJobError(f"Report {report_id!r} is a .{meta['template_ext']} template; format {fmt!r} unsupported")
 

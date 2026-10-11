@@ -60,7 +60,7 @@ export function bindSnippet(filter: SqlFilter, engine: string | null | undefined
 
 export const sqlDialectLabel = (engine: string | null | undefined) => (DIALECTS[engine ?? ""] ?? FALLBACK).label;
 
-const highlight = HighlightStyle.define([
+export const highlight = HighlightStyle.define([
   { tag: [t.keyword, t.operatorKeyword, t.modifier], color: "var(--accent-strong)", fontWeight: "600" },
   { tag: [t.string, t.special(t.string)], color: "var(--success-strong)" },
   { tag: [t.number, t.bool, t.null], color: "var(--highlight-strong)" },
@@ -98,7 +98,8 @@ function decorator(regexp: RegExp, className: string) {
   );
 }
 
-const theme = EditorView.theme({
+/** Shared with JsonEditor, so the two editors look the same. */
+export const theme = EditorView.theme({
   "&": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.82rem",

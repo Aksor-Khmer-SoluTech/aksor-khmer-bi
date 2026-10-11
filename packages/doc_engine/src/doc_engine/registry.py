@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Sequence
 
-from .engines import excel_engine, libreoffice_engine, weasyprint_engine
+from .engines import docx_tables, excel_engine, libreoffice_engine, weasyprint_engine
 from .segmentation import segment_generic
 
 Format = Literal["docx", "pdf", "png", "xlsx"]
@@ -66,6 +66,9 @@ def render(
         return libreoffice_engine.render_docx(segmented, template_path)
 
     if fmt == "xlsx":
+        if str(template_path).endswith(".docx"):
+            # Excel (tables): render the Word report, then hand over its tables as sheets -- see docx_tables.
+            return docx_tables.docx_tables_to_xlsx(libreoffice_engine.render_docx(segmented, template_path))
         return excel_engine.render_xlsx_template(segmented, template_path)
 
     if fmt == "pdf":

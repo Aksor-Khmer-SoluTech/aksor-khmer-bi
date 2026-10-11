@@ -451,7 +451,7 @@ connections (`report:manage` is enough to pick one) but neither their header val
 credentials. A connection in use, or a Secret anything still refers to, can't be deleted; a connection's
 name is fixed once created because reports refer to it.
 
-**Database connections** (Manage → Connections → *+ Database*) hold what is needed to reach one database:
+**Database connections** (Manage → Connections → *New Database*) hold what is needed to reach one database:
 the engine (Oracle, PostgreSQL, MySQL, SQL Server, MariaDB or IBM Db2, each with its logo), host, port,
 database (Oracle: service name or SID), a **secure connection mode** (disabled, required, verify CA,
 verify full — each engine's own settings are built for you), the driver, and the login. The JDBC URL is

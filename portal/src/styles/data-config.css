@@ -194,20 +194,36 @@
 
 /* ---- request editor (connection + path) ------------------------------------ */
 
+/* The caption on top, then the select with "Manage connections" beside it, centred on the select's own height.
+   The <label> lays its children straight into this grid (display: contents) and still labels the select. */
 .req-connection {
-  display: flex;
-  align-items: flex-end;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 14px;
+  align-items: center;
+  margin-bottom: 14px;
 }
 
-.req-connection label {
-  flex: 1;
+.req-connection:not(:has(.req-manage-link)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.req-connection > label {
+  display: contents;
+}
+
+.req-connection > label > span {
+  grid-column: 1 / -1;
+}
+
+.req-connection > label > select {
+  grid-column: 1;
   min-width: 0;
 }
 
 .req-manage-link {
-  flex: 0 0 auto;
-  margin-bottom: 16px;
+  grid-column: 2;
+  white-space: nowrap;
   font-size: 0.8rem;
   color: var(--accent-strong);
   text-decoration: underline;
@@ -768,13 +784,13 @@ label > span.req-url:focus-within {
   }
 
   .req-connection {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
   }
 
   .req-manage-link {
-    margin: -8px 0 14px;
+    grid-column: 1;
+    justify-self: start;
   }
 }
 
@@ -870,7 +886,14 @@ label > span.req-url:focus-within {
 .static-source {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
+}
+.static-source .field-hint,
+.static-source .alert {
+  margin: 0;
+}
+.json-editor.invalid .cm-editor {
+  border-color: var(--danger);
 }
 
 .jdbc-source-conn {
@@ -926,7 +949,6 @@ textarea.static-source-text {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
 }
 
 .static-source-head .field-label {

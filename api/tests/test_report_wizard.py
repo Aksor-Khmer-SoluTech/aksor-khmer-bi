@@ -329,3 +329,32 @@ def test_dates_and_ids_reach_the_template_unchanged_while_khmer_is_still_segment
     cells = [c.value for row in load_workbook(io.BytesIO(rendered.content)).active.iter_rows() for c in row]
     assert cells[:3] == ["02/09/2026", "UNPAID", "INV-2026-0131"]  # nothing invisible inside them
     assert "\u200b" in cells[3] and cells[3].replace("\u200b", "") == context["k"]  # Khmer still gets its break points
+
+
+def test_a_docx_report_also_gives_its_tables_as_excel(auth_headers, upstream):
+    """Excel (tables): a .docx report rendered as xlsx hands over its tables as sheets, numbers as numbers."""
+    draft = _draft(auth_headers)  # the docx starter: a table of the invoices with a total row
+    rendered = client.post(f"/api/v1/reports/{draft['report_id']}/render?format=xlsx", json=draft["sample_context"])
+    assert rendered.status_code == 200, rendered.text
+    wb = load_workbook(io.BytesIO(rendered.content))
+    assert wb.sheetnames == ["Invoices"]  # named after the heading above the table
+    rows = [[c.value for c in row] for row in wb.active.iter_rows()]
+    # The report's own lines come first, as in the document: its title, the filter, the company...
+    assert rows[0][0] == "Monthly invoices" and ["Month: 2026-09"] == rows[1][:1]
+    header = next(i for i, r in enumerate(rows) if r[0] == "Invoice no")
+    assert rows[header] == ["Invoice no", "Customer name", "Issued on", "Total usd", "Status"]
+    assert rows[header + 1][:2] == ["INV-1", "Sokha Trading"] and rows[header + 1][3] == 1240
+    assert rows[header + 2][1] == "ហាងលក់ទំនិញស្រីពៅ"  # Khmer intact, no invisible breaks
+    assert rows[-1][0] == "Total" and rows[-1][3] == 1552.75
+
+    # The same from a signed-in run.
+    run = client.post(f"/api/v1/reports/{draft['report_id']}/run", json={"parameters": {"month": "2026-09"}, "format": "xlsx"}, headers=auth_headers)
+    assert run.status_code == 200, run.text
+    assert load_workbook(io.BytesIO(run.content)).sheetnames == ["Invoices"]
+
+
+def test_the_starter_never_totals_identifier_columns():
+    data = {"employees": [{"card_no": 1529, "staff_id": 7, "salary": 1200.0}, {"card_no": 1778, "staff_id": 8, "salary": 900.5}]}
+    html = report_wizard.starter_template("Staff", data, "html").decode()
+    assert 'sum(attribute="salary")' in html
+    assert 'sum(attribute="card_no")' not in html and 'sum(attribute="staff_id")' not in html

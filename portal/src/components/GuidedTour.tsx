@@ -41,7 +41,7 @@ const TOURS: Record<TourId, TourStep[]> = {
       title: "This is Manage",
       body: "Everything you can manage, grouped by job: authoring, scheduling, data sources, people, operations. You only see the pages your role allows.",
     },
-    { target: "manage-templates", title: "Templates", body: "Where reports are made. New report starts from your data: run it, get the fields, design the look, preview, publish." },
+    { target: "manage-templates", title: "Templates", body: "Where reports are made. New Template starts from your data: run your source, get its fields, design the look, preview, publish. Upload Template takes one you've already designed." },
     { target: "manage-connections", title: "Data sources", body: "Connections to your REST APIs and databases, set up once and shared by every report that uses them." },
     { target: "manage-users", title: "People & access", body: "Accounts, roles and who can open which reports." },
     {

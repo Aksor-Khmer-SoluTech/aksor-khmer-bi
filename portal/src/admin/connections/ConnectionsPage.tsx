@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Cable, Pencil, Trash2 } from "lucide-react";
+import { Cable, Database, Pencil, Trash2 } from "lucide-react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { TableSkeleton } from "../../components/Skeletons";
@@ -91,10 +91,12 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
         </div>
         <div className="page-header-actions">
           <button type="button" className="btn" onClick={() => setDialog({ key: Date.now(), kind: "jdbc", connection: null })}>
-            + Database
+            <Database size={15} aria-hidden="true" />
+            New Database
           </button>
           <button type="button" className="btn btn-primary" onClick={() => setDialog({ key: Date.now(), kind: "rest", connection: null })}>
-            + REST API
+            <Cable size={15} aria-hidden="true" />
+            New REST API
           </button>
         </div>
       </div>

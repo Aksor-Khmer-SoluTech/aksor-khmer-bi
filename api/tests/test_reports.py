@@ -139,13 +139,13 @@ def test_render_report_pdf(auth_headers):
     assert resp.content.startswith(b"%PDF")
 
 
-def test_render_docx_report_rejects_xlsx_format(auth_headers):
-    created = _register_report(auth_headers).json()
+def test_render_xlsx_report_rejects_pdf_format(auth_headers):
+    created = _register_xlsx_report(auth_headers).json()
     resp = client.post(
-        f"/api/v1/reports/{created['report_id']}/render?format=xlsx",
+        f"/api/v1/reports/{created['report_id']}/render?format=pdf",
         json={"customer_name": "x"},
     )
-    assert resp.status_code == 400  # this report is a .docx template
+    assert resp.status_code == 400  # a spreadsheet template only makes xlsx (a .docx can make all four)
 
 
 def test_create_xlsx_report(auth_headers):
@@ -410,12 +410,12 @@ def test_render_report_batch_over_cap_rejected(auth_headers, monkeypatch):
 
 
 def test_render_report_batch_rejects_wrong_format(auth_headers):
-    created = _register_report(auth_headers).json()
+    created = _register_xlsx_report(auth_headers).json()
     resp = client.post(
-        f"/api/v1/reports/{created['report_id']}/render/batch?format=xlsx",
+        f"/api/v1/reports/{created['report_id']}/render/batch?format=pdf",
         json=[{"customer_name": "a"}],
     )
-    assert resp.status_code == 400  # this report is a .docx template
+    assert resp.status_code == 400  # a spreadsheet template only makes xlsx
 
 
 def test_render_report_batch_not_found():

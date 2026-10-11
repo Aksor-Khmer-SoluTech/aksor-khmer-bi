@@ -19,7 +19,7 @@ from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app import clients, db, report_data
+from app import clients, db, report_data, report_store
 from app.routers.reports import _report_headers
 from app.main import app
 
@@ -92,6 +92,18 @@ def report(auth_headers) -> str:
 def _text(content: bytes) -> str:
     # The renderer inserts zero-width word-break marks for Khmer line breaking; drop them.
     return "\n".join(p.text for p in Document(BytesIO(content)).paragraphs).replace("\u200b", "")
+
+
+def _as_xlsx_template(report_id: str) -> None:
+    """Swap the report's file for a spreadsheet template -- which can only produce xlsx (a .docx can now produce every
+    format: xlsx is its tables, "Excel (tables)")."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.active["A1"] = "{{ total }}"
+    buf = BytesIO()
+    wb.save(buf)
+    report_store.replace_report_file(report_store.resolve_ref(report_id), buf.getvalue(), "xlsx")
 
 
 def embed_run(ref, body, **kw):
@@ -170,7 +182,8 @@ def test_the_parameters_are_still_validated_against_the_reports_definitions(repo
 
 
 def test_a_format_the_template_cant_produce_is_refused(report, erp, granted):
-    resp = embed_run("sales", {"parameters": PARAMS, "format": "xlsx", **granted})
+    _as_xlsx_template("sales")
+    resp = embed_run("sales", {"parameters": PARAMS, "format": "pdf", **granted})
     assert resp.status_code == 400
     assert erp.calls == []
 

@@ -117,7 +117,9 @@ curl "http://localhost:8000/api/v1/reports/<report_id>/schema"
 ```
 
 A `.docx` template can render to `docx`/`pdf`/`png` (LibreOffice backend
-only — WeasyPrint has no notion of a user-supplied `.docx` template); a
+only — WeasyPrint has no notion of a user-supplied `.docx` template), and to
+`xlsx` as its data — a sheet per table, or per page when the template has page breaks, with the text around each table and the tables' formatting ("Excel (tables)", see
+`doc_engine/engines/docx_tables.py`); a
 `.xlsx` template only renders to `xlsx` (LibreOffice could convert it to
 pdf/png too, but that path isn't wired up yet). Requesting a format your
 template's file type doesn't support returns `400`. Every string in the

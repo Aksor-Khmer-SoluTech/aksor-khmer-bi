@@ -73,6 +73,18 @@ def _grant(auth_headers, subject_type, subject_id, report_id, level="render", li
     return resp
 
 
+def _as_xlsx_template(report_id: str) -> None:
+    """Swap the report's file for a spreadsheet template -- which can only produce xlsx (a .docx can now produce every
+    format: xlsx is its tables, "Excel (tables)")."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.active["A1"] = "{{ total }}"
+    buf = BytesIO()
+    wb.save(buf)
+    report_store.replace_report_file(report_store.resolve_ref(report_id), buf.getvalue(), "xlsx")
+
+
 def _run(headers, report_id, parameters, fmt="docx"):
     return client.post(f"/api/v1/reports/{report_id}/run", json={"parameters": parameters, "format": fmt}, headers=headers)
 
@@ -386,7 +398,7 @@ def test_run_form_narrows_options_to_the_grant(auth_headers, make_local_user):
 
     form = _form(headers, report_id).json()
     assert form["access_level"] == "render"
-    assert form["formats"] == ["pdf", "png", "docx"]
+    assert form["formats"] == ["pdf", "png", "docx", "xlsx"]
     by_name = {p["name"]: p for p in form["parameters"]}
     assert by_name["p_branch"]["options"] == [{"value": "BR01", "label": "Phnom Penh"}]
     assert by_name["note"]["options"] is None  # free text
@@ -674,7 +686,8 @@ def test_required_parameter_cannot_be_omitted(auth_headers):
 
 
 def test_format_not_allowed_for_the_template_is_rejected_before_any_fetch(auth_headers, sales_report, fake_source):
-    resp = _run(auth_headers, sales_report, {"p_branch": "BR01"}, fmt="xlsx")
+    _as_xlsx_template(sales_report)
+    resp = _run(auth_headers, sales_report, {"p_branch": "BR01"}, fmt="pdf")
     assert resp.status_code == 400
     assert fake_source.calls == []
 

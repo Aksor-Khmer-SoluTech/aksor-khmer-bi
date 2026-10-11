@@ -312,8 +312,8 @@
   flex-wrap: wrap;
 }
 
-/* The type filter, view toggle, sort control and "+ Register template"
-   move as one block, not as four independent flex items -- nowrap here
+/* The type filter, view toggle and sort control
+   move as one block, not as independent flex items -- nowrap here
    so they can never split from each other. At any width where the row
    as a whole doesn't fit, it's this whole group that wraps below the
    search field (.gallery-toolbar's own flex-wrap), together, rather than
@@ -329,18 +329,6 @@
   gap: 12px;
   flex-wrap: nowrap;
   margin-left: auto;
-}
-
-/* Fixed size like the segmented controls beside it (their own flex: 0 0 auto,
-   above) -- without this the button is the row's only shrinkable child, so
-   once .gallery-toolbar-actions itself has no more room, the browser shrinks
-   it by wrapping "Register template" onto a second line instead of moving
-   the whole group down a row, leaving it visibly taller than its siblings.
-   The label itself drops out below a width where even its fixed size no
-   longer fits (see responsive.css); nowrap so it never wraps while shown. */
-.btn-register {
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 .search-form {
@@ -1334,7 +1322,10 @@ button.access-chip {
      monitor the report fits the fold instead of hanging off the bottom --
      with a floor so it never collapses and a cap for very tall screens. */
   --run-above-h: 130px;
-  --run-stage-h: clamp(360px, calc(100vh - var(--run-above-h) - var(--run-toolbar-h) - 22px), 960px);
+  /* ...and below it: the page's bottom padding and the footer, so the whole page -- footer included -- fits the
+     window and never scrolls (a scrolling page pulled the sticky Run panel out of line with the viewer). */
+  --run-below-h: 57px;
+  --run-stage-h: clamp(360px, calc(100vh - var(--run-above-h) - var(--run-toolbar-h) - 22px - var(--run-below-h)), 960px);
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
   align-items: start;
@@ -1343,7 +1334,7 @@ button.access-chip {
 
 .run-sidebar {
   position: sticky;
-  top: 24px;
+  top: 16px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -5098,7 +5089,6 @@ textarea[readonly] {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-width: 1180px;
 }
 .nrw .page-header {
   margin-bottom: 0;
@@ -5218,13 +5208,13 @@ textarea[readonly] {
   gap: 18px;
   min-width: 0;
 }
-.nrw-grid-3 {
+.nrw-grid-2 {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
-.nrw-grid-3 > label,
-.nrw-grid-3 .field-block {
+.nrw-grid-2 > label,
+.nrw-grid-2 .field-block {
   margin-bottom: 0;
 }
 
@@ -5293,11 +5283,11 @@ textarea[readonly] {
   color: var(--text-faint);
 }
 
+/* The source's settings, then -- below, at full width -- what it returned: a query's columns need the room. */
 .nrw-source {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
 }
 .nrw-source-form {
   display: flex;
@@ -5342,13 +5332,13 @@ textarea[readonly] {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   background: var(--bg-panel);
-  min-height: 300px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
 }
 .nrw-result-empty {
+  min-height: 160px;
   align-items: center;
   justify-content: center;
   gap: 10px;
@@ -5651,8 +5641,7 @@ textarea[readonly] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .nrw-two,
-  .nrw-source,
-  .nrw-grid-3,
+  .nrw-grid-2,
   .nrw-kinds {
     grid-template-columns: minmax(0, 1fr);
   }

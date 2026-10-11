@@ -358,6 +358,26 @@ export default function JdbcConnectionDialog({
         </section>
 
         <section className="jdbc-section">
+          <h3 className="jdbc-heading">JDBC URL</h3>
+          <input
+            type="text"
+            className="mono-input jdbc-url"
+            spellCheck={false}
+            aria-label="JDBC URL"
+            placeholder={engine ? `jdbc:${engine.id === "oracle" ? "oracle:thin:@//" : `${engine.id}://`}host:${engine.default_port}/database` : "jdbc:…"}
+            value={shownUrl}
+            onChange={(e) => changeUrl(e.target.value)}
+            onBlur={() => setUrlText(null)}
+          />
+          <p className="field-hint">
+            Built from the connection fields, and the other way round: paste a URL and they fill in.{" "}
+            {usesUploadedDriver
+              ? "With an uploaded driver, edits you make here — extra options included — are used exactly as written."
+              : "The built-in driver uses only the host, port and database from it. Never put a username or password in the URL."}
+          </p>
+        </section>
+
+        <section className="jdbc-section">
           <h3 className="jdbc-heading">
             <Lock size={14} aria-hidden="true" /> Secure connection
           </h3>
@@ -419,26 +439,6 @@ export default function JdbcConnectionDialog({
           {usesUploadedDriver && (
             <p className="field-hint">An uploaded driver runs in the isolated driver service, never inside the API itself.</p>
           )}
-        </section>
-
-        <section className="jdbc-section">
-          <h3 className="jdbc-heading">JDBC URL</h3>
-          <input
-            type="text"
-            className="mono-input jdbc-url"
-            spellCheck={false}
-            aria-label="JDBC URL"
-            placeholder={engine ? `jdbc:${engine.id === "oracle" ? "oracle:thin:@//" : `${engine.id}://`}host:${engine.default_port}/database` : "jdbc:…"}
-            value={shownUrl}
-            onChange={(e) => changeUrl(e.target.value)}
-            onBlur={() => setUrlText(null)}
-          />
-          <p className="field-hint">
-            Built from the fields above, and the other way round: paste a URL and they fill in.{" "}
-            {usesUploadedDriver
-              ? "With an uploaded driver, edits you make here — extra options included — are used exactly as written."
-              : "The built-in driver uses only the host, port and database from it. Never put a username or password in the URL."}
-          </p>
         </section>
 
         <section className="jdbc-section">

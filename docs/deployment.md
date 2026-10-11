@@ -868,7 +868,7 @@ the LDAP config endpoints, which use the same gate. It reports the host
 ### Database connections and JDBC drivers
 
 A report can run a read-only SQL query against Oracle, PostgreSQL, MySQL, SQL Server, MariaDB or Db2
-(Manage → Connections → *+ Database*; see docs/building-a-report.md). **PostgreSQL, MySQL and MariaDB need
+(Manage → Connections → *New Database*; see docs/building-a-report.md). **PostgreSQL, MySQL and MariaDB need
 nothing here** — their drivers ship in the `api` image. The other engines need the vendor's JDBC driver
 uploaded in the portal (Manage → JDBC Drivers), and a driver is code the server runs, so it runs in a
 separate, locked-down container instead of in `api`:

@@ -95,7 +95,7 @@ _MEDIA_TYPES = {
 
 # Which render formats a template's own file type can produce.
 _ALLOWED_FORMATS = {
-    "docx": {"docx", "pdf", "png"},
+    "docx": {"docx", "pdf", "png", "xlsx"},  # xlsx from a docx: its tables as sheets (Excel (tables))
     "xlsx": {"xlsx"},
     "html": {"pdf", "png"},
 }
