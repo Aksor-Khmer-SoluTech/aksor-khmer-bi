@@ -1,5 +1,8 @@
-import { useRef } from "react";
-import { Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { useRef, type CSSProperties } from "react";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { MAX_QUERIES, newQuery, type EditableJdbc, type EditableQuery } from "../dataConfig";
 import type { ConnectionSummary } from "../types";
 import DbEngineIcon from "./DbEngineIcon";
@@ -7,14 +10,17 @@ import SqlEditor, { bindSnippet, sqlDialectLabel, type SqlEditorHandle, type Sql
 
 const SHAPES: { value: EditableQuery["shape"]; label: string; title: string }[] = [
   { value: "list", label: "List", title: "Every row, as a list to loop over ([] when there are none)" },
-  { value: "object", label: "One row", title: "The one row it returns, as an object (null when there is none; more than one fails the run)" },
+  { value: "object", label: "Object", title: "The one row it returns, as an object (null when there is none; more than one fails the run)" },
   { value: "value", label: "One value", title: "The first column of the one row it returns (null when there is none)" },
 ];
 
-/** One SELECT: its editor, the filters to bind into it, and -- once a source has several -- its result name and
- * shape. Each card keeps its own editor, so "Bind filter" inserts where *that* query's cursor is. */
+/** One SELECT: its editor, the filters to bind into it, and -- once a source has several -- its result name,
+ * shape and a handle to drag it into place. Each card keeps its own editor, so "Bind filter" inserts where *that*
+ * query's cursor is. */
 function QueryCard({
   query,
+  index,
+  count,
   several,
   onChange,
   onRemove,
@@ -23,6 +29,8 @@ function QueryCard({
   typedBinding,
 }: {
   query: EditableQuery;
+  index: number;
+  count: number;
   several: boolean;
   onChange: (patch: Partial<EditableQuery>) => void;
   onRemove: () => void;
@@ -31,14 +39,32 @@ function QueryCard({
   typedBinding: boolean;
 }) {
   const editor = useRef<SqlEditorHandle>(null);
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: query.key });
+  // Slide vertically only: a card never drifts sideways while it is dragged.
+  const style: CSSProperties = { transform: CSS.Translate.toString(transform ? { ...transform, x: 0 } : null), transition };
   const name = query.name.trim() || "rows";
   const usage =
     query.shape === "list" ? `{% for r in ${name} %} … {{ r.column_name }}` : query.shape === "object" ? `{{ ${name}.column_name }}` : `{{ ${name} }}`;
 
   return (
-    <div className={several ? "mb-4 rounded-sm border border-border-soft p-3.5" : ""}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={several ? `query-sortable mb-4 rounded-sm border border-border-soft bg-bg-raised p-3.5${isDragging ? " dragging" : ""}` : ""}
+    >
       {several && (
         <div className="mb-3 flex flex-wrap items-end gap-3">
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            className="param-grip mb-1.5"
+            aria-label={`Move query ${name}: position ${index + 1} of ${count}. Press space, then the arrow keys.`}
+            data-tip="Drag to reorder"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical size={16} aria-hidden="true" />
+          </button>
           <label className="mb-0 min-w-[10rem] flex-1">
             <span>Result name</span>
             <input
@@ -53,24 +79,26 @@ function QueryCard({
               onChange={(e) => onChange({ name: e.target.value })}
             />
           </label>
-          <div className="segmented segmented-sm" role="radiogroup" aria-label="What this query gives">
-            {SHAPES.map((s) => (
-              <button
-                key={s.value}
-                type="button"
-                role="radio"
-                aria-checked={query.shape === s.value}
-                title={s.title}
-                className={`segmented-btn${query.shape === s.value ? " active" : ""}`}
-                onClick={() => onChange({ shape: s.value })}
-              >
-                {s.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-3">
+            <div className="segmented segmented-sm" role="radiogroup" aria-label="What this query gives">
+              {SHAPES.map((s) => (
+                <button
+                  key={s.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={query.shape === s.value}
+                  title={s.title}
+                  className={`segmented-btn${query.shape === s.value ? " active" : ""}`}
+                  onClick={() => onChange({ shape: s.value })}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn btn-ghost btn-sm icon-only" title="Remove this query" aria-label={`Remove query ${name}`} onClick={onRemove}>
+              <Trash2 size={15} />
+            </button>
           </div>
-          <button type="button" className="btn btn-ghost btn-sm icon-only" title="Remove this query" aria-label={`Remove query ${name}`} onClick={onRemove}>
-            <Trash2 size={15} />
-          </button>
         </div>
       )}
       <div className="sql-field">
@@ -143,6 +171,27 @@ export default function JdbcSourceFields({
   const several = queries.length > 1;
   const [first] = queries;
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const keys = queries.map((q) => q.key);
+  // Spoken by screen readers while a card is moved with the keyboard -- by result name and position.
+  const nameOf = (id: string | number) => queries.find((q) => q.key === id)?.name.trim() || "this query";
+  const positionOf = (id: string | number) => keys.indexOf(String(id)) + 1;
+  const announcements = {
+    onDragStart: ({ active }: { active: { id: string | number } }) => `Picked up ${nameOf(active.id)}, position ${positionOf(active.id)} of ${keys.length}.`,
+    onDragOver: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over ? `${nameOf(active.id)} is over position ${positionOf(over.id)} of ${keys.length}.` : undefined,
+    onDragEnd: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over ? `${nameOf(active.id)} moved to position ${positionOf(over.id)} of ${keys.length}.` : `${nameOf(active.id)} was dropped where it was.`,
+    onDragCancel: ({ active }: { active: { id: string | number } }) => `Moving ${nameOf(active.id)} was cancelled; it is still at position ${positionOf(active.id)}.`,
+  };
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    onChange({ queries: arrayMove(queries, keys.indexOf(String(active.id)), keys.indexOf(String(over.id))) });
+  };
+
   const setQuery = (key: string, patch: Partial<EditableQuery>) =>
     onChange({ queries: queries.map((q) => (q.key === key ? { ...q, ...patch } : q)) });
 
@@ -186,18 +235,24 @@ export default function JdbcSourceFields({
       )}
       {!connectionsAvailable && <p className="field-hint">You can't list connections here — type the name of an existing database connection.</p>}
 
-      {queries.map((q) => (
-        <QueryCard
-          key={q.key}
-          query={q}
-          several={several}
-          onChange={(patch) => setQuery(q.key, patch)}
-          onRemove={() => onChange({ queries: queries.filter((x) => x.key !== q.key) })}
-          engine={selected?.engine}
-          filters={filters}
-          typedBinding={value.typedBinding}
-        />
-      ))}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={{ announcements }}>
+        <SortableContext items={keys} strategy={verticalListSortingStrategy}>
+          {queries.map((q, index) => (
+            <QueryCard
+              key={q.key}
+              query={q}
+              index={index}
+              count={queries.length}
+              several={several}
+              onChange={(patch) => setQuery(q.key, patch)}
+              onRemove={() => onChange({ queries: queries.filter((x) => x.key !== q.key) })}
+              engine={selected?.engine}
+              filters={filters}
+              typedBinding={value.typedBinding}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
       <p className="field-hint sql-field-hint">
         Coloured as {sqlDialectLabel(selected?.engine)}{selected ? "" : " (choose a connection to match its database)"}. Type <code>:</code> to pick a filter -- a date or number filter is offered with its conversion written for this database, because values reach the query as text. <kbd>Tab</kbd> indents.
       </p>

@@ -3,6 +3,13 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- A database source's query cards label the one-row shape **Object** (was *One row*): List / Object / One value.
+- Several queries in a database source can be put in order by dragging a card's handle (or with the keyboard:
+  space, then the arrow keys).
+
 ## [1.0.0-beta.4] - 2026-10-11
 
 ### Added

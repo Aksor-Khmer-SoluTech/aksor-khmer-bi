@@ -433,7 +433,7 @@ header, a count — each under its own name, and each giving one of three shapes
 | Shape | The template gets | No row | More than one row |
 |---|---|---|---|
 | **List** | every row, as a list | `[]` | fine (up to the row limit) |
-| **One row** | that row, as an object | `null` | the run fails, naming the query |
+| **Object** | that row, as an object | `null` | the run fails, naming the query |
 | **One value** | that row's first column | `null` | the run fails, naming the query |
 
 They run at the same time (4 at once by default, `JDBC_MAX_PARALLEL`) and are merged into one object, every name
@@ -447,7 +447,7 @@ Oracle and Db2 return unquoted column names in capitals (`info.TITLE`); alias a 
 (`SELECT title AS "title"`) to name it exactly. Sample data and REST sources are unchanged — each is already one object.
 
 In the Data source tab (and the New Template wizard), **Add query** turns the one query into cards, each with its
-result name, its shape (List / One row / One value) and its SQL. Through the API, `queries` replaces `query` /
+result name, its shape (List / Object / One value) and its SQL. Through the API, `queries` replaces `query` /
 `root_key`:
 
 ```json
