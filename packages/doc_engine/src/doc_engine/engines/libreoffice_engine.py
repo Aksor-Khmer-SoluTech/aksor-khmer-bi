@@ -17,7 +17,7 @@ from pathlib import Path
 from docx.shared import Mm
 from docxtpl import DocxTemplate, InlineImage
 
-from .. import charts, fonts, images
+from .. import charts, codes, fonts, images
 from ..config import SOFFICE_BIN
 
 
@@ -42,11 +42,27 @@ def _resolve_media(value, tpl: DocxTemplate):
     if images.is_image_spec(value):
         width_mm = value.get("width_mm", images.DEFAULT_WIDTH_MM)
         return InlineImage(tpl, io.BytesIO(value["image_bytes"]), width=Mm(width_mm))
+    if codes.is_code_spec(value):
+        png, width_mm = codes.spec_png(value)
+        return InlineImage(tpl, io.BytesIO(png), width=Mm(width_mm))
     if isinstance(value, list):
         return [_resolve_media(v, tpl) for v in value]
     if isinstance(value, dict):
         return {k: _resolve_media(v, tpl) for k, v in value.items()}
     return value
+
+
+def _code_functions(tpl: DocxTemplate) -> dict:
+    """`{{ qrcode(value) }}` and `{{ barcode(value, "ean13") }}` in a Word template: the code as a picture, drawn
+    from whatever the value is at that point -- a field, a row's column, a filter (codes.py)."""
+
+    def qrcode(value, width_mm=codes.DEFAULT_QR_WIDTH_MM, level="M"):
+        return InlineImage(tpl, io.BytesIO(codes.qr_png(value, level)), width=Mm(float(width_mm)))
+
+    def barcode(value, type="code128", width_mm=codes.DEFAULT_BARCODE_WIDTH_MM, text=False):  # noqa: A002 -- the template's word for it
+        return InlineImage(tpl, io.BytesIO(codes.barcode_png(value, type, text, float(width_mm))), width=Mm(float(width_mm)))
+
+    return {"qrcode": qrcode, "barcode": barcode}
 
 
 _CORE_PROPERTIES_REL = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"
@@ -106,7 +122,7 @@ def render_docx(context: dict, template_path: str | Path) -> bytes:
     # autoescape: a value is data, not markup. Without it a `&`, `<` or `>` in a value ("R&D", "a<b") is
     # written into the document's XML as-is, and everything from that character on is silently dropped
     # ("R&D Dept" prints as "R "). docxtpl's own objects (images, rich text, sub-documents) are exempt.
-    tpl.render(_resolve_media(context, tpl), autoescape=True)
+    tpl.render(codes.with_functions(_resolve_media(context, tpl), _code_functions(tpl)), autoescape=True)
     with tempfile.TemporaryDirectory() as tmp:
         out_path = Path(tmp) / "report.docx"
         tpl.save(str(out_path))

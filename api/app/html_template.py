@@ -49,6 +49,10 @@ _env = Environment()
 
 _HREF_SRC_RE = re.compile(r'\b(?:href|src)\s*=\s*(["\'])(.*?)\1', re.IGNORECASE | re.DOTALL)
 _RESOURCE_CALL_ONLY_RE = re.compile(r"""^\s*\{\{\s*resource\(\s*['"][^'"]+['"]\s*\)\s*\}\}\s*$""")
+# `src="{{ qrcode(invoice.no) }}"` / `{{ barcode(…) }}`: the engine draws the code itself and hands back a data: URI
+# (doc_engine/codes.py) -- nothing is fetched, so it's as safe as resource().
+_CODE_CALL_ONLY_RE = re.compile(r"^\s*\{\{\s*(?:qrcode|barcode)\([^{}]*\)\s*\}\}\s*$")
+CODE_FUNCTIONS = ("qrcode", "barcode")
 
 
 @dataclass
@@ -81,13 +85,25 @@ def parse_html_template(source: str) -> ParsedHtmlTemplate:
     except TemplateSyntaxError as exc:
         return ParsedHtmlTemplate(errors=[TemplateIssue(message=exc.message or str(exc), line=exc.lineno)])
 
-    fields = sorted(meta.find_undeclared_variables(ast) - {RESOURCE_CONTEXT_KEY})
+    fields = sorted(meta.find_undeclared_variables(ast) - {RESOURCE_CONTEXT_KEY} - _called_functions(ast))
     resources = sorted(_find_resource_names(ast))
     errors = [
         TemplateIssue(message=f"href/src must use {{{{ resource('name') }}}}, not a direct URL: {ref!r}")
         for ref in _find_disallowed_references(source)
     ]
     return ParsedHtmlTemplate(fields=fields, resources=resources, errors=errors)
+
+
+def _called_functions(ast: nodes.Template) -> set[str]:
+    """qrcode / barcode where the template only ever calls them -- the engine's functions, not fields. One also
+    used as a value ({{ barcode }}) is a field of that name and stays listed."""
+    called = {id(c.node) for c in ast.find_all(nodes.Call) if isinstance(c.node, nodes.Name)}
+    out = set()
+    for name in CODE_FUNCTIONS:
+        uses = [n for n in ast.find_all(nodes.Name) if n.name == name]
+        if uses and all(id(n) in called for n in uses):
+            out.add(name)
+    return out
 
 
 def _find_resource_names(ast: nodes.Template) -> set[str]:
@@ -107,7 +123,8 @@ def _find_resource_names(ast: nodes.Template) -> set[str]:
 
 def _find_disallowed_references(source: str) -> list[str]:
     """Every `href=`/`src=` in the raw uploaded source must be exactly
-    one `{{ resource('name') }}` call (whitespace aside), a same-page
+    one `{{ resource('name') }}` call (whitespace aside), one `{{ qrcode(…) }}`
+    or `{{ barcode(…) }}` call, a same-page
     `#anchor`, or empty -- anything else (a plain relative path, an
     absolute `http(s)://`/`file://` URL, a resource() call mixed with
     other text) is flagged so the register dialog can explain why, rather
@@ -118,7 +135,7 @@ def _find_disallowed_references(source: str) -> list[str]:
         value = match.group(2).strip()
         if not value or value.startswith("#"):
             continue
-        if _RESOURCE_CALL_ONLY_RE.match(value):
+        if _RESOURCE_CALL_ONLY_RE.match(value) or _CODE_CALL_ONLY_RE.match(value):
             continue
         disallowed.append(value)
     return disallowed

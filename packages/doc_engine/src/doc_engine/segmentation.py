@@ -11,6 +11,7 @@ from typing import Sequence
 from aksor_khmer_ocr_segmenter import process_text
 
 from .charts import is_chart_spec
+from .codes import is_code_spec
 from .images import is_image_spec
 
 
@@ -34,15 +35,16 @@ def segment_generic(value, extra_terms: Sequence[str] | None = None, exclude_ter
     if isinstance(value, list):
         return [segment_generic(v, extra_terms, exclude_terms) for v in value]
     if isinstance(value, dict):
-        if is_chart_spec(value) or is_image_spec(value):
+        if is_chart_spec(value) or is_image_spec(value) or is_code_spec(value):
             # Chart specs mix structural keys ("chart", "width_mm") with
             # display text (title, labels) in the same dict -- blindly
             # segmenting would corrupt the "chart" type discriminator,
             # and chart text is short/non-wrapping so ZWSP break points
             # serve no purpose there anyway. An already-resolved image
             # spec's "image_bytes" is binary, not prose -- segmenting it
-            # would just corrupt raw bytes. Both left untouched; resolved
-            # by engines/libreoffice_engine.py after this step.
+            # would just corrupt raw bytes. A QR code or barcode spec's
+            # value must reach the code exactly as given. All left
+            # untouched; resolved by the engines after this step.
             return value
         return {k: segment_generic(v, extra_terms, exclude_terms) for k, v in value.items()}
     return value

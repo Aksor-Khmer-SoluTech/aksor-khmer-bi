@@ -193,59 +193,75 @@ equivalent mechanism yet, the same limitation charts already have.
 
 ## Barcodes and QR codes
 
-Aksor does not draw barcodes or QR codes itself: the caller makes the picture (a PNG) and hands it to the template.
-What works depends on the template type — each way below was rendered and checked.
+Aksor draws QR codes and barcodes itself, from a value, while it renders — in Word, Excel and HTML templates alike.
+Write the call where the code belongs:
 
-| Template | How the code gets in | Notes |
+```
+{{ qrcode(invoice_no) }}
+{{ barcode(invoice_no) }}                    ← Code 128, the default
+{{ barcode(item.sku, "ean13") }}             ← or "code39", "code128"
+{{ qrcode(link, width_mm=30, level="H") }}
+{{ barcode(sku, "ean13", width_mm=40, text=true) }}
+```
+
+The value can be anything the template can reach — a field, a filter, a column of a row inside a loop — so it works
+with sample data, a REST API or a SQL query alike; nothing has to be uploaded first.
+
+| Type | Holds | Notes |
 |---|---|---|
-| `.docx` | Upload the PNG to Resources, send its id as an image: `{"image_id": "…", "width_mm": 50}` | Works in the body, a table cell, and the page header or footer. |
-| `.html` | Send the PNG as a `data:` URI string in the JSON and draw it as a CSS background | `<img src="{{ field }}">` is refused at registration (every `src` must be `{{ resource('…') }}`); a background is not. |
-| `.xlsx` | Not supported | Excel templates take no images (same limit as charts). |
+| `qrcode` | Any text, Khmer included | `level` is the error correction: `L`, `M` (default), `Q` or `H` — higher survives more damage but makes a denser code. |
+| `barcode(…, "code128")` | Letters, digits and punctuation (plain ASCII) | The usual choice for invoice and document numbers. |
+| `barcode(…, "code39")` | `A-Z`, `0-9`, space and `- . $ / + %` | Lower case is printed as capitals. No check character is added. |
+| `barcode(…, "ean13")` | 12 or 13 digits | 12 digits: the check digit is added. 13: it must be the right one. |
 
-Make the PNG in your own service. With the Python packages `qrcode` and `python-barcode`:
+`ean-13`, `Code 39`, `CODE_128` and the like are read the same way. `width_mm` sets the width (QR codes 25 mm,
+barcodes 50 mm unless you say); the height follows. `text=true` prints the value under a barcode.
 
-```python
-import base64, io, qrcode
-from barcode import Code128
-from barcode.writer import ImageWriter
+**Word.** Put the call alone in its paragraph or table cell — in the body, a `{%tr for %}` row, or the page header and
+footer. The code is a picture in the document.
 
-qr = io.BytesIO(); qrcode.make("EACL2007091100012163").save(qr, "PNG")
-bc = io.BytesIO(); Code128("EACL2007091100012163", writer=ImageWriter()).write(bc, options={"write_text": False})
-as_data_uri = lambda b: "data:image/png;base64," + base64.b64encode(b.getvalue()).decode()
-```
+**Excel.** Put the call in a cell (with other text if you like: `SKU {{ barcode(sku) }}`). The picture is anchored at
+the cell's top-left corner and floats over the sheet, so make the row tall and the column wide enough for it. In a
+repeated row, each row gets its own code.
 
-**docx.** Type `{{ QR_IMG }}` and `{{ BARCODE_IMG }}` where the pictures belong, each alone in its paragraph or
-cell. For every document: upload the two PNGs (`POST /api/v1/images`, form fields `file`, `name`, `org_id`), then
-render with the returned ids:
-
-```json
-{ "QR_IMG": {"image_id": "3f845517dc00", "width_mm": 13},
-  "BARCODE_IMG": {"image_id": "b9712afcebe5", "width_mm": 50} }
-```
-
-Uploaded images stay in Resources until deleted, so a service that renders many documents should delete them
-afterwards (`DELETE /api/v1/images/<id>`).
-
-**html.** Send the `data:` URI strings, and give each code a sized box:
-
-```json
-{ "QR_IMG": "data:image/png;base64,iVBOR…", "BARCODE_IMG": "data:image/png;base64,iVBOR…" }
-```
+**HTML.** Use the call as an image source and size it with CSS — the code is an SVG, sharp at any size in the PDF:
 
 ```html
-<style>
-  .qr      { width: 50px;  height: 50px; background: url("{{ QR_IMG }}") no-repeat; background-size: 100% 100%; }
-  .barcode { width: 190px; height: 30px; background: url("{{ BARCODE_IMG }}") no-repeat; background-size: 100% 100%; }
-</style>
-<div class="qr"></div>
-<div class="barcode"></div>
+<img src="{{ qrcode(invoice_no) }}" style="width: 30mm">
+<img src="{{ barcode(invoice_no) }}" style="width: 70mm; height: 15mm">
 ```
 
-A code that never changes (a store link, a logo) needs none of this: upload it once and use
-`<img src="{{ resource('qr-store') }}">` (html) or paste it into the Word file.
+`src="{{ qrcode(…) }}"` and `src="{{ barcode(…) }}"` are allowed like `{{ resource('…') }}`; any other `src` or
+`href` is still refused at registration.
 
-Scan the printed result before relying on it: keep a QR at least about 12 mm wide and a barcode's bars unsmoothed
-(`background-size: 100% 100%` on a PNG made wide enough).
+**From the data instead.** In Word and Excel the JSON can ask for a code where the template has a plain placeholder
+(`{{ label }}`), the way it asks for a chart:
+
+```json
+{ "label": {"barcode": "code128", "value": "PKG-77", "width_mm": 45},
+  "pay":   {"qr": "https://pay.example.com/i/001", "width_mm": 25, "level": "M"} }
+```
+
+Only a dict with exactly these keys counts — a row that merely has a `qr` or `barcode` column stays data.
+
+**A field called `barcode`.** If your data has its own top-level `barcode` (or `qrcode`) field, both still work: `{{
+barcode }}` prints the field and `{{ barcode(barcode, "ean13") }}` draws it.
+
+**When the value can't be drawn** — letters in an EAN-13, a wrong check digit, Khmer in a Code 39 or Code 128, an
+empty value — the render fails with the reason ("'5901234123458' isn't a valid EAN-13: its check digit should be 7")
+for whoever manages the report, instead of printing a code nobody can scan. The Placeholders tab lists the value a
+code is drawn from (`invoice_no`), not `qrcode` or `barcode` themselves.
+
+Khmer is fine in a QR code: it's encoded as UTF-8, which phone cameras read. (Aksor takes out the invisible
+line-break marks it adds to Khmer text before the code is drawn, so the code holds exactly your value.)
+
+How small can they be? Checked by decoding Word reports exported to PDF: a QR code with a 35-character link scans
+at 10 mm; Code 128 (12 and 20 characters), Code 39 and EAN-13 barcodes scan from 30 mm on a page printed at 300 dpi
+and from 25 mm at 600 dpi. **PNG** output is drawn at 150 dpi, which is coarse for bars: make barcodes about 60 mm
+wide there. Scan a printed copy before relying on it.
+
+A code that never changes (a shop's payment QR) can also simply be a picture: upload it under Resources and use
+`{{ resource('shop-qr') }}` (HTML), or paste it into the Word file.
 
 ## Khmer segmentation — automatic, no action needed
 

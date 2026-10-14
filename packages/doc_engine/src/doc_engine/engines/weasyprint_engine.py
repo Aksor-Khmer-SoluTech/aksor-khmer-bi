@@ -36,7 +36,7 @@ from weasyprint import CSS, HTML
 from weasyprint.text.fonts import FontConfiguration
 from weasyprint.urls import URLFetcher
 
-from .. import fonts
+from .. import codes, fonts
 
 _USER_TEMPLATE_FETCHER = URLFetcher(allowed_protocols={"data"}, fail_on_errors=True)
 
@@ -45,10 +45,20 @@ class ConversionError(RuntimeError):
     """Raised when pdftoppm fails to rasterize the generated PDF."""
 
 
+def _qrcode(value, width_mm=None, level="M") -> str:
+    """`<img src="{{ qrcode(value) }}">`: the code as an SVG data: URI -- sharp at any size; size it with CSS.
+    (`width_mm` is accepted so one call reads the same in every kind of template; in HTML the CSS decides.)"""
+    return codes.svg_data_uri(codes.qr_svg(value, level))
+
+
+def _barcode(value, type="code128", width_mm=None, text=False) -> str:  # noqa: A002 -- the template's word for it
+    return codes.svg_data_uri(codes.barcode_svg(value, type, text))
+
+
 def _render_html(context: dict, template_path: str | Path) -> str:
     env = Environment(autoescape=True)
     template = env.from_string(Path(template_path).read_text(encoding="utf-8"))
-    return template.render(**context)
+    return template.render(**codes.with_functions(context, {"qrcode": _qrcode, "barcode": _barcode}))
 
 
 def render_pdf(context: dict, template_path: str | Path) -> bytes:

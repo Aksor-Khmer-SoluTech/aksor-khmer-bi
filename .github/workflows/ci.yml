@@ -91,7 +91,7 @@ jobs:
           python -m pytest tests/ -v
 
       - name: Install doc_engine
-        run: pip install -e packages/doc_engine
+        run: pip install -e "packages/doc_engine[dev]"
 
       - name: Test doc_engine
         run: |

@@ -17,11 +17,15 @@ dependencies = [
     "xltpl>=0.21",
     "matplotlib>=3.8",
     "fonttools>=4.40",
+    "qrcode>=7.4",
+    "python-barcode>=0.15",
+    "Pillow>=10",
     "aksor-khmer-ocr-segmenter>=0.1.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "Pillow>=10"]
+# zxing-cpp reads QR codes and barcodes back out of rendered output, so the tests prove a code scans.
+dev = ["pytest>=8.0", "zxing-cpp>=2.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
