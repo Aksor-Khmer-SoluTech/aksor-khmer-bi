@@ -26,6 +26,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - **Analyze has its own place in the top bar**, next to Dashboards, for everyone who can analyze datasets
   (`analyze:use`). Before, it was only reachable through Dashboards → *Explore data*.
 
+### Fixed
+- **New template, sample data**: pressing *Use this data* with the editor empty no longer says the data "isn't valid
+  JSON" — it asks you to paste some (or press *Insert example*); invalid JSON is reported once, under the editor,
+  instead of twice; and the editor's placeholder now reads as an example, not as data already entered.
+
 ## [1.0.0-beta.5] - 2026-10-14
 
 ### Added

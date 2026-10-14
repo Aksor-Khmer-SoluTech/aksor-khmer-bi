@@ -41,7 +41,7 @@ export default function StaticSourceFields({ text, onChange, error }: { text: st
         onChange={onChange}
         ariaLabel="Sample data"
         invalid={error !== null}
-        placeholder={'{\n  "rows": [ { "name": "…", "total": 0 } ]\n}'}
+        placeholder={'Paste a JSON object here — for example:\n{ "rows": [ { "name": "…", "total": 0 } ] }'}
       />
       {error && <p className="alert alert-error">{error}</p>}
       <p className="field-hint">

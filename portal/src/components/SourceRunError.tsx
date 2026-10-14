@@ -8,7 +8,7 @@ import { ApiError } from "../api";
 export type SourceKind = "static" | "rest" | "jdbc" | "dataset" | string;
 
 export interface RunFailure {
-  /** HTTP status from the API; 0 when the API itself couldn't be reached; -1 for a problem found before sending. */
+  /** HTTP status from the API; 0 when the API itself couldn't be reached. */
   status: number;
   message: string;
 }
@@ -19,9 +19,6 @@ export function toRunFailure(err: unknown, fallback: string): RunFailure {
 }
 
 function describe(kind: SourceKind, status: number, message: string): { icon: LucideIcon; title: string; hint: string } {
-  if (status === -1) {
-    return { icon: FileWarning, title: "The sample data isn't valid JSON", hint: "Fix it where the message points, or press Insert example to start from a working one." };
-  }
   if (status === 0) {
     return { icon: PlugZap, title: "Couldn't reach the server", hint: "Check your network, then try again. If it keeps happening, the API may be down." };
   }

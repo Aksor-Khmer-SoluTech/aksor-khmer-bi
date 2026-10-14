@@ -196,6 +196,8 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
   const [error, setError] = useState<string | null>(null);
   // A failed Run: shown in the result panel under the Run button, where the data would have been.
   const [runError, setRunError] = useState<RunFailure | null>(null);
+  // Run pressed with the sample editor still empty: say so under the editor (cleared by typing).
+  const [emptyNudge, setEmptyNudge] = useState(false);
   const [published, setPublished] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -259,11 +261,12 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
     setError(null);
     setRunError(null);
     if (source.type === "static") {
+      // Nothing to send yet: the editor's own message says what's wrong, right where it is -- an empty editor
+      // asks for data, invalid JSON keeps its live error. The result panel is for what the server says.
       const parsed = parseStaticData(source.staticText);
       if (parsed.error || !parsed.value) {
         setPreview(null);
-        // The heading already says it isn't valid JSON; keep the parser's own words (where, and what it found).
-        setRunError({ status: -1, message: (parsed.error ?? "Paste the sample data first").replace(/^Not valid JSON — /, "") });
+        setEmptyNudge(!source.staticText.trim());
         return;
       }
     }
@@ -575,7 +578,14 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
           <div className="nrw-source">
             <div className="nrw-source-form">
               {source.type === "static" && (
-                <StaticSourceFields text={source.staticText} onChange={(text) => setSource((s) => ({ ...s, staticText: text }))} error={parseStaticData(source.staticText).error} />
+                <StaticSourceFields
+                  text={source.staticText}
+                  onChange={(text) => {
+                    setEmptyNudge(false);
+                    setSource((s) => ({ ...s, staticText: text }));
+                  }}
+                  error={parseStaticData(source.staticText).error ?? (emptyNudge ? "Paste your sample data first — or press Insert example to start from one." : null)}
+                />
               )}
               {source.type === "rest" && (
                 <RequestFields
