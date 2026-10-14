@@ -290,6 +290,14 @@ tables and `app/rbac.py` for the authorization logic.
   viewer's own access (`app/dashboards.py`). **Data alerts** are jobs,
   `job_type: "data_alert"` (`app/data_alerts.py`); `condition`
   `above` / `below` a threshold, or `outlier` across a `group_by` field.
+- **Stylesheets** — `/api/v1/stylesheets`: upload `.css`, `.scss`, `.sass` or `.less` (compiled on upload by
+  `app/style_compile.py`; `@import`/`@use`/`@forward` refused), `GET /{id}/file` (the compiled CSS a template
+  gets), `GET /{id}/source` (what was uploaded), `PUT /{id}/file` (replace, any format; audited).
+- **Projects** — `/api/v1/projects` (`project:transfer`): a top-level folder marked `is_project`
+  (`PATCH /folders/{id}`); `GET /{id}` (what it holds and uses), `POST /{id}/export` (a zip package),
+  `POST /import/preview` (multipart: what importing would do, plus a token) and `POST /import/{token}`
+  (the deployer's choices). `app/projects.py`: matched by content fingerprint and report code, ids
+  re-linked, secrets never packed, a failed import undone. Audited.
 - **Secrets** — `/api/v1/secrets` (`secret:manage` to create/rotate/
   revoke/delete; list also for `connection:manage`/`report:manage`,
   never a value): named credentials (`app/secrets.py`) a connection's

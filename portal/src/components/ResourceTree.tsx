@@ -1,5 +1,6 @@
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { useEffect, useRef, useState } from "react";
+import { Package } from "lucide-react";
 import { ChevronIcon, FolderIcon, FolderOpenIcon, GripIcon, MoreIcon } from "../admin/icons";
 import type { Folder } from "../types";
 
@@ -14,6 +15,10 @@ type Props = {
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
   onManageAccess: (id: string) => void;
+  /** Projects (api/app/projects.py): mark a top-level folder as one, and export it. */
+  canTransfer: boolean;
+  onSetProject: (id: string, isProject: boolean) => void;
+  onExportProject: (id: string) => void;
 };
 
 /** The folder tree — deliberately not a traditional indented-lines
@@ -85,6 +90,9 @@ function FolderRow({
   onRenameFolder,
   onDeleteFolder,
   onManageAccess,
+  canTransfer,
+  onSetProject,
+  onExportProject,
 }: Props & { folder: Folder; depth: number }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -138,7 +146,7 @@ function FolderRow({
             <ChevronIcon />
           </span>
         </button>
-        {isOpen ? <FolderOpenIcon /> : <FolderIcon />}
+        {folder.is_project ? <Package size={16} className="shrink-0 text-accent-strong" aria-label="Project" /> : isOpen ? <FolderOpenIcon /> : <FolderIcon />}
         {renaming ? (
           <input
             autoFocus
@@ -156,7 +164,14 @@ function FolderRow({
             }}
           />
         ) : (
-          <span className="resource-row-name">{folder.name}</span>
+          <span className="resource-row-name">
+            {folder.name}
+            {folder.is_project && (
+              <span className="ml-1.5 rounded-[4px] bg-accent-soft px-1 py-[1px] align-[1px] font-mono text-[0.6rem] font-semibold tracking-[0.06em] text-accent-strong uppercase">
+                Project
+              </span>
+            )}
+          </span>
         )}
 
         <RowMenu
@@ -172,6 +187,7 @@ function FolderRow({
           }}
           onManageAccess={() => onManageAccess(folder.id)}
           onDelete={() => onDeleteFolder(folder.id)}
+          project={depth === 0 ? { is: !!folder.is_project, canTransfer, onSet: (v) => onSetProject(folder.id, v), onExport: () => onExportProject(folder.id) } : null}
         />
       </div>
 
@@ -192,6 +208,9 @@ function FolderRow({
               onRenameFolder={onRenameFolder}
               onDeleteFolder={onDeleteFolder}
               onManageAccess={onManageAccess}
+              canTransfer={canTransfer}
+              onSetProject={onSetProject}
+              onExportProject={onExportProject}
             />
           ))}
           {creatingChild && (
@@ -240,6 +259,7 @@ function RowMenu({
   onNewSubfolder,
   onManageAccess,
   onDelete,
+  project,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -247,6 +267,8 @@ function RowMenu({
   onNewSubfolder: () => void;
   onManageAccess: () => void;
   onDelete: () => void;
+  /** Only for a top-level folder -- a project is always one. */
+  project: { is: boolean; canTransfer: boolean; onSet: (isProject: boolean) => void; onExport: () => void } | null;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -304,6 +326,33 @@ function RowMenu({
           >
             Manage access
           </button>
+          {project && (
+            <>
+              <div className="account-divider" />
+              {project.is && project.canTransfer && (
+                <button
+                  type="button"
+                  className="account-item"
+                  onClick={() => {
+                    onOpenChange(false);
+                    project.onExport();
+                  }}
+                >
+                  Export project…
+                </button>
+              )}
+              <button
+                type="button"
+                className="account-item"
+                onClick={() => {
+                  onOpenChange(false);
+                  project.onSet(!project.is);
+                }}
+              >
+                {project.is ? "Stop being a project" : "Make it a project"}
+              </button>
+            </>
+          )}
           <div className="account-divider" />
           <button
             type="button"

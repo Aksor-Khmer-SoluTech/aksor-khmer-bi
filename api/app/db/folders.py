@@ -9,7 +9,7 @@ covering everything filed under it.
 """
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, _gen_id
@@ -34,6 +34,9 @@ class Folder(Base):
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    # A top-level folder marked as a project: its templates, images and stylesheets export and import as one package
+    # (app/projects.py). Only a root-level folder can be one, so projects never nest.
+    is_project: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
 
 
 class ReportShortcut(Base):
@@ -97,6 +100,9 @@ class ImageResource(Base):
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    # The file's content fingerprint: what an import and an upload use to tell "this exact file is already here".
+    # Null on rows from before 0011 until first needed (image_store/stylesheet_store fill it in).
+    sha256: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
 
 class StylesheetResource(Base):
@@ -124,3 +130,9 @@ class StylesheetResource(Base):
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    # The file's content fingerprint: what an import and an upload use to tell "this exact file is already here".
+    # Null on rows from before 0011 until first needed (image_store/stylesheet_store fill it in).
+    sha256: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # What was uploaded: "scss", "sass" or "less" (kept as source.<ext>, compiled to style.css -- app/style_compile.py),
+    # or null for plain CSS.
+    source_format: Mapped[str | None] = mapped_column(String, nullable=True)

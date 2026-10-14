@@ -37,6 +37,7 @@ def _row_to_out(row: db.Folder) -> FolderOut:
         created_by=row.created_by,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        is_project=bool(row.is_project),
     )
 
 
@@ -125,7 +126,7 @@ def update_folder(
         row = session.get(db.Folder, folder_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Folder not found")
-        before = {"name": row.name, "description": row.description, "parent_folder_id": row.parent_folder_id}
+        before = {"name": row.name, "description": row.description, "parent_folder_id": row.parent_folder_id, "is_project": bool(row.is_project)}
 
         new_parent_id = row.parent_folder_id
         if "parent_folder_id" in body.model_fields_set:
@@ -149,6 +150,14 @@ def update_folder(
             if not can_manage_folder_contents(session, context, new_parent_id):
                 raise HTTPException(status_code=403, detail="Missing 'manage' access on the destination folder")
 
+        # A project is a top-level folder: it can't be filed inside another folder, and only a root folder can become one.
+        becomes_project = body.is_project if body.is_project is not None else bool(row.is_project)
+        if becomes_project and new_parent_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="A project is a top-level folder -- move it to the top first" if body.is_project else "A project stays at the top level -- it can't go inside another folder",
+            )
+
         new_name = body.name if body.name is not None else row.name
         if new_name != row.name or new_parent_id != row.parent_folder_id:
             _check_sibling_name_free(session, row.org_id, new_parent_id, new_name, exclude_id=folder_id)
@@ -158,11 +167,13 @@ def update_folder(
         if body.description is not None:
             row.description = body.description
         row.parent_folder_id = new_parent_id
+        if body.is_project is not None:
+            row.is_project = body.is_project
         row.updated_at = _now_iso()
         session.commit()
         changes = audit.diff(
-            before, {"name": row.name, "description": row.description, "parent_folder_id": row.parent_folder_id},
-            ["name", "description", "parent_folder_id"],
+            before, {"name": row.name, "description": row.description, "parent_folder_id": row.parent_folder_id, "is_project": bool(row.is_project)},
+            ["name", "description", "parent_folder_id", "is_project"],
         )
         if changes:
             moved = any(c["field"] == "parent_folder_id" for c in changes)

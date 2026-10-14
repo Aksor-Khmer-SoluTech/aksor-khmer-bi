@@ -21,3 +21,5 @@ qrcode>=7.4
 tzdata>=2024.1
 cryptography>=42
 fonttools>=4.40
+libsass>=0.23
+lesscpy>=0.15

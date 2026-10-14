@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ## [Unreleased]
 
 ### Added
+- **Stylesheets in SCSS, Sass and Less**, not only CSS, compiled on upload (the template always gets CSS) with the
+  source kept: its card shows the source beside the compiled CSS, *replace* takes any of the four formats, and a
+  project carries the source. Compile errors give the line and column. Each file must be self-contained -- `@import`,
+  `@use` and `@forward` are refused, since an import could read files on the server. Stylesheets now also have a place
+  in **Manage → Resources**: upload into any folder, view, replace, delete, with the "already here" notice images have.
+- **Projects: move templates between servers as one package.** Mark a top-level Resources folder as a project, then
+  **Export** it: its templates, images, stylesheets and subfolders, with version history, data sources, fonts and
+  protected-term sets, plus the shared files it uses — each of which you may leave out when the other server already
+  has it. **Import** shows what will happen to every item first: identical files are linked (never copied again),
+  a file with the same name and other content is yours to overwrite, keep both or keep as is, and templates already
+  in the project (same code, else same name) get a new version instead of a copy. Secrets never travel; missing
+  connections, secrets and datasets are listed. A failed import undoes what it created. New permission
+  `project:transfer` (Org Admin and Report Admin). Uploading an image or stylesheet that is already here now says
+  where, so the same file isn't kept twice by accident.
 - **QR codes and barcodes from a value**, in Word, Excel and HTML templates: `{{ qrcode(invoice_no) }}`,
   `{{ barcode(invoice_no) }}` (Code 128), `{{ barcode(sku, "ean13") }}` or `"code39"`, with `width_mm` (and a
   barcode's `height_mm`), a QR error
@@ -40,6 +54,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - **New template, sample data**: pressing *Use this data* with the editor empty no longer says the data "isn't valid
   JSON" — it asks you to paste some (or press *Insert example*); invalid JSON is reported once, under the editor,
   instead of twice; and the editor's placeholder now reads as an example, not as data already entered.
+
+**Upgrade note** — migrations `0011_projects` (a project flag on folders, a content fingerprint on images and
+stylesheets) and `0012_stylesheet_formats` (a stylesheet's source format). Docker installs run them on start; a
+hand-run API needs `alembic upgrade head` and `pip install -r api/requirements.txt` (the Sass and Less compilers,
+`libsass` and `lesscpy`, are new; the images include them).
 
 ## [1.0.0-beta.5] - 2026-10-14
 

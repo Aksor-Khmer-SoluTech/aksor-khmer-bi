@@ -23,6 +23,7 @@ class FolderUpdate(BaseModel):
     # than `is not None`, since "move to root" (explicit null) is a real
     # operation, not just "don't touch."
     parent_folder_id: str | None = None
+    is_project: bool | None = Field(None, description="Mark a top-level folder as a project (export/import as one package), or unmark it")
 
 
 class FolderOut(BaseModel):
@@ -35,6 +36,13 @@ class FolderOut(BaseModel):
     created_at: str
     updated_at: str
     can_manage: bool = Field(False, description="List endpoint only: whether the caller may file things into this folder")
+    is_project: bool = Field(False, description="A top-level folder whose contents export and import as one package")
+
+
+class ResourceDuplicate(BaseModel):
+    id: str
+    name: str
+    where: str = Field(..., description='Where it lives: "Receipts/Forms", or "(top level)"')
 
 
 class ImageOut(BaseModel):
@@ -47,9 +55,13 @@ class ImageOut(BaseModel):
     width_px: int
     height_px: int
     size_bytes: int
+    sha256: str | None = None
     created_by: str | None = None
     created_at: str
     updated_at: str
+    duplicates: list[ResourceDuplicate] = Field(
+        default_factory=list, description="Upload only: other files here with exactly this content -- the same file uploaded twice"
+    )
 
 
 class StylesheetOut(BaseModel):
@@ -59,6 +71,11 @@ class StylesheetOut(BaseModel):
     name: str
     content_type: str
     size_bytes: int
+    sha256: str | None = None
+    source_format: str = Field("css", description="What was uploaded: css, scss, sass or less (templates always get the compiled CSS)")
     created_by: str | None = None
     created_at: str
     updated_at: str
+    duplicates: list[ResourceDuplicate] = Field(
+        default_factory=list, description="Upload only: other files here with exactly this content -- the same file uploaded twice"
+    )

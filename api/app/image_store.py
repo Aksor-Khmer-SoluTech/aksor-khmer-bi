@@ -10,6 +10,7 @@ application's own code tree.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import shutil
 from datetime import datetime, timezone
@@ -52,6 +53,7 @@ def _row_to_dict(row: ImageResource) -> dict:
         "width_px": row.width_px,
         "height_px": row.height_px,
         "size_bytes": row.size_bytes,
+        "sha256": row.sha256,
         "created_by": row.created_by,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -102,6 +104,7 @@ def create_image(
         width_px=width_px,
         height_px=height_px,
         size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
         created_by=created_by,
         created_at=now,
         updated_at=now,
@@ -110,6 +113,55 @@ def create_image(
         session.add(row)
         session.commit()
         return _row_to_dict(row)
+
+
+def replace_image_content(image_id: str, content: bytes) -> dict:
+    """New bytes for an existing image, keeping its id -- so every template that points at it gets the new picture
+    (a project import's "overwrite"). Raises ImageNotFoundError / InvalidImageError."""
+    width_px, height_px, content_type = probe_image(content)
+    file_ext = (content_type.split("/")[-1] or "bin").lower()
+    with db.SessionLocal() as session:
+        row = session.get(ImageResource, image_id)
+        if row is None:
+            raise ImageNotFoundError(image_id)
+        old = _image_path(image_id, row.file_ext)
+        _image_dir(image_id).mkdir(parents=True, exist_ok=True)
+        _image_path(image_id, file_ext).write_bytes(content)
+        if old != _image_path(image_id, file_ext) and old.exists():
+            old.unlink()
+        row.content_type, row.file_ext, row.width_px, row.height_px = content_type, file_ext, width_px, height_px
+        row.size_bytes, row.sha256 = len(content), hashlib.sha256(content).hexdigest()
+        row.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _row_to_dict(row)
+
+
+def fingerprint(image_id: str) -> str | None:
+    """The image's sha256, worked out and kept the first time for a row from before fingerprints. None if its file
+    is gone."""
+    with db.SessionLocal() as session:
+        row = session.get(ImageResource, image_id)
+        if row is None:
+            raise ImageNotFoundError(image_id)
+        if row.sha256:
+            return row.sha256
+        path = _image_path(image_id, row.file_ext)
+        if not path.exists():
+            return None
+        row.sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        session.commit()
+        return row.sha256
+
+
+def with_content(org_id: str, sha256: str) -> list[dict]:
+    """The organization's images holding exactly this content (older rows fingerprinted on the way)."""
+    with db.SessionLocal() as session:
+        unprinted = session.execute(select(ImageResource.id).where(ImageResource.org_id == org_id, ImageResource.sha256.is_(None))).scalars().all()
+    for image_id in unprinted:
+        fingerprint(image_id)
+    with db.SessionLocal() as session:
+        rows = session.execute(select(ImageResource).where(ImageResource.org_id == org_id, ImageResource.sha256 == sha256).order_by(ImageResource.name)).scalars().all()
+        return [_row_to_dict(r) for r in rows]
 
 
 def get_image(image_id: str) -> dict:

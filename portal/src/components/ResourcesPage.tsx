@@ -11,10 +11,12 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
 import { has } from "../admin/sections";
 import { FolderIcon, ImageIcon, TemplatesIcon } from "../admin/icons";
-import type { AuthInfo, Folder, ImageResource, ReportMeta, ReportShortcut } from "../types";
+import type { AuthInfo, Folder, ImageResource, ReportMeta, ReportShortcut, StylesheetResource } from "../types";
 import FolderGrantsDialog from "./FolderGrantsDialog";
 import ResourceTree from "./ResourceTree";
 import FontsPanel from "./FontsPanel";
+import { ExportProjectDialog, ImportProjectDialog } from "./ProjectTransfer";
+import { Download, Package, Upload } from "lucide-react";
 import ResourceContentPane from "./ResourceContentPane";
 import { CardGridSkeleton, TreeSkeleton } from "./Skeletons";
 
@@ -32,6 +34,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
   const [folders, setFolders] = useState<Folder[] | null>(null);
   const [reports, setReports] = useState<ReportMeta[] | null>(null);
   const [images, setImages] = useState<ImageResource[] | null>(null);
+  const [stylesheets, setStylesheets] = useState<StylesheetResource[]>([]);
   const [shortcuts, setShortcuts] = useState<ReportShortcut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -54,14 +57,19 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
   const canManageFonts = has(auth, "font:manage") || auth.isSuperuser;
   const canSeeFonts = canManageFonts || has(auth, "report:manage");
   const [section, setSection] = useState<"library" | "fonts">("library");
+  // Projects: a top-level folder exported and imported as one package (api/app/projects.py).
+  const canTransfer = has(auth, "project:transfer") || auth.isSuperuser;
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const [importing, setImporting] = useState<{ into: string | null } | null>(null);
 
   function load() {
-    Promise.all([api.folders.list(), api.listReports(), api.images.list(), api.listShortcuts().catch(() => [])])
-      .then(([f, r, i, s]) => {
+    Promise.all([api.folders.list(), api.listReports(), api.images.list(), api.listShortcuts().catch(() => []), api.stylesheets.list().catch(() => [])])
+      .then(([f, r, i, s, css]) => {
         setFolders(f);
         setReports(r);
         setImages(i);
         setShortcuts(s);
+        setStylesheets(css);
       })
       .catch(() => setError("Couldn't load Resources — is the API reachable?"));
   }
@@ -84,6 +92,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
 
   const reportsInFolder = (reports ?? []).filter((r) => r.folder_id === selectedFolderId);
   const imagesInFolder = (images ?? []).filter((i) => i.folder_id === selectedFolderId);
+  const stylesheetsInFolder = stylesheets.filter((s) => s.folder_id === selectedFolderId);
   // A shortcut is a link to a report filed somewhere else, so it shows the original's details.
   const shortcutsInFolder = shortcuts
     .filter((s) => s.folder_id === selectedFolderId)
@@ -129,6 +138,16 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
       setFolders((prev) => prev?.map((f) => (f.id === id ? updated : f)) ?? null);
     } catch (err) {
       setMoveError(err instanceof ApiError ? err.message : "Couldn't rename folder");
+    }
+  }
+
+  async function setProject(id: string, isProject: boolean) {
+    setMoveError(null);
+    try {
+      const updated = await api.folders.update(id, { is_project: isProject });
+      setFolders((prev) => prev?.map((f) => (f.id === id ? { ...f, ...updated } : f)) ?? null);
+    } catch (err) {
+      setMoveError(err instanceof ApiError ? err.message : "Couldn't change the folder");
     }
   }
 
@@ -244,9 +263,16 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
         <div className="page-header">
           <div>
             <h1 className="page-title">Resources</h1>
-            <p className="page-subtitle">Organize report templates and images into folders — drag items between them.</p>
+            <p className="page-subtitle">Organize report templates, images and stylesheets into folders — drag items between them.</p>
           </div>
-          {sectionSwitch}
+          <div className="page-header-actions flex-wrap">
+            {canTransfer && (
+              <button type="button" className="btn" onClick={() => setImporting({ into: null })}>
+                <Upload size={14} aria-hidden="true" /> Import project
+              </button>
+            )}
+            {sectionSwitch}
+          </div>
         </div>
 
         {moveError && <p className="alert alert-error">{moveError}</p>}
@@ -263,20 +289,61 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
             onRenameFolder={renameFolder}
             onDeleteFolder={deleteFolder}
             onManageAccess={setGrantsFolderId}
+            canTransfer={canTransfer}
+            onSetProject={setProject}
+            onExportProject={setExportingId}
           />
 
+          <div className="grid min-w-0 content-start gap-3">
+          {selectedFolder?.is_project && (
+            <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-accent-border bg-accent-soft px-3.5 py-2.5">
+              <Package size={18} className="shrink-0 text-accent-strong" aria-hidden="true" />
+              <span className="min-w-0 flex-1 text-[0.86rem] leading-snug">
+                <b className="font-semibold">{selectedFolder.name}</b> is a project — its templates, images and stylesheets, with its subfolders, move to
+                another server as one package.
+              </span>
+              {canTransfer && (
+                <>
+                  <button type="button" className="btn btn-sm" onClick={() => setImporting({ into: selectedFolder.id })}>
+                    <Upload size={13} aria-hidden="true" /> Update from a package
+                  </button>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={() => setExportingId(selectedFolder.id)}>
+                    <Download size={13} aria-hidden="true" /> Export
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           <ResourceContentPane
             folder={selectedFolder}
             reports={reportsInFolder}
             images={imagesInFolder}
+            stylesheets={stylesheetsInFolder}
             shortcuts={shortcutsInFolder}
             onRemoveShortcut={removeShortcut}
             canManage={canManageSelected}
             orgId={auth.orgId ?? "root"}
             onImageUploaded={(img) => setImages((prev) => [...(prev ?? []), img])}
             onImageDeleted={(id) => setImages((prev) => prev?.filter((i) => i.id !== id) ?? null)}
+            onStylesheetChanged={(sheet) => setStylesheets((prev) => [...prev.filter((s) => s.id !== sheet.id), sheet].sort((a, b) => a.name.localeCompare(b.name)))}
+            onStylesheetDeleted={(id) => setStylesheets((prev) => prev.filter((s) => s.id !== id))}
           />
+          </div>
         </div>
+
+        {exportingId && <ExportProjectDialog folderId={exportingId} onClose={() => setExportingId(null)} />}
+        {importing && (
+          <ImportProjectDialog
+            orgId={auth.orgId ?? "root"}
+            projects={(folders ?? []).filter((f) => f.is_project)}
+            initialInto={importing.into}
+            onClose={() => setImporting(null)}
+            onImported={(summary) => {
+              load();
+              setSelectedFolderId(summary.project.id);
+            }}
+          />
+        )}
 
         {grantsFolderId && (
           <FolderGrantsDialog open folderId={grantsFolderId} onClose={() => setGrantsFolderId(null)} />

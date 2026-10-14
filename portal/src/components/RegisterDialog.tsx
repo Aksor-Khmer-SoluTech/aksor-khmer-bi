@@ -134,7 +134,7 @@ function ResourceMapRow({
       <input
         ref={uploadInputRef}
         type="file"
-        accept={[...IMAGE_EXTS, ".css"].join(",")}
+        accept={[...IMAGE_EXTS, ".css", ".scss", ".sass", ".less"].join(",")}
         className="sr-only-input"
         onChange={handleUploadFile}
       />

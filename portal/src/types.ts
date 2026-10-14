@@ -799,9 +799,69 @@ export interface Folder {
   description: string | null;
   /** From the folder list: whether the viewer may file reports into it. */
   can_manage?: boolean;
+  /** A top-level folder whose contents export and import as one package (api/app/projects.py). */
+  is_project?: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// --- Projects (api/app/projects.py) --------------------------------------------------------------------------------
+
+export interface ProjectResource {
+  kind: "image" | "stylesheet";
+  id: string;
+  name: string;
+  size_bytes: number;
+  /** "project": filed inside the project; "shared": elsewhere, used by its templates. */
+  scope: "project" | "shared";
+  folder: string | null;
+  /** Where it lives, for people ("Receipts/Forms", "(top level)"). */
+  where: string;
+  used_by: string[];
+}
+
+export interface ProjectContents {
+  project: { id: string; name: string; description: string | null; org_id: string };
+  folders: string[];
+  templates: { id: string; name: string; template_ext: TemplateExt; code: string | null; folder: string; version: number; is_draft: boolean }[];
+  resources: ProjectResource[];
+  fonts: { id: string; family: string; subfamily: string; used_by: string[] }[];
+  term_sets: { id: string; name: string; terms: number; used_by: string[] }[];
+  references: { connections: string[]; secrets: string[]; datasets: string[] };
+  warnings: string[];
+}
+
+export type ImportChoice =
+  | "create" | "create_shared" | "create_in_project" | "link" | "copy_into_project" | "overwrite" | "keep_both"
+  | "use_existing" | "update" | "skip" | "install" | "replace";
+
+interface PlanItem {
+  key: string;
+  status: string;
+  choices: ImportChoice[];
+  default: ImportChoice | null;
+  existing?: { id: string; name?: string; where?: string; version?: string } | null;
+}
+
+export interface ImportPlan {
+  token: string;
+  project: { name: string; existing_id: string | null; exported_at?: string; exported_by?: string };
+  contains: { versions?: boolean; data_sources?: boolean; fonts?: boolean; term_sets?: boolean };
+  templates: (PlanItem & { name: string; template_ext: TemplateExt; code: string | null; folder: string; match: { id: string; name: string; version: number } | null; code_note?: string })[];
+  resources: (PlanItem & { kind: "image" | "stylesheet"; name: string; scope: "project" | "shared"; included: boolean; used_by: string[] })[];
+  term_sets: (PlanItem & { name: string; terms: number })[];
+  fonts: (PlanItem & { family: string; subfamily: string; note?: string })[];
+  warnings: string[];
+}
+
+export interface ImportSummary {
+  project: { id: string; name: string };
+  created: string[];
+  updated: string[];
+  linked: string[];
+  skipped: string[];
+  warnings: string[];
 }
 
 export interface ImageResource {
@@ -814,12 +874,17 @@ export interface ImageResource {
   width_px: number;
   height_px: number;
   size_bytes: number;
+  sha256?: string | null;
+  /** Upload only: other images here with exactly this content (api/app/routers/images.py). */
+  duplicates?: { id: string; name: string; where: string }[];
   created_by: string | null;
   created_at: string;
   updated_at: string;
 }
 
 // The CSS counterpart to ImageResource — see api/app/stylesheet_store.py.
+export type StyleFormat = "css" | "scss" | "sass" | "less";
+
 export interface StylesheetResource {
   id: string;
   org_id: string;
@@ -827,6 +892,11 @@ export interface StylesheetResource {
   name: string;
   content_type: string;
   size_bytes: number;
+  /** What was uploaded -- templates always get the compiled CSS (api/app/style_compile.py). */
+  source_format?: StyleFormat;
+  sha256?: string | null;
+  /** Upload only: other stylesheets here with exactly this content. */
+  duplicates?: { id: string; name: string; where: string }[];
   created_by: string | null;
   created_at: string;
   updated_at: string;

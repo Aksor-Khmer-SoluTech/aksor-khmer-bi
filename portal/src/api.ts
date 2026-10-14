@@ -36,6 +36,10 @@ import type {
   DeploymentTerms,
   EffectivePermissions,
   Folder,
+  ImportChoice,
+  ImportPlan,
+  ImportSummary,
+  ProjectContents,
   FontBlock,
   FontResource,
   InstalledFont,
@@ -1506,12 +1510,45 @@ export const api = {
         // folder_id — omit to leave the parent unchanged, pass `null`
         // to move this folder to the Resources root.
         parent_folder_id?: string | null;
+        /** Mark a top-level folder as a project, or unmark it. */
+        is_project?: boolean;
       }
     ): Promise<Folder> {
       return sendJSON(`/folders/${id}`, "PATCH", body);
     },
     delete(id: string): Promise<void> {
       return del(`/folders/${id}`, "Delete failed");
+    },
+  },
+
+  // --- Projects: a folder exported as one package, imported elsewhere (api/app/routers/projects.py) ---
+  projects: {
+    contents(id: string): Promise<ProjectContents> {
+      return getJSON(`/projects/${id}`);
+    },
+    async export(
+      id: string,
+      body: { leave_out: string[]; versions: boolean; data_sources: boolean; fonts: boolean; term_sets: boolean },
+    ): Promise<{ blob: Blob; filename: string }> {
+      const resp = await apiFetch(`/projects/${id}/export`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!resp.ok) {
+        const err: ApiErrorBody = await resp.json().catch(() => ({}));
+        throw new ApiError(resp.status, err.detail || `Export failed (${resp.status})`);
+      }
+      return { blob: await resp.blob(), filename: filenameFromDisposition(resp, "project.aksor-project.zip") };
+    },
+    async preview(file: File, into: string | null, orgId: string): Promise<ImportPlan> {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("org_id", orgId);
+      if (into) form.set("into", into);
+      return asJson(await apiFetch("/projects/import/preview", { method: "POST", body: form }));
+    },
+    apply(token: string, decisions: Record<string, ImportChoice>): Promise<ImportSummary> {
+      return sendJSON(`/projects/import/${token}`, "POST", { decisions });
+    },
+    cancel(token: string): Promise<void> {
+      return del(`/projects/import/${token}`, "Cancel failed");
     },
   },
 
@@ -1591,6 +1628,23 @@ export const api = {
     },
     delete(id: string): Promise<void> {
       return del(`/stylesheets/${id}`, "Delete failed");
+    },
+    /** What was uploaded: the SCSS / Sass / Less source, or the CSS itself. */
+    async source(id: string): Promise<string> {
+      const resp = await apiFetch(`/stylesheets/${id}/source`);
+      if (!resp.ok) throw new ApiError(resp.status, `Couldn't load it (${resp.status})`);
+      return resp.text();
+    },
+    /** The compiled CSS a template gets. */
+    async css(id: string): Promise<string> {
+      const resp = await apiFetch(`/stylesheets/${id}/file`);
+      if (!resp.ok) throw new ApiError(resp.status, `Couldn't load it (${resp.status})`);
+      return resp.text();
+    },
+    replace(id: string, file: File): Promise<StylesheetResource> {
+      const form = new FormData();
+      form.set("file", file);
+      return apiFetch(`/stylesheets/${id}/file`, { method: "PUT", body: form }).then((r) => asJson<StylesheetResource>(r));
     },
   },
 };

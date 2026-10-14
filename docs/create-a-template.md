@@ -192,6 +192,46 @@ page.
   - In Manage → Resources a shortcut shows with a *Shortcut* badge, **Open the original** and
     **Remove shortcut**; it can't be dragged (move the original instead).
 
+### 3.5 Projects: moving templates to another server
+
+A **project** is a top-level folder whose contents travel together: its templates (docx, xlsx, html), the images
+and stylesheets filed in it, its subfolders — and, when you choose, what those templates use from outside it. Use
+one to build reports on a test server and move them to production in one step.
+
+- **Make a folder a project**: Manage → Resources → the folder's **…** menu → *Make it a project* (top-level
+  folders only; a project can't be moved inside another folder). It gets a package icon and a *Project* label.
+- **Export** (the project's **…** menu, or *Export* on its banner) downloads one `.aksor-project.zip`. The dialog
+  lists what's in it and every **shared** file the templates use from outside the project — a logo at the top level,
+  a common stylesheet. Each is included unless you untick it; untick one the other server already has, and the
+  package records it by name and fingerprint so the import finds it there (or says it's missing). Also included,
+  each on by default: **version history** (every earlier version with its note), **data sources and sample data**,
+  **fonts** the templates name (Resources → Fonts) and **protected-term sets** they use.
+- **Import** (*Import project* at the top of Resources, or *Update from a package* on a project) first shows what
+  would happen to every item — nothing is written until you press *Import*:
+  - **Already here** — the exact same file (same content) is on this server: it's linked, never copied again.
+  - **New** — it's added. A shared file can be added as shared again, or inside the project.
+  - **Differs** — one with the same name is here with other content. You choose: *Overwrite the one here* (same
+    file, so every template using it changes — the default for the project's own files), *Keep both* (the imported
+    templates get their own copy, inside the project), or *Keep the one here* (the default for shared files).
+  - **Exists** — importing into an existing project matches each template by its **code**, else by its name in the
+    same folder, and adds a new version to it (*Update*) — nothing is duplicated. Or *Keep both*, or *Skip*.
+  - **Missing** — a shared file left out of the package that this server doesn't have. Add it, then map it.
+  If anything fails half-way, everything the import created is removed again.
+- **Never in a package: secrets.** A data source names its connection, its secrets and its dataset; the import
+  lists any the server doesn't have yet — create them under Manage → Connections / Secrets / Datasets.
+- **Report codes** keep a template's identity across servers ("the same report"); a code already used by another
+  template here is left off the imported one, and the import says so.
+- **Who may**: `project:transfer` (Org Admin and Report Admin have it) with manage access on the project; importing
+  also needs `report:manage`, a new project `folder:manage`, adding or replacing a font `font:manage`, and term sets
+  `protected_terms:manage`. Every export and import is in the audit log.
+
+**Own copies or shared files?** A project that keeps its own copy of a logo is self-contained: it moves, and
+changes, without touching any other template — but the same logo may then be stored in five projects, and updating
+it means five uploads. A shared logo is updated once for everyone, but exporting must carry it (or expect it on the
+other server), and changing it changes every template that uses it. Aksor helps either way: uploading an image or
+stylesheet that is already somewhere here (same content, whatever its name) says where it is, so you can keep the
+new copy or remove it and use that one; and an import links identical files instead of copying them.
+
 ---
 
 ## 4. Jinja syntax cheat sheet
@@ -618,6 +658,23 @@ you uploaded to **Resources**, by name:
 Every `href`/`src` must be exactly one `resource('…')` call; anything else (a literal
 URL, a relative path) is rejected at registration. At register time you map each name to
 an uploaded resource. Rendering never touches the network.
+
+**Stylesheets in CSS, SCSS, Sass or Less.** Upload them under Manage → Resources (*Upload stylesheet*), or from the
+register dialog's *Upload new*. SCSS (`.scss`), Sass's indented syntax (`.sass`) and Less (`.less`) are compiled to
+CSS when uploaded — the template always gets CSS, since that's all the PDF engine reads — and the file you uploaded is
+kept: *view* on its card shows the source beside the compiled CSS, *replace* takes a new version in any of the four
+formats, and a project exports the source. A mistake is caught at upload, with the line: `Undefined variable: "$brnd".
+(line 3, column 10)`.
+
+| Format | What works | What doesn't |
+|---|---|---|
+| CSS | Everything, as written | — |
+| SCSS / Sass | Variables, nesting, `&`, mixins and `@include`, functions, `@extend`, maths, colour functions (`darken`, `mix`…) | The module system (`@use`, `@forward`, `sass:math`) — this is the `@import`-era Sass engine (LibSass) |
+| Less | Variables, nesting, mixins with arguments and guards, operations, colour functions | Inline JavaScript, a few rarer built-in functions |
+
+Each SCSS / Sass / Less file must be **self-contained**: `@import`, `@use` and `@forward` are refused (an import would
+let a stylesheet read files on the server, and there is no folder of partials to import from). Put the variables and
+mixins in the same file. Stylus isn't supported — compile it to CSS first (`stylus theme.styl`) and upload the `.css`.
 
 ### 6.5 Fonts
 

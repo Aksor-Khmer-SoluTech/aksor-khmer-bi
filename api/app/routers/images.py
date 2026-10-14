@@ -18,7 +18,7 @@ import hashlib
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
-from .. import audit, db, image_store
+from .. import audit, db, image_store, projects
 from ..auth import ensure_org_scope, get_current_user
 from ..models import ImageOut
 from ..rbac import AuthContext, can_manage_folder_contents, can_view_folder_contents
@@ -68,7 +68,15 @@ async def upload_image(
         details={"sha256": hashlib.sha256(content).hexdigest(), "size_bytes": len(content),
                  "original_filename": file.filename, "folder_id": folder_id},
     )
-    return _to_out(created)
+    # The same file already here (by content, whatever its name): said, so the uploader can use that one instead of
+    # keeping two copies -- only ones they can see.
+    with db.SessionLocal() as session:
+        same = [
+            {"id": d["id"], "name": d["name"], "where": projects.folder_path(session, d["folder_id"])}
+            for d in image_store.with_content(org_id, created["sha256"])
+            if d["id"] != created["id"] and can_view_folder_contents(session, context, d["folder_id"])
+        ]
+    return _to_out({**created, "duplicates": same})
 
 
 @router.get("", summary="List images visible to the caller", response_model=list[ImageOut])

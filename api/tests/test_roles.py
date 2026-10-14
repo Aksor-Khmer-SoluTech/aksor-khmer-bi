@@ -41,6 +41,7 @@ def test_get_role_includes_permissions(auth_headers):
         "protected_terms:manage",
         "dataset:manage",
         "analyze:use",
+        "project:transfer",
     }
 
 

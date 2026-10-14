@@ -98,9 +98,35 @@ def upload_font(
 ) -> FontOut:
     try:
         data = font_store.read_upload(file.file)
-        info = font_info.inspect(data)
     except font_info.FontError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        added = install_font(data, filename=file.filename, note=note, user_id=context.user.id if context.user else None)
+    except FontInstallError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    with db.SessionLocal() as session:
+        row = _get(session, added["id"])
+        audit.record(
+            audit.Actor.of(context, request), "font.upload", "font", row.id, label=f"{row.family} {row.subfamily}",
+            summary=f"Added font {row.family} {row.subfamily} (version {row.version or 'unknown'})",
+            details={"filename": row.filename, "sha256": row.sha256, "size_bytes": row.size_bytes, "khmer_coverage": row.khmer_coverage},
+        )
+        return _out(row, {}, warnings=added["warnings"], shadows=added["shadows"])
+
+
+class FontInstallError(ValueError):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def install_font(data: bytes, *, filename: str | None, note: str = "", user_id: str | None = None) -> dict:
+    """Add a font for the whole server: {"id", "warnings", "shadows"}. Raises FontInstallError -- 400 for a file
+    that isn't a usable font, 409 for one that is already there. Shared by the upload route and project import."""
+    try:
+        info = font_info.inspect(data)
+    except font_info.FontError as exc:
+        raise FontInstallError(400, str(exc)) from exc
     digest = font_store.sha256_of(data)
     shadows = info.family.lower() in font_catalog.system_families()
     warnings = list(info.warnings)
@@ -109,19 +135,18 @@ def upload_font(
             f"The server already has a font named {info.family!r}. Which of the two a render uses is up to the "
             "operating system's font matching, so check the result -- or give this font its own family name."
         )
-
     with db.SessionLocal() as session:
         if session.scalar(select(db.FontResource.id).where(db.FontResource.sha256 == digest)):
-            raise HTTPException(status_code=409, detail="That exact font file has already been added")
+            raise FontInstallError(409, "That exact font file has already been added")
         clash = session.scalar(
             select(db.FontResource).where(
                 db.FontResource.family_key == info.family.lower(), db.FontResource.subfamily_key == info.subfamily.lower()
             )
         )
         if clash is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"{info.family} {info.subfamily} is already there (version {clash.version or 'unknown'}). Remove it "
+            raise FontInstallError(
+                409,
+                f"{info.family} {info.subfamily} is already there (version {clash.version or 'unknown'}). Remove it "
                 "first if you mean to replace it -- two files can't both be that font.",
             )
         row = db.FontResource(
@@ -130,16 +155,15 @@ def upload_font(
             italic=info.italic, glyph_count=info.glyph_count, khmer_coverage=info.khmer_coverage,
             latin_coverage=info.latin_coverage, has_layout_tables=info.has_layout_tables, copyright=info.copyright,
             license=info.license, license_url=info.license_url, embedding=info.embedding, note=(note or "").strip()[:300],
-            filename=(file.filename or f"font.{info.file_ext}")[:200], file_ext=info.file_ext, sha256=digest,
-            size_bytes=len(data), created_at=datetime.now(timezone.utc).isoformat(),
-            created_by=context.user.id if context.user else None,
+            filename=(filename or f"font.{info.file_ext}")[:200], file_ext=info.file_ext, sha256=digest,
+            size_bytes=len(data), created_at=datetime.now(timezone.utc).isoformat(), created_by=user_id,
         )
         session.add(row)
         try:
             session.flush()
         except IntegrityError as exc:
             session.rollback()
-            raise HTTPException(status_code=409, detail="That font is already there") from exc
+            raise FontInstallError(409, "That font is already there") from exc
         font_store.save(row.id, row.file_ext, data)
         try:
             session.commit()
@@ -148,12 +172,19 @@ def upload_font(
             font_store.remove_file(row.id, row.file_ext)
             raise
         font_catalog.forget()
-        audit.record(
-            audit.Actor.of(context, request), "font.upload", "font", row.id, label=f"{row.family} {row.subfamily}",
-            summary=f"Added font {row.family} {row.subfamily} (version {row.version or 'unknown'})",
-            details={"filename": row.filename, "sha256": row.sha256, "size_bytes": row.size_bytes, "khmer_coverage": row.khmer_coverage},
-        )
-        return _out(row, {}, warnings=warnings, shadows=shadows)
+        return {"id": row.id, "warnings": warnings, "shadows": shadows}
+
+
+def remove_font(font_id: str) -> str:
+    """Remove a font's row and file; returns its label. Raises HTTPException 404 when there's no such font."""
+    with db.SessionLocal() as session:
+        row = _get(session, font_id)
+        label, ext = f"{row.family} {row.subfamily}", row.file_ext
+        session.delete(row)
+        session.commit()
+    font_store.remove_file(font_id, ext)
+    font_catalog.forget()
+    return label
 
 
 @router.get("/{font_id}", summary="One font, with the templates that use it", response_model=FontOut)
@@ -201,11 +232,7 @@ def delete_font(
                 detail=f"{row.family} is named by {', '.join(users[:5])}{' and more' if len(users) > 5 else ''} -- they would render "
                 "in a substitute font. Remove it anyway with force=true.",
             )
-        label, ext = f"{row.family} {row.subfamily}", row.file_ext
-        session.delete(row)
-        session.commit()
-    font_store.remove_file(font_id, ext)
-    font_catalog.forget()
+    label = remove_font(font_id)
     audit.record(
         audit.Actor.of(context, request), "font.delete", "font", font_id, label=label,
         summary=f"Removed font {label}" + (f" (named by {len(users)} template(s))" if users else ""),
