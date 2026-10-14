@@ -555,7 +555,18 @@ logic of its own.
 export PORTAL_USERNAME=admin
 export PORTAL_PASSWORD='pick something real'
 export CORS_ALLOWED_ORIGINS=http://localhost:8080   # wherever the portal is served from
-uvicorn app.main:app --reload --port 8000 --env-file .env
+```
+
+Then start the server with either command:
+
+```bash
+python -m app
+```
+
+or
+
+```bash
+uvicorn app.main:app --reload --port 8000
 ```
 
 If neither `PORTAL_USERNAME`/`PORTAL_PASSWORD` is set nor any user exists, every protected request (see
@@ -581,8 +592,21 @@ pip install -r requirements.txt
 alembic upgrade head
 
 cp .env.example .env   # first time only -- then edit .env if you need to
-uvicorn app.main:app --reload --port 8000 --env-file .env
 ```
+
+Then start the dev server (port 8000, reloads on changes) with either command:
+
+```bash
+python -m app
+```
+
+or
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+Both read `.env` by themselves. For another port: `PORT=8001 python -m app`, or `--port 8001`.
 
 [`.env.example`](.env.example) has the env vars a local dev run actually
 needs: `PORTAL_USERNAME`/`PORTAL_PASSWORD` (the break-glass superuser --

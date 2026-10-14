@@ -89,9 +89,21 @@ pip install -e packages/doc_engine
 pip install -r api/requirements.txt
 
 cd api
-uvicorn app.main:app --reload --port 8000
-# open http://localhost:8000/docs
 ```
+
+Then start the dev server (port 8000, reloads on changes) with either command:
+
+```bash
+python -m app
+```
+
+or
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+and open http://localhost:8000/docs.
 
 Or skip the API entirely and call the library directly against your own
 template (see [`examples/build_receipt.py`](examples/build_receipt.py)

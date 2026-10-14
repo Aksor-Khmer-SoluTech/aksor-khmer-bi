@@ -69,9 +69,23 @@ pip install -r api/requirements.txt
 cd api
 export PORTAL_USERNAME=admin PORTAL_PASSWORD='pick something real'
 export CORS_ALLOWED_ORIGINS=http://localhost:8080
-uvicorn app.main:app --reload --port 8000
+```
 
-# separately, in another terminal:
+Then start the API (port 8000, reloads on changes) with either command:
+
+```bash
+python -m app
+```
+
+or
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+And separately, in another terminal, serve the portal:
+
+```bash
 cd portal && python3 -m http.server 8080
 ```
 
