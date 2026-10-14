@@ -670,7 +670,7 @@ before and the next report can share it.
 
 ### Analyze: slice a dataset as a table or a chart
 
-**Analyze** (**Dashboards → Explore data** in the top bar, for people with the `analyze:use` permission — given to
+**Analyze** (in the top bar, or **Dashboards → Explore data**, for people with the `analyze:use` permission — given to
 `ROLE_REPORT_ADMIN` and `ROLE_ORG_ADMIN` by default; add it to other roles under Manage → Roles) works on any
 dataset you may use:
 
@@ -693,6 +693,30 @@ name, with its own link (`#/analyze/<id>`); saved views are yours alone.
 Who sees which rows is the dataset's to decide: an *open* dataset is open to everyone with `analyze:use`, and a
 *restricted* one only to its grants, each within their filter values (the dataset's **Access** tab). Analyze has no
 report grants to narrow it, so restrict a dataset whose rows not everyone should see. Hidden fields stay hidden here.
+
+#### Statistics: show values as, ranges, trends and outliers
+
+- **Show as** — under each ticked value: *as is*, *% of total*, *% of row total*, *% of column total*, *running total*,
+  *change from previous* or *% change from previous* (Excel's *Show Values As*). The column's name says so ("Net sales
+  (% of total)"). A running total or a change runs down the rows, or across the columns when you choose; with two
+  row fields — branch, then month — it starts again for each branch. The totals it can't run along are left empty.
+- **Ranges** — a number or money field in rows or columns can be grouped *in ranges* (about ten, of a round width
+  chosen for you: "in ranges of 5,000,000") or *ranges of…* a width you type. Each range runs from its lower edge up
+  to, not including, the next: `20,000–40,000` holds 20,000 and 39,999 but not 40,000. A range field alone on its
+  side lists every range, the empty ones too, so the bar chart is an honest histogram.
+- **Trend line** — with exactly one field in rows: a straight line through the first value (or the one you choose) by
+  least squares, with its slope ("+9,595,867 ៛ per month") and R², drawn dashed over the chart. Dates count as real
+  periods, so a missing month is a gap of two, not one. **Moving average** adds a trailing average over 2–12 periods;
+  **Forecast** carries the line on 1–12 periods past the last, as extra points on the chart and rows under the table.
+  It is a straight line, not a model of the seasons — read it as "if things go on as they have".
+- **Outliers** — marks the cells that stand out from the other cells of the same value (never the totals): by
+  **z-score**, more than *n* standard deviations from their mean (2 unless you change it; needs at least three
+  values), or by **IQR**, more than *n* interquartile ranges below the first quartile or above the third (1.5, as a
+  box plot draws it; needs four). The line above the table says where the limits fell.
+
+All of it is worked out on the server, so the PDF, Word and Excel exports, saved views and dashboard tiles show the
+same numbers: shares stay percentages in Excel, outliers are shaded, and the trend and outlier limits are written
+under the title.
 
 ### Dashboards and data alerts
 
@@ -717,6 +741,11 @@ the data, and emails when the condition first holds — not again until it has r
 *Data alert* job under Manage → Jobs, whose run history shows the value it saw ("Not triggered: Net sales is
 244,435,000 ៛…"); stop or change it there. Like a report job, it may only watch what its creator could analyze when
 saving it.
+
+An alert can also watch for something **unusual** rather than a fixed number: choose *Stands out for one…*, the field
+to compare across (each branch, each product) and how to judge it (z-score or IQR, as above). Each check works the
+measure out for every value of that field and emails the ones that stand out ("កែប: 91,330,000 ៛ (unusually high)") —
+so a branch whose sales jump or collapse is noticed without anyone having picked a threshold.
 
 ### Embedding a report that fetches its own data
 

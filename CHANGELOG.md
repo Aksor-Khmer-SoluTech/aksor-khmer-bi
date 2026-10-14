@@ -11,6 +11,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   the rest. They work wherever measures do: report templates (`{{ measures.<key> }}`), Analyze pivots and charts,
   dashboard tiles and data alerts — "tell me when the median sale drops below 30,000 ៛". They follow Excel's
   `PERCENTILE.INC`, `STDEV.S` and `VAR.S`. Existing datasets are unchanged; no migration.
+- **Statistics in Analyze** (Phase 5b). *Show value as* a percentage of the total, of the row or column total, a
+  running total, or the change (or % change) from the previous row or column. *Ranges*: group a number field into
+  ranges of a width you choose or one chosen for you, empty ranges kept — a histogram. *Trend line* down one row
+  field, with its slope per period and R², a moving average and a forecast of up to 12 periods (missing months count
+  as gaps). *Outliers* by z-score or interquartile range, shaded in the table and outlined on the chart. They carry
+  into exports, saved views and dashboard tiles. A **data alert** can now email when one group *stands out* — any
+  branch whose sales are unusually high or low — instead of crossing a fixed threshold. No migration.
 
 ### Changed
 - **Analyze has its own place in the top bar**, next to Dashboards, for everyone who can analyze datasets

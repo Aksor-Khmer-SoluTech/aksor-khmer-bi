@@ -5,7 +5,7 @@ import { has } from "../admin/sections";
 import { initialValue } from "../dateFormat";
 import { downloadBlob } from "../download";
 import type { Route } from "../hooks";
-import type { AnalysisChart, AnalysisView, AnalyzeDataset, AnalyzeForm, AuthInfo, DateBucket, PivotLayout, PivotResult, PivotValue } from "../types";
+import type { AnalysisChart, AnalysisView, AnalyzeDataset, AnalyzeForm, AuthInfo, DateBucket, PivotLayout, PivotResult, PivotValue, ShowAsMode } from "../types";
 import { ParameterField } from "./RunReportPage";
 import { AddToDashboard, AlertMe } from "./AnalyzeActions";
 
@@ -18,69 +18,165 @@ const SERIES = ["var(--color-accent)", "#e07a1f", "#18794a", "#9b3fb4", "#c23b4a
 const EMPTY: PivotLayout = { rows: [], columns: [], values: [], buckets: {} };
 const keyText = (k: (string | number | null)[]) => k.map((v) => (v === null ? "(blank)" : String(v))).join(" · ") || "All";
 const isKhmer = (s: string) => /[ក-៿]/.test(s);
+const SHOW_AS: [ShowAsMode | "", string][] = [
+  ["", "as is"],
+  ["percent_of_total", "% of total"],
+  ["percent_of_row", "% of row total"],
+  ["percent_of_column", "% of column total"],
+  ["running_total", "running total"],
+  ["difference", "change from previous"],
+  ["percent_difference", "% change from previous"],
+];
+const SEQUENCE: ShowAsMode[] = ["running_total", "difference", "percent_difference"];
+
+/** The layout as sent: statistics that no longer fit the arrangement are left out rather than refused -- a trend
+ * needs exactly one row field; a running total or change runs along a side that has a field; a value no longer shown
+ * keeps no "show as". */
+export function sendable(layout: PivotLayout): PivotLayout {
+  const showAs: NonNullable<PivotLayout["show_as"]> = {};
+  for (const [key, spec] of Object.entries(layout.show_as ?? {})) {
+    if (!layout.values.includes(key)) continue;
+    if (!SEQUENCE.includes(spec.mode)) showAs[key] = spec;
+    else if (layout[spec.along].length) showAs[key] = spec;
+    else if (layout.rows.length || layout.columns.length) showAs[key] = { ...spec, along: layout.rows.length ? "rows" : "columns" };
+  }
+  const placed = [...layout.rows, ...layout.columns];
+  const trend = layout.trend && layout.rows.length === 1 ? { ...layout.trend, value: layout.trend.value && layout.values.includes(layout.trend.value) ? layout.trend.value : null } : null;
+  return {
+    ...layout,
+    ranges: Object.fromEntries(Object.entries(layout.ranges ?? {}).filter(([name]) => placed.includes(name))),
+    show_as: showAs,
+    trend,
+    outliers: layout.outliers ?? null,
+  };
+}
+
+const STEPS = [1, 2, 2.5, 3, 4, 5, 6, 8, 10];
+const TREND_GREY = "var(--color-text-faint)";
+
+/** About four round steps from at or below `low` (zero, or less when a change or a trend goes negative) to at or
+ * above `high` -- the same as the exported chart (analyze_export.axis_range). */
+function axisRange(low: number, high: number) {
+  const raw = (high - low) / 4;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = STEPS.map((n) => n * magnitude).find((t) => t >= raw * (1 - 1e-9)) ?? raw;
+  const bottom = Math.floor(low / step + 1e-9) * step;
+  const top = Math.ceil(high / step - 1e-9) * step;
+  const ticks = Array.from({ length: Math.round((top - bottom) / step) + 1 }, (_, n) => bottom + n * step);
+  return { bottom, top, ticks };
+}
+
+/** Which value a chart draws: the one a trend follows, else the first. */
+export const chartedIndex = (result: PivotResult) => (result.trend ? Math.max(0, result.layout.values.indexOf(result.trend.value)) : 0);
 
 export function Chart({ result, kind }: { result: PivotResult; kind: "bar" | "line" }) {
+  const vi = chartedIndex(result);
   const hasColumns = result.labels.columns.length > 0;
-  const series = hasColumns ? result.column_keys.map(keyText) : [result.labels.values[0]?.label ?? ""];
-  const cats = result.row_keys.map(keyText);
-  const data = series.map((_, si) => cats.map((_, ci) => (result.cells[ci][hasColumns ? si : 0]?.[0]?.v ?? 0) || 0));
-  const max = Math.max(1, ...data.flat());
-  // The axis' top: 1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 or 10 x a power of ten -- the same as the exported chart.
-  const magnitude = Math.pow(10, Math.floor(Math.log10(max)));
-  const top = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map((s) => s * magnitude).find((t) => t >= max) ?? max;
+  const series = hasColumns ? result.column_keys.map(keyText) : [result.labels.values[vi]?.label ?? ""];
+  const trend = result.trend;
+  const ahead = trend?.forecast_keys ?? [];
+  const known = result.row_keys.length;
+  const cats = [...result.row_keys.map(keyText), ...ahead];
+  const entry = (ci: number, si: number) => result.cells[ci][hasColumns ? si : 0]?.[vi];
+  const data = series.map((_, si) => result.row_keys.map((_, ci) => entry(ci, si)?.v ?? 0));
+  // Trend lines (dashed, carried into the forecast) and moving averages, drawn over the marks.
+  const overlays = (trend?.series ?? []).flatMap((line, si) => {
+    const out: { points: [number, number][]; color: string; dashed: boolean; name: string; si: number }[] = [];
+    if (line.fitted) {
+      const all = [...line.fitted, ...(line.forecast ?? []).map((f) => f.v)];
+      out.push({ points: all.flatMap((v, ci) => (v === null ? [] : [[ci, v] as [number, number]])), color: SERIES[si % SERIES.length], dashed: true, name: `${series[si]} trend`, si });
+    }
+    if (line.moving_average) {
+      out.push({ points: line.moving_average.flatMap((v, ci) => (v === null ? [] : [[ci, v] as [number, number]])), color: TREND_GREY, dashed: false, name: `${series[si]} moving average`, si });
+    }
+    return out;
+  });
+  const everything = [...data.flat(), ...overlays.flatMap((o) => o.points.map((p) => p[1]))];
+  const low = Math.min(0, ...everything);
+  const high = Math.max(0, ...everything);
+  const { bottom, top, ticks } = axisRange(low, high > low ? high : low + 1);
+  const percent = (result.formats?.[result.layout.values[vi]] ?? "").includes("%");
   // Labels side by side need room; with many categories they tilt instead of running into each other.
   const tilt = cats.length > 5 && (800 - 100) / Math.max(1, cats.length) < 90;
   const W = 800, H = tilt ? 360 : 320, L = 84, R = 16, T = 12, B = tilt ? 96 : 44;
   const iw = W - L - R, ih = H - T - B;
-  const y = (v: number) => T + ih - (v / top) * ih;
+  const y = (v: number) => T + ih - ((v - bottom) / (top - bottom)) * ih;
   const band = iw / Math.max(1, cats.length);
-  const short = (v: number) => (top >= 1e7 ? `${+(v / 1e6).toFixed(1)}M` : top >= 1e4 ? `${+(v / 1e3).toFixed(1)}K` : v.toLocaleString());
-  const text = result.labels.values[0];
-  if (cats.length === 0) return <p className="muted p-4">No rows for these filters.</p>;
+  const span = Math.max(top, -bottom);
+  const short = (v: number) =>
+    percent
+      ? `${+(v * 100).toFixed(1)}%`
+      : span >= 1e7
+        ? `${+(v / 1e6).toFixed(1)}M`
+        : span >= 1e4
+          ? `${+(v / 1e3).toFixed(1)}K`
+          : (+v.toFixed(2)).toLocaleString();
+  const text = result.labels.values[vi];
+  if (known === 0) return <p className="muted p-4">No rows for these filters.</p>;
   return (
     <div className="grid gap-2 p-3.5">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${text?.label ?? ""} chart`} className="h-auto w-full">
-        {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-          <g key={f}>
-            <line x1={L} x2={W - R} y1={y(f * top)} y2={y(f * top)} stroke="var(--color-border-soft)" />
-            <text x={L - 8} y={y(f * top) + 4} textAnchor="end" className="fill-text-faint text-[11px]">
-              {short(f * top)}
+        {ticks.map((v) => (
+          <g key={v}>
+            <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke={v === 0 && bottom < 0 ? "var(--color-text-faint)" : "var(--color-border-soft)"} />
+            <text x={L - 8} y={y(v) + 4} textAnchor="end" className="fill-text-faint text-[11px]">
+              {short(v)}
             </text>
           </g>
         ))}
+        {ahead.length > 0 && <rect x={L + known * band} y={T} width={ahead.length * band} height={ih} fill="var(--color-bg-panel)" opacity={0.6} />}
         {kind === "bar"
-          ? cats.map((c, ci) =>
+          ? result.row_keys.map((_, ci) =>
               series.map((s, si) => {
                 const w = Math.min(44, (band * 0.78) / series.length);
                 const x = L + ci * band + (band - w * series.length) / 2 + si * w;
                 const v = data[si][ci];
+                const e = entry(ci, si);
                 return (
-                  <rect key={`${ci}-${si}`} x={x} y={y(v)} width={Math.max(w - 3, 1)} height={T + ih - y(v)} rx={3} fill={SERIES[si % SERIES.length]}>
-                    <title>{`${c} · ${s}: ${result.cells[ci][hasColumns ? si : 0]?.[0]?.t ?? "—"}`}</title>
+                  <rect key={`${ci}-${si}`} x={x} y={Math.min(y(v), y(0))} width={Math.max(w - 3, 1)} height={Math.abs(y(0) - y(v))} rx={3} fill={SERIES[si % SERIES.length]} stroke={e?.o ? "var(--color-highlight)" : undefined} strokeWidth={e?.o ? 3 : undefined}>
+                    <title>{`${cats[ci]} · ${s}: ${e?.t ?? "—"}${e?.o ? ` (outlier, ${e.o})` : ""}`}</title>
                   </rect>
                 );
               }),
             )
           : series.map((s, si) => (
               <g key={s}>
-                <polyline fill="none" stroke={SERIES[si % SERIES.length]} strokeWidth={2.5} points={cats.map((_, ci) => `${L + ci * band + band / 2},${y(data[si][ci])}`).join(" ")} />
-                {cats.map((c, ci) => (
-                  <circle key={ci} cx={L + ci * band + band / 2} cy={y(data[si][ci])} r={4} fill={SERIES[si % SERIES.length]}>
-                    <title>{`${c} · ${s}: ${result.cells[ci][hasColumns ? si : 0]?.[0]?.t ?? "—"}`}</title>
-                  </circle>
-                ))}
+                <polyline fill="none" stroke={SERIES[si % SERIES.length]} strokeWidth={2.5} points={result.row_keys.map((_, ci) => `${L + ci * band + band / 2},${y(data[si][ci])}`).join(" ")} />
+                {result.row_keys.map((_, ci) => {
+                  const e = entry(ci, si);
+                  return (
+                    <circle key={ci} cx={L + ci * band + band / 2} cy={y(data[si][ci])} r={e?.o ? 6 : 4} fill={SERIES[si % SERIES.length]} stroke={e?.o ? "var(--color-highlight)" : undefined} strokeWidth={e?.o ? 3 : undefined}>
+                      <title>{`${cats[ci]} · ${s}: ${e?.t ?? "—"}${e?.o ? ` (outlier, ${e.o})` : ""}`}</title>
+                    </circle>
+                  );
+                })}
               </g>
             ))}
+        {overlays.map((o, oi) => (
+          <g key={oi}>
+            <polyline fill="none" stroke={o.color} strokeWidth={1.8} strokeDasharray={o.dashed ? "6 4" : undefined} opacity={0.9} points={o.points.map(([ci, v]) => `${L + ci * band + band / 2},${y(v)}`).join(" ")}>
+              <title>{o.name}</title>
+            </polyline>
+            {o.points
+              .filter(([ci]) => ci >= known)
+              .map(([ci, v]) => (
+                <circle key={ci} cx={L + ci * band + band / 2} cy={y(v)} r={4} fill="var(--color-bg-raised)" stroke={o.color} strokeWidth={1.8}>
+                  <title>{`${cats[ci]} · ${series[o.si]}: forecast ${trend?.series[o.si]?.forecast?.[ci - known]?.t ?? ""}`}</title>
+                </circle>
+              ))}
+          </g>
+        ))}
         {cats.map((c, ci) => {
           const x = L + ci * band + band / 2;
-          const text = c.length > 22 ? `${c.slice(0, 21)}…` : c;
+          const label = c.length > 22 ? `${c.slice(0, 21)}…` : c;
+          const cls = ci >= known ? "fill-text-faint italic" : "fill-text-dim";
           return tilt ? (
-            <text key={ci} x={x} y={H - B + 14} textAnchor="end" transform={`rotate(-35 ${x} ${H - B + 14})`} className="fill-text-dim text-[12px]" style={isKhmer(c) ? { fontFamily: "Khmer OS Siemreap" } : undefined}>
-              {text}
+            <text key={ci} x={x} y={H - B + 14} textAnchor="end" transform={`rotate(-35 ${x} ${H - B + 14})`} className={`${cls} text-[12px]`} style={isKhmer(c) ? { fontFamily: "Khmer OS Siemreap" } : undefined}>
+              {label}
             </text>
           ) : (
-            <text key={ci} x={x} y={H - B + 20} textAnchor="middle" className="fill-text-dim text-[11px]" style={isKhmer(c) ? { fontFamily: "Khmer OS Siemreap" } : undefined}>
-              {text}
+            <text key={ci} x={x} y={H - B + 20} textAnchor="middle" className={`${cls} text-[11px]`} style={isKhmer(c) ? { fontFamily: "Khmer OS Siemreap" } : undefined}>
+              {label}
             </text>
           );
         })}
@@ -92,9 +188,57 @@ export function Chart({ result, kind }: { result: PivotResult; kind: "bar" | "li
             {s}
           </span>
         ))}
+        {trend?.line && (
+          <span className="inline-flex items-center gap-1.5">
+            <i className="inline-block w-4 border-t-2 border-dashed border-text-dim" /> Trend{ahead.length > 0 ? " and forecast" : ""}
+          </span>
+        )}
+        {trend?.moving_average && (
+          <span className="inline-flex items-center gap-1.5">
+            <i className="inline-block w-4 border-t-2 border-text-faint" /> {trend.moving_average}-period moving average
+          </span>
+        )}
         {result.labels.values.length > 1 && <span className="text-text-faint">Charting {text?.label}; the table shows every value.</span>}
       </div>
     </div>
+  );
+}
+
+/** What a trend and an outlier check found, a line each, above the table or chart. */
+export function StatsNotes({ result }: { result: PivotResult }) {
+  const lines: { key: string; text: string }[] = [];
+  const trend = result.trend;
+  const name = (i: number) => result.labels.values[i]?.label ?? "";
+  if (trend) {
+    const many = trend.series.length > 1;
+    trend.series.forEach((line, si) => {
+      if (line.slope === undefined) return;
+      let text = `Trend${many ? ` · ${keyText(result.column_keys[si])}` : ""}: ${line.slope >= 0 ? "+" : ""}${line.slope_t} per ${trend.per ?? "row"}`;
+      if (line.r2 !== null && line.r2 !== undefined) text += ` · R² ${line.r2.toFixed(2)}`;
+      if (line.forecast?.length) text += ` · forecast ${trend.forecast_keys.map((k, i) => `${k} ${line.forecast?.[i]?.t}`).join(", ")}`;
+      lines.push({ key: `t${si}`, text });
+    });
+  }
+  const outliers = result.outliers;
+  if (outliers) {
+    const how = outliers.method === "zscore" ? `more than ${outliers.threshold} standard deviations from the mean` : `beyond ${outliers.threshold} × IQR outside the quartiles`;
+    outliers.values.forEach((o, i) =>
+      lines.push({
+        key: `o${i}`,
+        text:
+          o.low === null
+            ? `Outliers in ${name(i)}: too few values to tell`
+            : `Outliers in ${name(i)}: ${o.count} — below ${o.low_t} or above ${o.high_t} (${how})`,
+      }),
+    );
+  }
+  if (!lines.length) return null;
+  return (
+    <ul className="m-0 grid list-none gap-0.5 border-b border-border-soft px-3 py-2 text-[0.8rem] text-text-dim">
+      {lines.map((l) => (
+        <li key={l.key}>{l.text}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -105,12 +249,25 @@ export function PivotTable({ result }: { result: PivotResult }) {
   const cell = (entries: PivotValue[] | null | undefined) =>
     values.map((_, i) => {
       const e = entries?.[i];
+      if (e?.o)
+        return (
+          <td key={i} className="analyze-outlier" title={`Outlier: unusually ${e.o}`}>
+            {e.t}
+          </td>
+        );
       return (
         <td key={i} className={e && e.v !== null ? "" : "text-text-faint"}>
           {e && e.v !== null ? e.t : "—"}
         </td>
       );
     });
+  // A forecast row per period ahead: the trend's value in each column, the rest left empty.
+  const trend = result.trend;
+  const followed = trend ? result.layout.values.indexOf(trend.value) : -1;
+  const forecastRows = (trend?.forecast_keys ?? []).map((k, fi) => {
+    const at = (si: number) => values.map((_, i) => (i === followed ? trend?.series[si]?.forecast?.[fi] : undefined));
+    return { key: k, cells: hasColumns ? [...result.column_keys.map((_, si) => at(si)), values.map(() => undefined)] : [at(0)] };
+  });
   const name = (l: { label: string; label_km: string | null }) => l.label_km || l.label;
   return (
     <div className="overflow-x-auto">
@@ -160,6 +317,20 @@ export function PivotTable({ result }: { result: PivotResult }) {
             {hasColumns && result.column_totals.map((ct) => cell(ct))}
             {cell(result.total)}
           </tr>
+          {forecastRows.map((row) => (
+            <tr key={row.key} className="analyze-forecast">
+              <td colSpan={Math.max(1, labels.rows.length)} className="text-left">
+                {row.key} · forecast
+              </td>
+              {row.cells.flatMap((entries, ci) =>
+                entries.map((e, i) => (
+                  <td key={`${ci}-${i}`} className={e ? "" : "text-text-faint"}>
+                    {e ? e.t : ""}
+                  </td>
+                )),
+              )}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -183,6 +354,7 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
   const [notice, setNotice] = useState<string | null>(null);
   const pending = useRef<AnalysisView | null>(null);
   const [panel, setPanel] = useState<"dashboard" | "alert" | null>(null);
+  const sent = useMemo(() => sendable(layout), [layout]);
 
   useEffect(() => {
     api.analyze.datasets().then(setDatasets).catch((err) => setError(err instanceof ApiError ? err.message : "Couldn't load the datasets"));
@@ -239,7 +411,7 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
     const timer = window.setTimeout(() => {
       setRunning(true);
       api.analyze
-        .pivot(form.dataset, values, layout)
+        .pivot(form.dataset, values, sent)
         .then((r) => {
           setResult(r);
           setError(null);
@@ -248,7 +420,7 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
         .finally(() => setRunning(false));
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [form, values, layout]);
+  }, [form, values, sent]);
 
   const fieldLabel = (name: string) => {
     const f = form?.fields.find((x) => x.name === name);
@@ -266,6 +438,29 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
       return { ...prev, [where]: there ? prev[where].filter((n) => n !== name) : [...prev[where], name].slice(0, 3), [other]: prev[other].filter((n) => n !== name) };
     });
   }
+  function setShowAs(key: string, mode: ShowAsMode | "", along?: "rows" | "columns") {
+    setLayout((prev) => {
+      const show = { ...(prev.show_as ?? {}) };
+      if (!mode) delete show[key];
+      else show[key] = { mode, along: along ?? show[key]?.along ?? (prev.rows.length || !prev.columns.length ? "rows" : "columns") };
+      return { ...prev, show_as: show };
+    });
+  }
+  function setRange(name: string, width: number | null | undefined) {
+    setLayout((prev) => {
+      const ranges = { ...(prev.ranges ?? {}) };
+      if (width === undefined) delete ranges[name];
+      else ranges[name] = width;
+      return { ...prev, ranges };
+    });
+  }
+  function setTrend(change: Partial<NonNullable<PivotLayout["trend"]>>) {
+    setLayout((prev) => {
+      const next = { line: false, moving_average: null, forecast: 0, ...(prev.trend ?? {}), ...change };
+      if (!next.line) next.forecast = 0;
+      return { ...prev, trend: next.line || next.moving_average ? next : null };
+    });
+  }
   const toggleValue = (key: string) =>
     setLayout((prev) => ({ ...prev, values: prev.values.includes(key) ? prev.values.filter((k) => k !== key) : [...prev.values, key].slice(0, 6) }));
 
@@ -273,7 +468,7 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
     if (!form) return;
     setBusy(format);
     try {
-      const { blob, filename } = await api.analyze.export({ dataset: form.dataset, values, layout, format, chart, title: title.trim() || undefined });
+      const { blob, filename } = await api.analyze.export({ dataset: form.dataset, values, layout: sent, format, chart, title: title.trim() || undefined });
       downloadBlob(blob, filename);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Export failed");
@@ -286,7 +481,7 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
     if (!form || !title.trim()) return;
     setBusy("save");
     try {
-      const body = { title: title.trim(), dataset: form.dataset, config: { values, layout, view: chart } };
+      const body = { title: title.trim(), dataset: form.dataset, config: { values, layout: sent, view: chart } };
       const saved = current && !asNew ? await api.analyze.views.update(current.id, body) : await api.analyze.views.create(body);
       setCurrent(saved);
       setViews((prev) => [saved, ...prev.filter((v) => v.id !== saved.id)]);
@@ -405,15 +600,107 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
           </div>
           <div>
             <h3 className="docs-home-label">Values</h3>
-            {measureOptions.map((m) => (
-              <label key={m.key} className="checkbox-label mb-0 rounded-md px-1.5 py-1 hover:bg-bg-panel">
-                <input type="checkbox" checked={layout.values.includes(m.key)} onChange={() => toggleValue(m.key)} />
-                <span className="leading-tight">
-                  {m.label}
-                  {m.km && <small className="block text-[0.72rem] text-text-faint">{m.km}</small>}
-                </span>
+            {measureOptions.map((m) => {
+              const shown = layout.values.includes(m.key);
+              const spec = layout.show_as?.[m.key];
+              return (
+                <div key={m.key}>
+                  <label className="checkbox-label mb-0 rounded-md px-1.5 py-1 hover:bg-bg-panel">
+                    <input type="checkbox" checked={shown} onChange={() => toggleValue(m.key)} />
+                    <span className="leading-tight">
+                      {m.label}
+                      {m.km && <small className="block text-[0.72rem] text-text-faint">{m.km}</small>}
+                    </span>
+                  </label>
+                  {shown && (
+                    <div className="mb-1 flex flex-wrap items-center gap-1 pl-7">
+                      <select className="analyze-bucket" aria-label={`Show ${m.label} as`} value={spec?.mode ?? ""} onChange={(e) => setShowAs(m.key, e.target.value as ShowAsMode | "")}>
+                        {SHOW_AS.map(([mode, label]) => (
+                          <option key={mode} value={mode} disabled={SEQUENCE.includes(mode as ShowAsMode) && !layout.rows.length && !layout.columns.length}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                      {spec && SEQUENCE.includes(spec.mode) && layout.rows.length > 0 && layout.columns.length > 0 && (
+                        <select className="analyze-bucket" aria-label={`Run ${m.label} along`} value={spec.along} onChange={(e) => setShowAs(m.key, spec.mode, e.target.value as "rows" | "columns")}>
+                          <option value="rows">down the rows</option>
+                          <option value="columns">across the columns</option>
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div>
+            <h3 className="docs-home-label">Statistics</h3>
+            <label className="checkbox-label mb-0 rounded-md px-1.5 py-1 hover:bg-bg-panel">
+              <input type="checkbox" checked={!!layout.trend?.line} disabled={layout.rows.length !== 1} onChange={(e) => setTrend({ line: e.target.checked })} />
+              <span className="leading-tight">Trend line</span>
+            </label>
+            <div className="grid grid-cols-2 gap-x-2 px-1.5">
+              <label className="mb-1">
+                <span className="text-[0.72rem]">Moving avg. (periods)</span>
+                <select value={layout.trend?.moving_average ?? ""} disabled={layout.rows.length !== 1} onChange={(e) => setTrend({ moving_average: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">off</option>
+                  {[2, 3, 4, 6, 12].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
               </label>
-            ))}
+              <label className="mb-1">
+                <span className="text-[0.72rem]">Forecast</span>
+                <select value={layout.trend?.forecast ?? 0} disabled={!layout.trend?.line || layout.rows.length !== 1} onChange={(e) => setTrend({ forecast: Number(e.target.value) })}>
+                  {[0, 1, 2, 3, 6, 12].map((n) => (
+                    <option key={n} value={n}>
+                      {n ? `${n} ahead` : "off"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {layout.trend && layout.values.length > 1 && (
+              <label className="mb-1 px-1.5">
+                <span className="text-[0.72rem]">Trend of</span>
+                <select value={sent.trend?.value ?? layout.values[0]} onChange={(e) => setTrend({ value: e.target.value })}>
+                  {layout.values.map((k) => (
+                    <option key={k} value={k}>
+                      {measureOptions.find((o) => o.key === k)?.label ?? k}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {layout.rows.length !== 1 && <p className="field-hint m-0 px-1.5">A trend runs down exactly one field in rows — a date by month, say.</p>}
+            <div className="grid grid-cols-2 gap-x-2 px-1.5 pt-1">
+              <label className="mb-1">
+                <span className="text-[0.72rem]">Outliers</span>
+                <select
+                  value={layout.outliers?.method ?? ""}
+                  onChange={(e) => setLayout((prev) => ({ ...prev, outliers: e.target.value ? { method: e.target.value as "zscore" | "iqr", threshold: null } : null }))}
+                >
+                  <option value="">off</option>
+                  <option value="zscore">z-score</option>
+                  <option value="iqr">IQR</option>
+                </select>
+              </label>
+              {layout.outliers && (
+                <label className="mb-1">
+                  <span className="text-[0.72rem]">{layout.outliers.method === "zscore" ? "Std. deviations" : "× IQR"}</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    value={layout.outliers.threshold ?? (layout.outliers.method === "zscore" ? 2 : 1.5)}
+                    onChange={(e) => setLayout((prev) => ({ ...prev, outliers: prev.outliers && { ...prev.outliers, threshold: Number(e.target.value) > 0 ? Math.min(10, Number(e.target.value)) : null } }))}
+                  />
+                </label>
+              )}
+            </div>
           </div>
           <div>
             <h3 className="docs-home-label">Saved views</h3>
@@ -445,6 +732,8 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
                   {layout[where].map((name) => {
                     const f = form?.fields.find((x) => x.name === name);
                     const isDate = f?.type === "date" || f?.type === "datetime";
+                    const isNumber = f?.type === "number" || f?.type === "money";
+                    const width = layout.ranges?.[name];
                     return (
                       <span key={name} className="inline-flex items-center gap-1 rounded-full bg-accent-soft py-1 pr-1 pl-2.5 text-[0.8rem] font-medium text-accent-strong">
                         {fieldLabel(name)}
@@ -467,6 +756,28 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
                             <option value="month">by month</option>
                             <option value="year">by year</option>
                           </select>
+                        )}
+                        {isNumber && (
+                          <select
+                            className="analyze-bucket"
+                            aria-label={`Group ${fieldLabel(name)} into`}
+                            value={width === undefined ? "" : width === null ? "auto" : "custom"}
+                            onChange={(e) => setRange(name, e.target.value === "" ? undefined : e.target.value === "auto" ? null : (result?.ranges?.[name]?.width ?? 1000))}
+                          >
+                            <option value="">each value</option>
+                            <option value="auto">in ranges{width === null && result?.ranges?.[name] ? ` of ${result.ranges[name].width_t}` : ""}</option>
+                            <option value="custom">ranges of…</option>
+                          </select>
+                        )}
+                        {isNumber && typeof width === "number" && (
+                          <input
+                            type="number"
+                            className="analyze-bucket w-24"
+                            aria-label={`Width of each ${fieldLabel(name)} range`}
+                            min={0}
+                            value={width}
+                            onChange={(e) => Number(e.target.value) > 0 && setRange(name, Number(e.target.value))}
+                          />
                         )}
                         <button type="button" className="border-0 bg-transparent px-1 text-inherit opacity-70 hover:opacity-100" aria-label={`Remove ${fieldLabel(name)}`} onClick={() => place(where, name)}>
                           <X size={13} />
@@ -503,6 +814,7 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
               )}
             </div>
             {!result && !error && <p className="muted p-4">{form ? "Working it out…" : "Choose a dataset."}</p>}
+            {result && <StatsNotes result={result} />}
             {result && (chart === "table" ? <PivotTable result={result} /> : <Chart result={result} kind={chart} />)}
           </div>
 
@@ -536,7 +848,7 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
             <AddToDashboard
               form={form}
               values={values}
-              layout={layout}
+              layout={sent}
               chart={chart}
               title={title}
               onDone={(message, dashboardId) => {

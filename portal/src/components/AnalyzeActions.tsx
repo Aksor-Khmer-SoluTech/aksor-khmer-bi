@@ -129,8 +129,12 @@ export function AlertMe({
 }) {
   const options = [...form.measures.map((m) => ({ key: m.key, label: m.label })), { key: "__rows", label: "Rows (count)" }];
   const [measure, setMeasure] = useState(options[0].key);
-  const [condition, setCondition] = useState<"below" | "above">("below");
+  const [condition, setCondition] = useState<"below" | "above" | "outlier">("below");
   const [threshold, setThreshold] = useState("");
+  // Branches, products… first: comparing single days is rarely what's meant.
+  const groupable = ["text", "boolean", "date"].flatMap((type) => form.fields.filter((f) => f.type === type));
+  const [groupBy, setGroupBy] = useState(groupable[0]?.name ?? "");
+  const [method, setMethod] = useState<"zscore" | "iqr">("zscore");
   const [cron, setCron] = useState(SCHEDULES[1].cron);
   const [servers, setServers] = useState<ConnectionSummary[] | null>(null);
   const [server, setServer] = useState("");
@@ -150,7 +154,9 @@ export function AlertMe({
   }, []);
 
   const number = Number(threshold.replace(/[,\s៛$%]/g, ""));
-  const ready = threshold.trim() !== "" && Number.isFinite(number) && server && to.trim();
+  const outlier = condition === "outlier";
+  const ready = (outlier ? groupBy : threshold.trim() !== "" && Number.isFinite(number)) && server && to.trim();
+  const groupLabel = groupable.find((f) => f.name === groupBy)?.label || groupBy;
   const label = options.find((o) => o.key === measure)?.label ?? measure;
 
   async function create() {
@@ -158,16 +164,21 @@ export function AlertMe({
     setError(null);
     try {
       await api.jobs.create(orgId, {
-        name: `Alert: ${form.title} · ${label} ${condition} ${threshold.trim()}`.slice(0, 120),
+        name: (outlier ? `Alert: ${form.title} · a ${groupLabel} stands out on ${label}` : `Alert: ${form.title} · ${label} ${condition} ${threshold.trim()}`).slice(0, 120),
         job_type: "data_alert",
         trigger_type: "cron",
         cron_expression: cron,
         config: {
-          dataset: form.dataset, values, measure, condition, threshold: number, repeat: "on_change",
+          dataset: form.dataset, values, measure, condition, repeat: "on_change",
+          ...(outlier ? { group_by: groupBy, method } : { threshold: number }),
           email: { connection: server, to: to.split(/[,;\s]+/).filter(Boolean) },
         },
       });
-      onDone(`Alert set: you'll get an email when ${label} ${condition === "below" ? "drops below" : "rises above"} ${threshold.trim()}.`);
+      onDone(
+        outlier
+          ? `Alert set: you'll get an email when a ${groupLabel} stands out from the rest on ${label}.`
+          : `Alert set: you'll get an email when ${label} ${condition === "below" ? "drops below" : "rises above"} ${threshold.trim()}.`,
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't set the alert");
     } finally {
@@ -193,15 +204,40 @@ export function AlertMe({
         </label>
         <label>
           <span>Goes</span>
-          <select value={condition} onChange={(e) => setCondition(e.target.value as "below" | "above")}>
+          <select value={condition} onChange={(e) => setCondition(e.target.value as "below" | "above" | "outlier")}>
             <option value="below">Below</option>
             <option value="above">Above</option>
+            <option value="outlier" disabled={groupable.length === 0}>
+              Stands out for one…
+            </option>
           </select>
         </label>
-        <label>
-          <span>Threshold</span>
-          <input type="text" inputMode="decimal" placeholder="50,000,000" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
-        </label>
+        {outlier ? (
+          <>
+            <label>
+              <span>Compare each</span>
+              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
+                {groupable.map((f) => (
+                  <option key={f.name} value={f.name}>
+                    {f.label || f.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Outlier by</span>
+              <select value={method} onChange={(e) => setMethod(e.target.value as "zscore" | "iqr")}>
+                <option value="zscore">z-score (beyond 2 std. dev.)</option>
+                <option value="iqr">IQR (beyond 1.5 × IQR)</option>
+              </select>
+            </label>
+          </>
+        ) : (
+          <label>
+            <span>Threshold</span>
+            <input type="text" inputMode="decimal" placeholder="50,000,000" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
+          </label>
+        )}
         <label>
           <span>Check</span>
           <select value={cron} onChange={(e) => setCron(e.target.value)}>
@@ -229,8 +265,10 @@ export function AlertMe({
         </label>
       </div>
       <p className="field-hint m-0">
-        It checks with the filters set above, across all the data, and emails when it first crosses — not again until it has recovered. Change or
-        stop it under Manage → Jobs.
+        {outlier
+          ? `It works ${label} out for each ${groupLabel} with the filters set above and emails when one stands out from the rest — no number to pick. Not again until none does.`
+          : "It checks with the filters set above, across all the data, and emails when it first crosses — not again until it has recovered."}{" "}
+        Change or stop it under Manage → Jobs.
       </p>
       {error && <p className="alert alert-error m-0">{error}</p>}
       <div>

@@ -27,6 +27,8 @@
   thead th { background: #e7ecf5; font-weight: 600; }
   tr.total td { font-weight: 700; background: #f1f4f9; }
   td.empty { color: #9aa1b2; }
+  td.outlier { background: #fde2c8; font-weight: 600; }
+  .notes { margin: 0 0 10px; padding: 0; list-style: none; color: #56607a; font-size: 8.5pt; }
   .foot { margin-top: 8px; color: #6b7280; font-size: 8pt; }
 </style>
 </head>
@@ -34,6 +36,7 @@
   <h1>{{ title }}</h1>
   <p class="sub">{{ subtitle }}</p>
   {% if filters %}<p class="filters">{% for f in filters %}<span><b>{{ f.label }}:</b> {{ f.value }}</span>{% endfor %}</p>{% endif %}
+  {% if notes %}<ul class="notes">{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
   {% if graph %}
   <div class="chart">
     <img src="{{ graph.uri }}" alt="">

@@ -44,7 +44,7 @@ const JSON_HINT: Record<Exclude<JobType, "render_report">, string> = {
   soap_call: "Calls one operation of the SOAP service with params.",
   file_output: "Writes content to destination_path ({job_id} and {timestamp} are filled in on each run).",
   data_alert:
-    "Works out a dataset measure on each run and emails when it rises above or drops below the threshold (once, until it recovers; repeat: every_time for each run). Easiest made from Analyze → Alert me.",
+    "Works out a dataset measure on each run and emails when it rises above or drops below the threshold (once, until it recovers; repeat: every_time for each run). Or condition: outlier with group_by (a field) and method (zscore or iqr): emails when one group stands out from the rest. Easiest made from Analyze → Alert me.",
 };
 
 function isoToDatetimeLocal(iso: string | null): string {

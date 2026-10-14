@@ -5727,6 +5727,16 @@ textarea[readonly] {
   font-weight: 700;
   background: var(--bg-panel);
 }
+/* Phase 5b statistics: a cell that stands out from the rest of its value, and the trend's forecast rows. */
+.analyze-table td.analyze-outlier {
+  background: var(--highlight-soft);
+  color: var(--highlight-strong);
+  font-weight: 600;
+}
+.analyze-table tr.analyze-forecast td {
+  font-style: italic;
+  color: var(--text-dim);
+}
 .analyze-table thead th.text-center {
   text-align: center;
   border-bottom: 1px solid var(--border-soft);

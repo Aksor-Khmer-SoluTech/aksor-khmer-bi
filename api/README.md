@@ -281,12 +281,15 @@ tables and `app/rbac.py` for the authorization logic.
   `POST /export` (`pdf` | `docx` | `xlsx`, audited) and the caller's own
   saved views under `/views`. `app/analyze.py` checks access like a report
   run, caches fetched rows five minutes, and works measures out per cell.
+  A layout may also ask for `show_as` (per value), `ranges` (number
+  fields), a `trend` (one row field) and `outliers` (z-score / IQR).
 - **Dashboards** — `/api/v1/dashboards`: the caller's own and those
   shared with their roles (`GET`), making one (`POST`, `analyze:use`), its
   owner's `PUT` (tiles, shared filters), `PUT /{id}/sharing` (roles) and
   `DELETE`, and `POST /{id}/tiles/{tile}/run` -- a tile's pivot with the
   viewer's own access (`app/dashboards.py`). **Data alerts** are jobs,
-  `job_type: "data_alert"` (`app/data_alerts.py`).
+  `job_type: "data_alert"` (`app/data_alerts.py`); `condition`
+  `above` / `below` a threshold, or `outlier` across a `group_by` field.
 - **Secrets** — `/api/v1/secrets` (`secret:manage` to create/rotate/
   revoke/delete; list also for `connection:manage`/`report:manage`,
   never a value): named credentials (`app/secrets.py`) a connection's

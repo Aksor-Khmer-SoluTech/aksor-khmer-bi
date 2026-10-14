@@ -1228,6 +1228,24 @@ export interface AnalyzeForm {
 
 export type DateBucket = "day" | "month" | "year";
 
+export type ShowAsMode = "percent_of_total" | "percent_of_row" | "percent_of_column" | "running_total" | "difference" | "percent_difference";
+
+export interface PivotTrendSpec {
+  /** The value it follows; omitted: the first. */
+  value?: string | null;
+  line: boolean;
+  /** A trailing average over this many periods (2-12). */
+  moving_average: number | null;
+  /** Carry the line on this many periods (0-12). */
+  forecast: number;
+}
+
+export interface PivotOutliersSpec {
+  method: "zscore" | "iqr";
+  /** z-score: standard deviations (2 by default); IQR: interquartile ranges beyond the quartiles (1.5). */
+  threshold: number | null;
+}
+
 export interface PivotLayout {
   source?: string | null;
   rows: string[];
@@ -1235,11 +1253,29 @@ export interface PivotLayout {
   /** Measure keys, or "__rows" for the row count. */
   values: string[];
   buckets: Record<string, DateBucket>;
+  /** A number field in ranges this wide; null: about ten, chosen by the server. */
+  ranges?: Record<string, number | null>;
+  show_as?: Record<string, { mode: ShowAsMode; along: "rows" | "columns" }>;
+  trend?: PivotTrendSpec | null;
+  outliers?: PivotOutliersSpec | null;
 }
 
 export interface PivotValue {
   v: number | null;
   t: string;
+  /** An outlier among the other cells of this value. */
+  o?: "high" | "low";
+}
+
+export interface PivotTrendSeries {
+  slope?: number;
+  slope_t?: string;
+  intercept?: number;
+  r2?: number | null;
+  /** The line at each row (null for a blank key). */
+  fitted?: (number | null)[];
+  forecast?: PivotValue[];
+  moving_average?: (number | null)[];
 }
 
 export interface PivotResult {
@@ -1256,7 +1292,17 @@ export interface PivotResult {
   labels: {
     rows: { name: string; label: string; label_km: string | null; type: string }[];
     columns: { name: string; label: string; label_km: string | null; type: string }[];
-    values: { key: string; label: string; label_km: string | null }[];
+    values: { key: string; label: string; label_km: string | null; show_as?: ShowAsMode }[];
+  };
+  /** Each value's display format as shown ("0.0%" when shown as a percentage). */
+  formats?: Record<string, string | null>;
+  /** The width each range field was grouped by. */
+  ranges?: Record<string, { width: number; width_t: string }>;
+  /** One series per column key (one when there are no columns). */
+  trend?: PivotTrendSpec & { value: string; per: "day" | "month" | "year" | "range" | null; forecast_keys: string[]; series: PivotTrendSeries[] };
+  outliers?: PivotOutliersSpec & {
+    threshold: number;
+    values: { key: string; count: number; low: number | null; high: number | null; low_t: string | null; high_t: string | null }[];
   };
   values_used: Record<string, string>;
   elapsed_ms: number;

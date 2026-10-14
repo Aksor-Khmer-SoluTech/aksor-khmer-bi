@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -50,7 +51,10 @@ def table(result: dict) -> dict:
     def cells(entries: list | None) -> list[dict]:
         if entries is None:
             return [{"text": "—", "value": None, "cls": "empty"} for _ in values]
-        return [{"text": e["t"] if e["v"] is not None else "—", "value": e["v"], "cls": "" if e["v"] is not None else "empty"} for e in entries]
+        return [
+            {"text": e["t"] if e["v"] is not None else "—", "value": e["v"], "cls": ("outlier" if e.get("o") else "") if e["v"] is not None else "empty"}
+            for e in entries
+        ]
 
     body = []
     for i, rk in enumerate(result["row_keys"]):
@@ -81,62 +85,136 @@ def nice_top(value: float) -> float:
     return next(step * magnitude for step in (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10) if step * magnitude >= value)
 
 
+def axis_range(low: float, high: float) -> tuple[float, float, float]:
+    """(bottom, top, step): about four round steps from at or below `low` (zero, or less when a change or a trend
+    goes negative) to at or above `high` -- 106M tops at 120M in steps of 30M."""
+    raw = (high - low) / 4
+    magnitude = 10 ** math.floor(math.log10(raw))
+    step = next(n * magnitude for n in (1, 2, 2.5, 3, 4, 5, 6, 8, 10) if n * magnitude >= raw * (1 - 1e-9))
+    return math.floor(low / step + 1e-9) * step, math.ceil(high / step - 1e-9) * step, step
+
+
+def charted(result: dict) -> int:
+    """Which value a chart draws: the one a trend follows, else the first."""
+    trend = result.get("trend")
+    return result["layout"]["values"].index(trend["value"]) if trend else 0
+
+
 def chart(result: dict, kind: str) -> dict | None:
-    """A bar or line chart of the first value -- row keys along the axis, one series per column key -- as
-    {uri, categories, series, pad_left, pad_right}. Only the marks, the grid and the axis numbers are drawn in SVG:
-    WeasyPrint draws SVG text without Khmer shaping (stacked consonants come apart), so the category names and the
-    legend are HTML text under the picture, lined up with it by the same margins."""
+    """A bar or line chart of one value (`charted`) -- row keys along the axis, one series per column key -- as
+    {uri, categories, series, pad_left, pad_right}, with any trend line, moving average and forecast drawn over it.
+    Only the marks, the grid and the axis numbers are drawn in SVG: WeasyPrint draws SVG text without Khmer shaping
+    (stacked consonants come apart), so the category names and the legend are HTML text under the picture, lined up
+    with it by the same margins."""
     if kind not in ("bar", "line") or not result["row_keys"]:
         return None
-    labels = result["labels"]
+    labels, trend, i = result["labels"], result.get("trend"), charted(result)
     has_columns = bool(labels["columns"])
-    series = [key_text(ck) for ck in result["column_keys"]] if has_columns else [_name(labels["values"][0])]
-    cats = [key_text(rk) for rk in result["row_keys"]]
-    data = [
-        [((result["cells"][ri][si] or [{"v": None}])[0]["v"] if has_columns else (result["cells"][ri][0] or [{"v": None}])[0]["v"]) or 0
-         for ri in range(len(cats))]
-        for si in range(len(series))
-    ]
-    top = nice_top(max([v for row in data for v in row] + [1]))
+    series = [key_text(ck) for ck in result["column_keys"]] if has_columns else [_name(labels["values"][i])]
+    ahead = trend["forecast_keys"] if trend else []
+    cats = [key_text(rk) for rk in result["row_keys"]] + ahead
+    known = len(result["row_keys"])
+    data = [[((result["cells"][ri][si] or [None] * (i + 1))[i] or {"v": None})["v"] or 0 for ri in range(known)] for si in range(len(series))]
+    overlays = []  # (points, color, dashed)
+    for si, line in enumerate(trend["series"] if trend else []):
+        color = SERIES[si % len(SERIES)]
+        if line.get("fitted"):
+            fitted = line["fitted"] + [f["v"] for f in line["forecast"]]
+            overlays.append(([(ci, v) for ci, v in enumerate(fitted) if v is not None], color, True))
+        if line.get("moving_average"):
+            overlays.append(([(ci, v) for ci, v in enumerate(line["moving_average"]) if v is not None], "#56607a", False))
+    everything = [v for row in data for v in row] + [v for points, _, _ in overlays for _, v in points]
+    low, high = min(everything + [0]), max(everything + [0])
+    bottom, top, step = axis_range(low, high if high > low else low + 1)
     W, H, L, R, T, B = 760, 220, 92, 16, 14, 6
     iw, ih = W - L - R, H - T - B
 
     def y(v: float) -> float:
-        return T + ih - (v / top) * ih
+        return T + ih - ((v - bottom) / (top - bottom)) * ih
+
+    span = max(top, -bottom)
+    ticks = [bottom + n * step for n in range(round((top - bottom) / step) + 1)]
+
+    percent = "%" in ((result.get("formats") or {}).get(result["layout"]["values"][i]) or "")
 
     def short(v: float) -> str:
+        if percent:
+            return f"{v * 100:,.1f}".rstrip("0").rstrip(".") + "%"
+        if span < 10:
+            return f"{v:,.2f}".rstrip("0").rstrip(".")
         for div, unit in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
-            if top >= div * 10:
+            if span >= div * 10:
                 return f"{v / div:,.1f}".rstrip("0").rstrip(".") + unit
         return f"{v:,.0f}"
 
     font = 'font-family="DejaVu Sans, sans-serif" font-size="11" fill="#56607a"'
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}">']
-    for f in (0, 0.25, 0.5, 0.75, 1):
-        parts.append(f'<line x1="{L}" x2="{W - R}" y1="{y(f * top):.1f}" y2="{y(f * top):.1f}" stroke="#dfe3ec"/>')
-        parts.append(f'<text x="{L - 8}" y="{y(f * top) + 4:.1f}" text-anchor="end" {font}>{escape(short(f * top))}</text>')
+    for v in ticks:
+        parts.append(f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="#dfe3ec"/>')
+        parts.append(f'<text x="{L - 8}" y="{y(v) + 4:.1f}" text-anchor="end" {font}>{escape(short(v))}</text>')
+    if bottom < 0:  # where zero is, when a change or a trend goes below it
+        parts.append(f'<line x1="{L}" x2="{W - R}" y1="{y(0):.1f}" y2="{y(0):.1f}" stroke="#9aa1b2"/>')
     band = iw / len(cats)
     if kind == "bar":
         width = min(46.0, band * 0.78 / len(series))
-        for ci in range(len(cats)):
+        for ci in range(known):
             for si in range(len(series)):
                 x = L + ci * band + (band - width * len(series)) / 2 + si * width
-                parts.append(f'<rect x="{x:.1f}" y="{y(data[si][ci]):.1f}" width="{max(width - 3, 1):.1f}" height="{T + ih - y(data[si][ci]):.1f}" rx="2" fill="{SERIES[si % len(SERIES)]}"/>')
+                v = data[si][ci]
+                parts.append(f'<rect x="{x:.1f}" y="{min(y(v), y(0)):.1f}" width="{max(width - 3, 1):.1f}" height="{abs(y(0) - y(v)):.1f}" rx="2" fill="{SERIES[si % len(SERIES)]}"/>')
     else:
         for si in range(len(series)):
-            points = " ".join(f"{L + ci * band + band / 2:.1f},{y(data[si][ci]):.1f}" for ci in range(len(cats)))
+            points = " ".join(f"{L + ci * band + band / 2:.1f},{y(data[si][ci]):.1f}" for ci in range(known))
             parts.append(f'<polyline points="{points}" fill="none" stroke="{SERIES[si % len(SERIES)]}" stroke-width="2.5"/>')
-            for ci in range(len(cats)):
+            for ci in range(known):
                 parts.append(f'<circle cx="{L + ci * band + band / 2:.1f}" cy="{y(data[si][ci]):.1f}" r="3.5" fill="{SERIES[si % len(SERIES)]}"/>')
+    for points, color, dashed in overlays:
+        path = " ".join(f"{L + ci * band + band / 2:.1f},{y(v):.1f}" for ci, v in points)
+        dash = ' stroke-dasharray="6 4"' if dashed else ""
+        parts.append(f'<polyline points="{path}" fill="none" stroke="{color}" stroke-width="1.8" opacity="0.85"{dash}/>')
+        for ci, v in points:
+            if ci >= known:  # a forecast point: hollow
+                parts.append(f'<circle cx="{L + ci * band + band / 2:.1f}" cy="{y(v):.1f}" r="3.5" fill="#fff" stroke="{color}" stroke-width="1.8"/>')
     parts.append("</svg>")
     svg = "".join(parts)
+    legend = [{"name": name, "color": SERIES[si % len(SERIES)]} for si, name in enumerate(series)]
+    if trend and trend.get("moving_average"):
+        legend.append({"name": f"{trend['moving_average']}-period moving average · មធ្យមភាគចល័ត", "color": "#56607a"})
     return {
         "uri": f"data:image/svg+xml;base64,{base64.b64encode(svg.encode()).decode()}",
         "categories": cats,
-        "series": [{"name": name, "color": SERIES[si % len(SERIES)]} for si, name in enumerate(series)],
+        "series": legend,
         "pad_left": round(L / W * 100, 2),
         "pad_right": round(R / W * 100, 2),
     }
+
+
+def notes(result: dict) -> list[str]:
+    """What a trend and an outlier check found, one line each -- under the title, in every format."""
+    out = []
+    labels = result["labels"]
+    trend = result.get("trend")
+    if trend:
+        name = _name(labels["values"][charted(result)])
+        many = len(trend["series"]) > 1
+        for si, line in enumerate(trend["series"]):
+            if "slope" not in line:
+                continue
+            text = f"Trend · និន្នាការ — {name}{' · ' + key_text(result['column_keys'][si]) if many else ''}: {line['slope_t']} per {trend['per'] or 'row'}"
+            if line["r2"] is not None:
+                text += f", R² {line['r2']:.2f}"
+            if line["forecast"]:
+                text += "; forecast " + ", ".join(f"{k} {f['t']}" for k, f in zip(trend["forecast_keys"], line["forecast"]))
+            out.append(text)
+    outliers = result.get("outliers")
+    if outliers:
+        how = f"z-score beyond {outliers['threshold']:g}" if outliers["method"] == "zscore" else f"{outliers['threshold']:g} × IQR beyond the quartiles"
+        for v, entry in zip(labels["values"], outliers["values"]):
+            if entry["low"] is None:
+                out.append(f"Outliers · តម្លៃខុសប្រក្រតី — {_name(v)}: too few values to tell")
+            else:
+                out.append(f"Outliers · តម្លៃខុសប្រក្រតី — {_name(v)}: {entry['count']} (below {entry['low_t']} or above {entry['high_t']}; {how})")
+    return out
 
 
 # --- the files --------------------------------------------------------------------------------------------------------
@@ -148,6 +226,7 @@ def _context(result: dict, meta: dict, picture: dict | None) -> dict:
         "title": meta["title"],
         "subtitle": f"{meta['dataset_title']} · {result['row_count']:,} rows",
         "filters": meta["filters"],
+        "notes": notes(result),
         # The chart's names go through segmentation with everything else; its picture (base64) has nothing to segment.
         # ("graph", not "chart": the engine takes a dict with a "chart" key for one of its own chart specs.)
         "graph": picture,
@@ -190,6 +269,8 @@ def to_docx(result: dict, meta: dict, kind: str) -> bytes:
     doc.add_paragraph(context["subtitle"])
     if context["filters"]:
         doc.add_paragraph("    ".join(f"{f['label']}: {f['value']}" for f in context["filters"]))
+    for note in context["notes"]:
+        doc.add_paragraph(note)
     picture = chart(result, kind)
     if picture:
         # The chart page -- picture, then its names as shaped HTML text -- rasterized for Word.
@@ -213,6 +294,9 @@ def to_docx(result: dict, meta: dict, kind: str) -> bytes:
     for r, row in enumerate(body, start=len(headers)):
         for c, cell in enumerate(row["cells"]):
             grid.cell(r, c).text = cell["text"]
+            if cell["cls"] == "outlier":
+                shade = grid.cell(r, c)._tc.get_or_add_tcPr().makeelement(qn("w:shd"), {qn("w:val"): "clear", qn("w:fill"): "FDE2C8"})
+                grid.cell(r, c)._tc.get_or_add_tcPr().append(shade)
             if row["cls"] == "total":
                 for run in grid.cell(r, c).paragraphs[0].runs:
                     run.bold = True
@@ -235,6 +319,7 @@ def _number_format(measure_format: str | None) -> str:
 
 
 def to_xlsx(result: dict, meta: dict, measure_formats: dict[str, str | None]) -> bytes:
+    """`measure_formats`: each value's format as shown (analyze.value_formats) -- a percentage when shown as one."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -247,8 +332,11 @@ def to_xlsx(result: dict, meta: dict, measure_formats: dict[str, str | None]) ->
     ws.append([f"{meta['dataset_title']} · {result['row_count']:,} rows"])
     for f in meta["filters"]:
         ws.append([f["label"], f["value"]])
+    for note in notes(result):
+        ws.append([note])
     ws.append([])
     head_fill = PatternFill("solid", fgColor="E7ECF5")
+    outlier_fill = PatternFill("solid", fgColor="FDE2C8")
     for header in grid["headers"]:
         row_index = ws.max_row + 1
         col = 1
@@ -270,7 +358,9 @@ def to_xlsx(result: dict, meta: dict, measure_formats: dict[str, str | None]) ->
         excel_row = ws.max_row
         for i in range(dims, len(row["cells"])):
             key = keys[(i - dims) % len(keys)]
-            ws.cell(row=excel_row, column=i + 1).number_format = "#,##0" if key == "__rows" else _number_format(measure_formats.get(key))
+            ws.cell(row=excel_row, column=i + 1).number_format = _number_format(measure_formats.get(key))
+            if row["cells"][i]["cls"] == "outlier":
+                ws.cell(row=excel_row, column=i + 1).fill = outlier_fill
         if row["cls"] == "total":
             for c in range(1, len(row["cells"]) + 1):
                 ws.cell(row=excel_row, column=c).font = Font(bold=True)

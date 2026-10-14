@@ -106,7 +106,7 @@ def export(body: ExportRequest, request: Request, context: AuthContext = Depends
         elif body.format == "docx":
             content = analyze_export.to_docx(result, meta, body.chart)
         else:
-            content = analyze_export.to_xlsx(result, meta, {m["key"]: m.get("format") for m in row.measures or []})
+            content = analyze_export.to_xlsx(result, meta, analyze.value_formats(result["layout"], row.measures or []))
         dataset_name, org_id, dataset_id = row.name, row.org_id, row.id
     audit.record(
         audit.Actor.of(context, request), "analyze.export", "dataset", dataset_id, label=title, org_id=org_id,

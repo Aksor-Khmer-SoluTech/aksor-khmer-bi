@@ -15,12 +15,33 @@ class AnalyzeDataset(BaseModel):
     measure_count: int
 
 
+class ShowAs(BaseModel):
+    mode: Literal["percent_of_total", "percent_of_row", "percent_of_column", "running_total", "difference", "percent_difference"]
+    along: Literal["rows", "columns"] = Field("rows", description="running_total / difference: down the rows or across the columns")
+
+
+class PivotTrend(BaseModel):
+    value: str | None = Field(None, description="The value to follow; omitted: the first")
+    line: bool = Field(True, description="A straight-line trend (least squares), its slope and R²")
+    moving_average: int | None = Field(None, ge=2, le=12, description="A trailing average over this many periods")
+    forecast: int = Field(0, ge=0, le=12, description="Carry the trend line on this many periods")
+
+
+class PivotOutliers(BaseModel):
+    method: Literal["zscore", "iqr"] = "zscore"
+    threshold: float | None = Field(None, gt=0, le=10, description="z-score: standard deviations (2); IQR: interquartile ranges (1.5)")
+
+
 class PivotLayout(BaseModel):
     source: str | None = Field(None, description="Which of the dataset's lists to analyze; omitted: the first")
     rows: list[str] = Field(default_factory=list, description="Fields down the side (up to 3)")
     columns: list[str] = Field(default_factory=list, description="Fields across the top (up to 3)")
     values: list[str] = Field(default_factory=list, description="Measure keys, or __rows for the row count (up to 6)")
     buckets: dict[str, Literal["day", "month", "year"]] = Field(default_factory=dict, description="Group a date field by day, month or year")
+    ranges: dict[str, float | None] = Field(default_factory=dict, description="Group a number field into ranges this wide; null: about ten, chosen")
+    show_as: dict[str, ShowAs] = Field(default_factory=dict, description="Show a value as a percentage of a total, a running total or a change")
+    trend: PivotTrend | None = Field(None, description="A trend down the one row field: line, moving average, forecast")
+    outliers: PivotOutliers | None = Field(None, description="Mark cells that stand out, by z-score or IQR")
 
 
 class PivotRequest(BaseModel):
