@@ -1,6 +1,6 @@
-import { FileText, History, House, LayoutDashboard, Star, type LucideIcon } from "lucide-react";
+import { ChartColumnBig, FileText, History, House, LayoutDashboard, Star, type LucideIcon } from "lucide-react";
 import { useState } from "react";
-import { canManage, firstManageRoute, isManageRoute } from "../admin/sections";
+import { canManage, firstManageRoute, has, isManageRoute } from "../admin/sections";
 import { AdminIcon, DocsIcon, InfoIcon } from "../admin/icons";
 import { branding } from "../branding";
 import type { Route } from "../hooks";
@@ -16,8 +16,10 @@ export const EVERYDAY: { label: string; icon: LucideIcon; route: Route; isActive
   { label: "Reports", icon: FileText, route: { view: "reports" }, isActive: (r) => r.view === "reports" || r.view === "run" },
   { label: "My runs", icon: History, route: { view: "runs" }, isActive: (r) => r.view === "runs" },
   { label: "Starred", icon: Star, route: { view: "starred" }, isActive: (r) => r.view === "starred" },
-  // Dashboards shared with you, for everyone; those with analyze:use also make them and explore data (Analyze) there.
-  { label: "Dashboards", icon: LayoutDashboard, route: { view: "dashboards" }, isActive: (r) => r.view === "dashboards" || r.view === "analyze" },
+  // Dashboards shared with you, for everyone; those with analyze:use also make them from Analyze.
+  { label: "Dashboards", icon: LayoutDashboard, route: { view: "dashboards" }, isActive: (r) => r.view === "dashboards" },
+  // Pivot and chart a dataset (AnalyzePage.tsx) -- only for those with analyze:use.
+  { label: "Analyze", icon: ChartColumnBig, route: { view: "analyze" }, isActive: (r) => r.view === "analyze", visible: (auth) => has(auth, "analyze:use") },
 ];
 
 /** The top bar, and for most people the only navigation there is: brand, then the everyday pages (Home, Reports,

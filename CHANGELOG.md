@@ -3,6 +3,12 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Analyze has its own place in the top bar**, next to Dashboards, for everyone who can analyze datasets
+  (`analyze:use`). Before, it was only reachable through Dashboards → *Explore data*.
+
 ## [1.0.0-beta.5] - 2026-10-14
 
 ### Added
