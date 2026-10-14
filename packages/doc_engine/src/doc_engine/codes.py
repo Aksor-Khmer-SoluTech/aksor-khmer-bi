@@ -34,6 +34,10 @@ class CodeError(ValueError):
     scan."""
 
 
+def _positive(n: Any) -> bool:
+    return isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0
+
+
 def _value(value: Any) -> str:
     if value is None or value == "":
         raise CodeError("A QR code or barcode needs a value -- this one is empty")
@@ -135,10 +139,11 @@ _PPI = 300  # LibreOffice's PDF export resamples pictures above this; a barcode 
 _QUIET_MODULES = 10
 
 
-def barcode_png(value: Any, kind: Any = "code128", text: bool = False, width_mm: float | None = None) -> bytes:
+def barcode_png(value: Any, kind: Any = "code128", text: bool = False, width_mm: float | None = None, height_mm: float | None = None) -> bytes:
     """The barcode drawn for the width it will be placed at: every bar a whole number of pixels, at no more than
     300 pixels per inch there -- so nothing downstream resamples it and makes some bars a pixel thinner than others,
-    which is what stops a printed barcode scanning (QR codes shrug that off; barcodes don't)."""
+    which is what stops a printed barcode scanning (QR codes shrug that off; barcodes don't). `height_mm`, with
+    `width_mm`, sets its proportions (text included), so a picture placed at that width is that tall."""
     from PIL import Image, ImageDraw, ImageFont
 
     code = _barcode(value, kind, None)
@@ -147,10 +152,17 @@ def barcode_png(value: Any, kind: Any = "code128", text: bool = False, width_mm:
     target_px = (width_mm or DEFAULT_BARCODE_WIDTH_MM) / 25.4 * _PPI
     k = max(1, int(target_px // modules))  # pixels per module
     width = modules * k
-    bar_height = max(round(width * 0.28), 60)
     label = code.get_fullcode() if text else ""
-    font_px = max(round(bar_height * 0.22), 14)
-    height = bar_height + (font_px + round(font_px * 0.6) if label else 0)
+    if height_mm:
+        if not (_positive(height_mm) and height_mm <= 200):
+            raise CodeError(f"A barcode's height_mm is a number of millimetres above 0, not {height_mm!r}")
+        height = max(round(width * float(height_mm) / float(width_mm or DEFAULT_BARCODE_WIDTH_MM)), 12)
+        font_px = max(round(height * 0.18), 10) if label else 0
+        bar_height = height - (font_px + round(font_px * 0.6) if label else 0)
+    else:
+        bar_height = max(round(width * 0.28), 60)
+        font_px = max(round(bar_height * 0.22), 14)
+        height = bar_height + (font_px + round(font_px * 0.6) if label else 0)
     image = Image.new("1", (width, height), 1)
     draw = ImageDraw.Draw(image)
     x = _QUIET_MODULES * k
@@ -174,7 +186,20 @@ def barcode_svg(value: Any, kind: Any = "code128", text: bool = False) -> bytes:
 
     out = io.BytesIO()
     _barcode(value, kind, SVGWriter()).write(out, options=_writer_options(text))
-    return out.getvalue()
+    return _with_view_box(out.getvalue())
+
+
+def _with_view_box(svg: bytes) -> bytes:
+    """python-barcode's SVG has a size in mm but no viewBox, so a browser shows it at that size whatever CSS asks
+    for. A viewBox in the same units (1 mm = 96/25.4 user units) lets `width: 40mm` scale it, as WeasyPrint does.
+    And it fills the box it's given (preserveAspectRatio="none"): a barcode stretched wider just has wider bars, all
+    in proportion, and still scans -- where keeping its shape in a wide 190x30 box would shrink it to a third."""
+    text = svg.decode("utf-8")
+    size = re.search(r'<svg\b[^>]*\bwidth="([\d.]+)mm"[^>]*\bheight="([\d.]+)mm"', text)
+    if not size or "viewBox" in text[: size.end()]:
+        return svg
+    w, h = (float(v) * 96 / 25.4 for v in size.groups())
+    return text.replace("<svg ", f'<svg viewBox="0 0 {w:.3f} {h:.3f}" preserveAspectRatio="none" ', 1).encode("utf-8")
 
 
 # --- for the engines ---------------------------------------------------------------------------------------------------
@@ -185,7 +210,7 @@ def svg_data_uri(svg: bytes) -> str:
 
 
 _QR_KEYS = {"qr", "level", "width_mm"}
-_BARCODE_KEYS = {"barcode", "value", "width_mm", "text"}
+_BARCODE_KEYS = {"barcode", "value", "width_mm", "height_mm", "text"}
 
 
 def is_code_spec(value: object) -> bool:
@@ -210,7 +235,7 @@ def spec_png(spec: dict) -> tuple[bytes, float]:
     if "qr" in spec:
         return qr_png(spec["qr"], spec.get("level", "M")), float(spec.get("width_mm") or DEFAULT_QR_WIDTH_MM)
     width = float(spec.get("width_mm") or DEFAULT_BARCODE_WIDTH_MM)
-    return barcode_png(spec["value"], spec["barcode"], bool(spec.get("text", False)), width), width
+    return barcode_png(spec["value"], spec["barcode"], bool(spec.get("text", False)), width, spec.get("height_mm")), width
 
 
 FUNCTION_NAMES = ("qrcode", "barcode")

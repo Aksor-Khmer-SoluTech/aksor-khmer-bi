@@ -3,6 +3,7 @@ function or by a spec in the data. Every test reads the codes back out of the ou
 so "it rendered a picture" is never mistaken for "it scans"."""
 import io
 import os
+import re
 import shutil
 import zipfile
 
@@ -61,6 +62,12 @@ def test_a_qr_code_holds_khmer_without_segmentation_marks():
 def test_a_value_that_cant_be_drawn_says_why(call, message):
     with pytest.raises(codes.CodeError, match=message):
         call()
+
+
+def test_a_barcode_svg_scales_to_its_css_size():
+    # A viewBox, so a browser scales it to `width: 40mm` instead of showing it at its natural size.
+    svg = codes.barcode_svg("A-1", "code128").decode()
+    assert re.search(r'<svg\b[^>]*\bviewBox="0 0 [\d.]+ [\d.]+"', svg)
 
 
 def test_only_a_real_spec_is_taken_for_a_code():
@@ -142,6 +149,17 @@ def test_word_codes_scan_from_the_printed_page(tmp_path):
     path = _docx(tmp_path, "{{ qrcode(no, width_mm=35) }}", "{{ barcode(no, width_mm=90) }}")
     page = render({"no": INVOICE}, "png", template_path=path)
     assert {("QRCode", INVOICE), ("Code128", INVOICE)} <= read(page)
+
+
+@pytest.mark.parametrize("text", [False, True])
+def test_a_barcode_height_sets_its_proportions(tmp_path, text):
+    path = _docx(tmp_path, "{{ barcode(no, width_mm=50, height_mm=10.5, text=t) }}")
+    out = render({"no": INVOICE, "t": text}, "docx", template_path=path)
+    shape = Document(io.BytesIO(out)).inline_shapes[0]
+    assert abs(shape.width.mm - 50) < 0.1 and abs(shape.height.mm - 10.5) < 0.3
+    assert set().union(*_docx_pictures(out)) == {("Code128", INVOICE)}
+    with pytest.raises(codes.CodeError, match="height_mm"):
+        codes.barcode_png(INVOICE, height_mm=-1)
 
 
 def test_a_bad_value_fails_the_render_with_its_reason(tmp_path):

@@ -59,8 +59,9 @@ def _code_functions(tpl: DocxTemplate) -> dict:
     def qrcode(value, width_mm=codes.DEFAULT_QR_WIDTH_MM, level="M"):
         return InlineImage(tpl, io.BytesIO(codes.qr_png(value, level)), width=Mm(float(width_mm)))
 
-    def barcode(value, type="code128", width_mm=codes.DEFAULT_BARCODE_WIDTH_MM, text=False):  # noqa: A002 -- the template's word for it
-        return InlineImage(tpl, io.BytesIO(codes.barcode_png(value, type, text, float(width_mm))), width=Mm(float(width_mm)))
+    def barcode(value, type="code128", width_mm=codes.DEFAULT_BARCODE_WIDTH_MM, text=False, height_mm=None):  # noqa: A002 -- the template's word for it
+        png = codes.barcode_png(value, type, text, float(width_mm), height_mm)
+        return InlineImage(tpl, io.BytesIO(png), width=Mm(float(width_mm)))
 
     return {"qrcode": qrcode, "barcode": barcode}
 

@@ -7,12 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Added
 - **QR codes and barcodes from a value**, in Word, Excel and HTML templates: `{{ qrcode(invoice_no) }}`,
-  `{{ barcode(invoice_no) }}` (Code 128), `{{ barcode(sku, "ean13") }}` or `"code39"`, with `width_mm`, a QR error
+  `{{ barcode(invoice_no) }}` (Code 128), `{{ barcode(sku, "ean13") }}` or `"code39"`, with `width_mm` (and a
+  barcode's `height_mm`), a QR error
   correction `level` and `text=true` to print the value under a barcode. Any field, filter or row column works — no
   upload first. HTML gets a sharp SVG (`<img src="{{ qrcode(…) }}">` is now allowed); Word and Excel get a picture,
   in Excel anchored at the cell. The JSON can also ask for one (`{"barcode": "code128", "value": "…"}`). A value
   that can't be drawn (a wrong EAN-13 check digit, Khmer in a Code 39) fails the render with the reason. Khmer in
-  QR codes is supported. No migration; the new libraries come with the images.
+  QR codes is supported. No migration; the new libraries come with the images. The guide shows a sample of each
+  supported type (Charts, images and data → Barcodes and QR codes → Supported types), and guides can now show
+  pictures in the portal.
 - **Statistical measures** (Phase 5a). A dataset's measures can now be a *Median*, a *Percentile* (choose which,
   0–100), a *Standard deviation*, a *Variance* or the *Most common value* of a field, besides sum, count, average and
   the rest. They work wherever measures do: report templates (`{{ measures.<key> }}`), Analyze pivots and charts,

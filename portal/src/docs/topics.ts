@@ -56,6 +56,7 @@ export const TOPICS: Topic[] = [
       { label: "Charts", slug: B, anchor: "charts-docx-templates-only" },
       { label: "Images", slug: B, anchor: "images-docx-templates-only" },
       { label: "Barcodes and QR codes", slug: B, anchor: "barcodes-and-qr-codes" },
+      { label: "Barcode types", slug: B, anchor: "supported-types" },
       { label: "A chart in a report", slug: T, anchor: "77-a-chart-in-a-report" },
     ],
   },

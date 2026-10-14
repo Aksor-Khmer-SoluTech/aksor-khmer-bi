@@ -207,15 +207,24 @@ Write the call where the code belongs:
 The value can be anything the template can reach — a field, a filter, a column of a row inside a loop — so it works
 with sample data, a REST API or a SQL query alike; nothing has to be uploaded first.
 
-| Type | Holds | Notes |
-|---|---|---|
-| `qrcode` | Any text, Khmer included | `level` is the error correction: `L`, `M` (default), `Q` or `H` — higher survives more damage but makes a denser code. |
-| `barcode(…, "code128")` | Letters, digits and punctuation (plain ASCII) | The usual choice for invoice and document numbers. |
-| `barcode(…, "code39")` | `A-Z`, `0-9`, space and `- . $ / + %` | Lower case is printed as capitals. No check character is added. |
-| `barcode(…, "ean13")` | 12 or 13 digits | 12 digits: the check digit is added. 13: it must be the right one. |
+### Supported types
 
-`ean-13`, `Code 39`, `CODE_128` and the like are read the same way. `width_mm` sets the width (QR codes 25 mm,
-barcodes 50 mm unless you say); the height follows. `text=true` prints the value under a barcode.
+Four types, each shown as Aksor draws it (these pictures were made by the same code that draws your documents):
+
+| Type | Write | Holds | Looks like |
+|---|---|---|---|
+| **QR code** | `qrcode(value)` | Any text — links, IDs, Khmer included | ![A QR code holding a link](images/codes/qrcode.svg) |
+| **Code 128** | `barcode(value)` or `barcode(value, "code128")` | Letters, digits and punctuation (plain ASCII) — the usual choice for invoice and document numbers | ![A Code 128 barcode reading INV-2026-001](images/codes/code128.svg) |
+| **Code 39** | `barcode(value, "code39")` | `A-Z`, `0-9`, space and `- . $ / + %` — lower case is printed as capitals; no check character is added | ![A Code 39 barcode reading INV-2026-001](images/codes/code39.svg) |
+| **EAN-13** | `barcode(value, "ean13")` | 12 digits (the check digit is added) or 13 (it must be the right one) — product codes | ![An EAN-13 barcode reading 5901234123457](images/codes/ean13.svg) |
+
+The type can be written `ean-13`, `Code 39`, `CODE_128` and the like too. A QR code's `level` is its error
+correction: `L`, `M` (default), `Q` or `H` — a higher level survives more damage but makes a denser code.
+`width_mm` sets the width (QR codes 25 mm, barcodes 50 mm unless you say); the height follows, or a barcode takes
+`height_mm` too — `barcode(code, width_mm=50, height_mm=10)` for a low strip in a page header. `text=true` prints the
+value under a barcode, as in the pictures above.
+
+### In each kind of template
 
 **Word.** Put the call alone in its paragraph or table cell — in the body, a `{%tr for %}` row, or the page header and
 footer. The code is a picture in the document.
@@ -224,7 +233,9 @@ footer. The code is a picture in the document.
 the cell's top-left corner and floats over the sheet, so make the row tall and the column wide enough for it. In a
 repeated row, each row gets its own code.
 
-**HTML.** Use the call as an image source and size it with CSS — the code is an SVG, sharp at any size in the PDF:
+**HTML.** Use the call as an image source (or a CSS `background-image: url("{{ barcode(…) }}")`) and size it with
+CSS — the code is an SVG, sharp at any size in the PDF. A barcode fills the box it's given, so a wide, low box gives a
+wide, low barcode:
 
 ```html
 <img src="{{ qrcode(invoice_no) }}" style="width: 30mm">
@@ -244,8 +255,10 @@ repeated row, each row gets its own code.
 
 Only a dict with exactly these keys counts — a row that merely has a `qr` or `barcode` column stays data.
 
-**A field called `barcode`.** If your data has its own top-level `barcode` (or `qrcode`) field, both still work: `{{
-barcode }}` prints the field and `{{ barcode(barcode, "ean13") }}` draws it.
+**A field called `barcode`.** If your data has its own top-level `barcode` (or `qrcode`) field, both still work:
+`{{ barcode }}` prints the field and `{{ barcode(barcode, "ean13") }}` draws it.
+
+### Errors, Khmer and sizes
 
 **When the value can't be drawn** — letters in an EAN-13, a wrong check digit, Khmer in a Code 39 or Code 128, an
 empty value — the render fails with the reason ("'5901234123458' isn't a valid EAN-13: its check digit should be 7")

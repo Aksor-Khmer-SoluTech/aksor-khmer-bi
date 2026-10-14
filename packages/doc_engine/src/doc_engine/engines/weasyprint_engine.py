@@ -51,7 +51,7 @@ def _qrcode(value, width_mm=None, level="M") -> str:
     return codes.svg_data_uri(codes.qr_svg(value, level))
 
 
-def _barcode(value, type="code128", width_mm=None, text=False) -> str:  # noqa: A002 -- the template's word for it
+def _barcode(value, type="code128", width_mm=None, text=False, height_mm=None) -> str:  # noqa: A002 -- the template's word for it
     return codes.svg_data_uri(codes.barcode_svg(value, type, text))
 
 

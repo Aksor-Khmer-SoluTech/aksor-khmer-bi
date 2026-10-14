@@ -821,10 +821,11 @@ in the template. Setup in
 | Loop prints nothing | The field isn't a list, or is empty. Check the JSON key name and case. |
 | xlsx numbers can't be summed | The cell mixes text with `{{ }}` or uses `.format()` → text. Use a bare `{{ x }}` and format the cell in Excel. |
 | xlsx loop variable is unbound | You used `{%- for %}`. Use `{% for %}`. |
+| docx: a dotted line prints as short bars, not round dots | That's how LibreOffice draws Word's *dotted* border — the file is fine, the renderer differs from a browser's `border: dotted`. For round dots, draw the line as text instead: an empty paragraph with a right tab stop at the margin and a **dot leader**, one tab in it, in Times New Roman 12 pt, grey (round dots about 1 mm apart, like CSS `2px dotted`). |
 | Khmer wraps badly in a table cell | Set the cell/paragraph to justify + a Khmer font; see [khmer-line-breaking](khmer-line-breaking.md). |
 | Khmer word split in the wrong place | Add it to a [protected-terms](protected-terms-guide.md) set. |
 | html: `{{ x }}` shows `&lt;b&gt;` | Output is escaped on purpose. `\|safe` only for markup you control. |
-| html: registration rejects an `href`/`src` | Must be exactly `{{ resource('name') }}`; upload the asset and map it. |
+| html: registration rejects an `href`/`src` | Must be exactly `{{ resource('name') }}` (upload the asset and map it), or a `{{ qrcode(…) }}` / `{{ barcode(…) }}` call. |
 | `400 … not a valid .docx/.xlsx` | Wrong extension or a corrupt/renamed file — re-save it from Word/Excel. |
 | `409` on register | The code is taken by another template. |
 | Version label rejected | Letters, digits and `. - _ +` only, ≤ 32 chars, and unique per template (`409` if reused). |

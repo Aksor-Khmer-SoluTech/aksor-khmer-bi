@@ -50,8 +50,26 @@ function resolveHref(href: string, slug: string): { href: string; external: bool
   return { href: `${branding.repoUrl}/blob/main${url.pathname}${url.hash}`, external: true };
 }
 
+// Pictures the guides show (docs/images/…), bundled with them -- a guide writes `![…](images/codes/qrcode.svg)`, the
+// same relative path GitHub resolves.
+const docImages = import.meta.glob("../../../docs/images/**/*.{svg,png}", { query: "?url", import: "default", eager: true }) as Record<
+  string,
+  string
+>;
+
+function docImage(src: string): string | null {
+  const path = new URL(src, "https://docs.invalid/docs/").pathname; // "/docs/images/codes/qrcode.svg"
+  return docImages[`../../..${path}`] ?? null;
+}
+
 function markdownComponents(slug: string): Components {
   return {
+    img({ src, alt }) {
+      const url = typeof src === "string" ? docImage(src) : null;
+      if (!url) return alt ? <span className="muted">[{alt}]</span> : null;
+      // On a white tile in either theme: a code on a dark page is a code a phone can't read.
+      return <img className="doc-specimen" src={url} alt={alt ?? ""} loading="lazy" />;
+    },
     a({ href, children }) {
       if (!href) return <>{children}</>;
       const to = resolveHref(href, slug);

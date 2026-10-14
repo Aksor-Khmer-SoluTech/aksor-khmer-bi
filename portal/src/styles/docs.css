@@ -305,6 +305,25 @@
   border-bottom: 0;
 }
 
+/* A picture in a guide -- the barcode and QR code samples. Always on white with dark marks, like the printed page:
+   codes are only readable that way round, in either theme. Kept to a row's height inside a table. */
+.doc-specimen {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  vertical-align: middle;
+}
+.doc-table .doc-specimen {
+  /* One height for every sample, so they compare at a glance; a wide barcode makes the table scroll, not shrink. */
+  height: 64px;
+  width: auto;
+  max-width: none;
+}
+
 @media (max-width: 1200px) {
   .docs-page {
     grid-template-columns: 200px minmax(0, 1fr);

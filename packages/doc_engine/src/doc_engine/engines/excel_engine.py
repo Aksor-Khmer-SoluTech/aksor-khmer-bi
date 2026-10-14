@@ -30,8 +30,8 @@ class _Codes:
     def qrcode(self, value, width_mm=codes.DEFAULT_QR_WIDTH_MM, level="M") -> str:
         return self._mark(codes.qr_png(value, level), width_mm)
 
-    def barcode(self, value, type="code128", width_mm=codes.DEFAULT_BARCODE_WIDTH_MM, text=False) -> str:  # noqa: A002
-        return self._mark(codes.barcode_png(value, type, text, float(width_mm)), width_mm)
+    def barcode(self, value, type="code128", width_mm=codes.DEFAULT_BARCODE_WIDTH_MM, text=False, height_mm=None) -> str:  # noqa: A002
+        return self._mark(codes.barcode_png(value, type, text, float(width_mm), height_mm), width_mm)
 
     def specs(self, value):
         """A QR or barcode spec in the data ({"qr": …} / {"barcode": …, "value": …}) as a marker, like the
