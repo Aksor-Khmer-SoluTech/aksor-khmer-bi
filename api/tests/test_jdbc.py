@@ -881,7 +881,7 @@ def test_several_queries_validation(auth_headers):
     ):
         detail = _configure(auth_headers, report_id, [_BRANCH], _source(queries), expect=400)["detail"]
         assert fragment in detail, detail
-    with pytest.raises(DataConfigError, match="list, one row"):
+    with pytest.raises(DataConfigError, match="a list, an object"):
         report_data.validate_data_config([_BRANCH], _source([{**one, "shape": "table"}]))
     # A single query's result name can't shadow a filter either.
     detail = _configure(auth_headers, report_id, [_BRANCH], {"type": "jdbc", "connection": "sales-db", "query": _QUERY, "root_key": "branch"}, expect=400)["detail"]
@@ -978,3 +978,131 @@ def test_an_older_worker_gets_the_queries_one_by_one(auth_headers, monkeypatch):
         (True, None), (False, "SELECT name FROM sales WHERE branch = ?"), (False, "SELECT title FROM branches WHERE code = ?"),
     ]
     assert _text(run.content) == "Branch — Siem Reap"
+
+
+# --- a query on a database of its own (data spread over services) --------------------------------------------------
+
+_KHMER_CUSTOMER = "ក្រុមហ៊ុនអង្គរពាណិជ្ជកម្ម"  # a customer name, unspaced as Khmer is written
+
+
+@pytest.fixture
+def two_databases(tmp_path, monkeypatch):
+    """Two 'PostgreSQL services' -- sales and crm -- as two SQLite files, picked by the connection's database. Records
+    which database each connection was opened on, with which password, so a test can see no login is mixed up."""
+    files = {}
+    for name, ddl, rows in [
+        ("sales", "CREATE TABLE sales (branch TEXT, customer_id INT, total NUMERIC)", [("pp", 1, 42), ("sr", 2, 7.5)]),
+        ("crm", "CREATE TABLE customers (id INT, name TEXT)", [(1, _KHMER_CUSTOMER), (2, "Siem Reap Traders")]),
+    ]:
+        path = tmp_path / f"{name}.sqlite"
+        conn = sqlite3.connect(path)
+        conn.execute(ddl)
+        conn.executemany(f"INSERT INTO {ddl.split()[2]} VALUES ({', '.join('?' * len(rows[0]))})", rows)
+        conn.commit()
+        conn.close()
+        files[name] = path
+    opened = []
+
+    def connect(config, password):
+        opened.append((config["database"], password))
+        return sqlite3.connect(files[config["database"]])
+
+    monkeypatch.setitem(jdbc._NATIVE, "postgresql", (connect, "named"))
+    return opened
+
+
+def _two_connections(headers):
+    _secret(headers)
+    _secret(headers, name="crm-db-password", value="crm-pw")
+    _connection(headers)
+    _connection(headers, name="crm-db", config=_pg(database="crm", auth={"type": "basic", "username": "crm_ro", "password_secret": "crm-db-password"}))
+
+
+_SPREAD = [
+    {"name": "rows", "shape": "list", "query": "SELECT branch, customer_id, total FROM sales ORDER BY branch"},
+    {"name": "customer", "shape": "object", "query": "SELECT name FROM customers WHERE id = :customer_id", "connection": "crm-db"},
+    {"name": "total", "shape": "value", "query": "SELECT SUM(total) FROM sales", "connection": "sales-db"},
+]
+_CUSTOMER = {"name": "customer_id", "label": "Customer", "type": "text", "required": True}
+
+
+def test_each_query_can_read_its_own_database(auth_headers, two_databases):
+    _two_connections(auth_headers)
+    doc = Document()
+    doc.add_paragraph("{{ customer.name }} · {{ total }} · {{ rows | length }}")
+    buf = BytesIO()
+    doc.save(buf)
+    report_id = http.post(
+        "/api/v1/reports", files={"file": ("t.docx", buf.getvalue(), "application/octet-stream")}, data={"name": "Spread"}, headers=auth_headers
+    ).json()["report_id"]
+    saved = _configure(auth_headers, report_id, [_CUSTOMER], {"type": "jdbc", "connection": "sales-db", "queries": _SPREAD})
+    # The source's own connection named again on a query is the same as none: stored as none.
+    assert [q.get("connection") for q in saved["data_source"]["queries"]] == [None, "crm-db", None]
+
+    run = http.post(f"/api/v1/reports/{report_id}/run", json={"parameters": {"customer_id": "1"}, "format": "docx"}, headers=auth_headers)
+    assert run.status_code == 200, run.text
+    assert _text(run.content) == f"{_KHMER_CUSTOMER} · 49.5 · 2"
+    # Each database opened with its own connection's login -- never another's.
+    assert sorted(set(two_databases)) == [("crm", "crm-pw"), ("sales", "s3cret-pw")]
+
+
+def test_a_querys_connection_is_checked_like_the_sources(auth_headers, two_databases):
+    _two_connections(auth_headers)
+    http.post("/api/v1/connections", json={"name": "erp-api", "kind": "rest", "config": {"base_url": "https://erp.example.test"}}, headers=auth_headers)
+    report_id = _register(auth_headers)
+    for connection, fragment in [("no-such-db", "doesn't exist in this organization"), ("erp-api", "isn't a database connection"), ("bad name!", "isn't a valid connection name")]:
+        queries = [_SPREAD[0], {**_SPREAD[1], "connection": connection}]
+        resp = _configure(auth_headers, report_id, [_CUSTOMER], {"type": "jdbc", "connection": "sales-db", "queries": queries}, expect=400)
+        assert fragment in resp["detail"], resp
+
+
+def test_a_connection_one_query_reads_through_cant_be_deleted(auth_headers, two_databases):
+    _two_connections(auth_headers)
+    report_id = _register(auth_headers)
+    _configure(auth_headers, report_id, [_CUSTOMER], {"type": "jdbc", "connection": "sales-db", "queries": _SPREAD})
+    crm = next(c for c in http.get("/api/v1/connections", headers=auth_headers).json() if c["name"] == "crm-db")
+    resp = http.delete(f"/api/v1/connections/{crm['id']}", headers=auth_headers)
+    assert resp.status_code == 409 and "Sales" in resp.json()["detail"]
+
+    # A dataset's query counts too.
+    _configure(auth_headers, report_id, [], None)
+    dataset = http.post("/api/v1/datasets", headers=auth_headers, json={
+        "name": "spread", "title": "Spread sales", "parameters": [_CUSTOMER],
+        "data_source": {"type": "jdbc", "connection": "sales-db", "queries": _SPREAD},
+    })
+    assert dataset.status_code == 200, dataset.text
+    resp = http.delete(f"/api/v1/connections/{crm['id']}", headers=auth_headers)
+    assert resp.status_code == 409 and "Spread sales" in resp.json()["detail"]
+
+
+def test_a_failing_query_names_its_connection(two_databases):
+    crm = {**_resolved(), "database": "crm"}
+    source = {"type": "jdbc", "connection": "sales-db", "jdbc": {**_resolved(), "database": "sales"}, "queries": [
+        {**_SPREAD[0]},
+        {"name": "customer", "shape": "object", "query": "SELECT name FROM customers", "connection": "crm-db", "jdbc": crm},
+    ]}
+    with pytest.raises(report_data.DataSourceError) as exc:
+        report_data.fetch_report_data(source, {})
+    assert "'customer'" in str(exc.value) and "'crm-db'" in str(exc.value)
+
+
+def test_uploaded_drivers_get_one_batch_per_database(monkeypatch, two_databases):
+    batches = []
+
+    def batch(conn, queries, params):
+        batches.append((conn["database"], [name for name, _ in queries]))
+        return {name: [{"n": 1}] for name, _ in queries}
+
+    monkeypatch.setattr(jdbc, "run_batch_via_worker", batch)
+    oracle = {**_resolved(), "engine": "oracle", "driver": "ojdbc", "database": "ledger"}
+    db2 = {**_resolved(), "engine": "db2", "driver": "db2jcc", "database": "stock"}
+    source = {"type": "jdbc", "connection": "ledger-db", "jdbc": oracle, "queries": [
+        {"name": "a", "shape": "list", "query": "SELECT 1 FROM dual"},
+        {"name": "b", "shape": "value", "query": "SELECT 1 FROM sysibm.sysdummy1", "connection": "stock-db", "jdbc": db2},
+        {"name": "c", "shape": "list", "query": "SELECT 1 FROM dual"},
+        {"name": "d", "shape": "list", "query": "SELECT total FROM sales", "connection": "sales-db", "jdbc": {**_resolved(), "database": "sales"}},
+    ]}
+    data = report_data.fetch_report_data(source, {})
+    assert list(data) == ["a", "b", "c", "d"]  # in the order they're defined, whatever finished first
+    assert sorted(batches) == [("ledger", ["a", "c"]), ("stock", ["b"])]  # one JVM per database, not per query
+    assert data["d"] == [{"total": 42}, {"total": 7.5}]  # a built-in driver alongside, on its own database

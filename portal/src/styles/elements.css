@@ -206,6 +206,11 @@
   color: var(--highlight-strong);
 }
 
+.badge-dataset {
+  background: var(--success-soft);
+  color: var(--success-strong);
+}
+
 
 .tabs {
   display: flex;

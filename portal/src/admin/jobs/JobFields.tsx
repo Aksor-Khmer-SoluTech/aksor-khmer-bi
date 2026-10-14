@@ -1,6 +1,8 @@
 import { useState } from "react";
 import JsonEditor from "../../components/JsonEditor";
 import type { Job, JobType, TriggerType } from "../../types";
+import type { RunForm } from "../../types";
+import DeliveryFields from "./DeliveryFields";
 import ReportJobFields, { type ReportJobConfig } from "./ReportJobFields";
 import ScheduleField from "./ScheduleField";
 
@@ -31,12 +33,18 @@ const JSON_EXAMPLES: Record<Exclude<JobType, "render_report">, object> = {
   rest_call: { url: "https://example.com/webhook", method: "POST", headers: {}, body_template: {}, context: {}, auth: null },
   soap_call: { wsdl_url: "https://example.com/service?wsdl", operation: "DoSomething", params: {}, auth: null },
   file_output: { destination_path: "/data/output/{job_id}-{timestamp}.txt", source: "static", content: "" },
+  data_alert: {
+    dataset: "branch-sales", values: {}, measure: "net", condition: "below", threshold: 50000000, repeat: "on_change",
+    email: { connection: "company-mail", to: ["finance@example.com"] },
+  },
 };
 
 const JSON_HINT: Record<Exclude<JobType, "render_report">, string> = {
   rest_call: "Calls the URL. Text in body_template can use {{ name }} from context; a secret goes in an environment variable named in auth.",
   soap_call: "Calls one operation of the SOAP service with params.",
   file_output: "Writes content to destination_path ({job_id} and {timestamp} are filled in on each run).",
+  data_alert:
+    "Works out a dataset measure on each run and emails when it rises above or drops below the threshold (once, until it recovers; repeat: every_time for each run). Easiest made from Analyze → Alert me.",
 };
 
 function isoToDatetimeLocal(iso: string | null): string {
@@ -97,6 +105,9 @@ export function draftToBody(d: JobDraft):
   let config: Record<string, unknown>;
   if (d.jobType === "render_report") {
     if (!d.configValid) return { error: "The extra data isn't valid JSON yet" };
+    if (!d.reportConfig.email && typeof d.reportConfig.destination_path !== "string") {
+      return { error: "Say where the report goes: save it to a folder, email it, or both" };
+    }
     // Always send `parameters`: it is what makes a run call the report's data source (an older job without it only
     // renders its saved data).
     config = { ...d.reportConfig, parameters: d.reportConfig.parameters ?? {} };
@@ -185,6 +196,7 @@ export default function JobFields({
   canChangeType: boolean;
 }) {
   const set = (patch: Partial<JobDraft>) => onChange({ ...draft, ...patch });
+  const [form, setForm] = useState<RunForm | null>(null);
 
   function changeType(jobType: JobType) {
     set({
@@ -205,6 +217,7 @@ export default function JobFields({
             <option value="rest_call">Call a REST API</option>
             <option value="soap_call">Call a SOAP service</option>
             <option value="file_output">Write a file</option>
+            <option value="data_alert">Watch a measure (data alert)</option>
           </select>
         </label>
         {draft.jobType === "render_report" ? (
@@ -212,6 +225,7 @@ export default function JobFields({
             config={draft.reportConfig}
             onChange={(reportConfig) => set({ reportConfig })}
             onContextValidity={(configValid) => set({ configValid })}
+            onForm={setForm}
           />
         ) : (
           <div className="mb-3.5">
@@ -221,6 +235,10 @@ export default function JobFields({
           </div>
         )}
       </Section>
+
+      {draft.jobType === "render_report" && draft.reportConfig.report_id && (
+        <DeliveryFields config={draft.reportConfig} onChange={(reportConfig) => set({ reportConfig })} form={form} reportName={form?.name ?? ""} />
+      )}
 
       <Section title="When it runs">
         <div className="segmented mb-3.5" role="radiogroup" aria-label="Trigger">

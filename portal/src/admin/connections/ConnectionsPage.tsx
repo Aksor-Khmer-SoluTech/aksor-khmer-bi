@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Cable, Database, Pencil, Trash2 } from "lucide-react";
+import { Cable, Database, Mail, Pencil, Sigma, Trash2 } from "lucide-react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { TableSkeleton } from "../../components/Skeletons";
@@ -7,6 +7,8 @@ import type { AuthInfo, Connection, ConnectionSummary, Organization } from "../.
 import DbEngineIcon from "../../components/DbEngineIcon";
 import ConnectionDialog from "./ConnectionDialog";
 import JdbcConnectionDialog from "./JdbcConnectionDialog";
+import RoutinesDialog from "./RoutinesDialog";
+import MailServerDialog from "./MailServerDialog";
 
 const AUTH_LABEL: Record<ConnectionSummary["auth_type"], string> = { none: "None", bearer: "Bearer token", basic: "Basic" };
 const CREDENTIAL_LABEL: Record<ConnectionSummary["credential"], (c: ConnectionSummary) => string | null> = {
@@ -23,9 +25,10 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // The dialog is mounted fresh for each open (see its docstring); `dialog.key` is that.
-  const [dialog, setDialog] = useState<{ key: number; kind: "rest" | "jdbc"; connection: Connection | null } | null>(null);
+  const [dialog, setDialog] = useState<{ key: number; kind: "rest" | "jdbc" | "smtp"; connection: Connection | null } | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ConnectionSummary | null>(null);
+  const [routinesFor, setRoutinesFor] = useState<ConnectionSummary | null>(null);
 
   useEffect(() => {
     api.organizations.list().then(setOrganizations).catch(() => {});
@@ -56,7 +59,7 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
     try {
       // The list has no header values (report authors see it too); the editor needs them.
       const full = await api.connections.get(c.id);
-      setDialog({ key: Date.now(), kind: full.kind === "jdbc" ? "jdbc" : "rest", connection: full });
+      setDialog({ key: Date.now(), kind: full.kind === "jdbc" || full.kind === "smtp" ? full.kind : "rest", connection: full });
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : "Couldn't open the connection");
     } finally {
@@ -86,10 +89,14 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
           <p className="page-subtitle">
             Where reports get their data: a REST API's base URL with the headers and authentication every call needs, or a database with its
             login. A report picks a connection and adds only a path or a SQL query — so when a system moves, or you go from test to
-            production, you change it here once.
+            production, you change it here once. A mail server here is what report jobs email their files through.
           </p>
         </div>
         <div className="page-header-actions">
+          <button type="button" className="btn" onClick={() => setDialog({ key: Date.now(), kind: "smtp", connection: null })}>
+            <Mail size={15} aria-hidden="true" />
+            New Mail Server
+          </button>
           <button type="button" className="btn" onClick={() => setDialog({ key: Date.now(), kind: "jdbc", connection: null })}>
             <Database size={15} aria-hidden="true" />
             New Database
@@ -157,6 +164,7 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
                 <td>
                   <span className="conn-name-row">
                     {c.kind === "jdbc" && c.engine && <DbEngineIcon engine={c.engine} size={22} />}
+                    {c.kind === "smtp" && <Mail size={18} className="shrink-0 text-text-dim" aria-label="Mail server" />}
                     <span className="mono conn-name">{c.name}</span>
                   </span>
                   {c.description && <div className="muted" style={{ fontSize: "0.78rem" }}>{c.description}</div>}
@@ -181,6 +189,12 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
                 <td className="muted">{new Date(c.updated_at).toLocaleDateString()}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <div className="row-actions">
+                    {c.kind === "jdbc" && c.engine === "sqlserver" && (
+                      <button type="button" className="btn btn-sm" onClick={() => setRoutinesFor(c)} title="Stored procedures and functions reports may call">
+                        <Sigma size={13} aria-hidden="true" />
+                        Procedures{c.routines.length > 0 ? ` (${c.routines.length})` : ""}
+                      </button>
+                    )}
                     <button type="button" className="btn btn-sm" onClick={() => edit(c)} disabled={opening === c.id}>
                       {opening === c.id ? <span className="spinner" /> : <Pencil size={13} aria-hidden="true" />}
                       Edit
@@ -215,6 +229,18 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
           onSaved={load}
         />
       )}
+      {dialog && dialog.kind === "smtp" && (
+        <MailServerDialog
+          key={dialog.key}
+          open
+          onClose={() => setDialog(null)}
+          connection={dialog.connection}
+          organizations={orgList}
+          defaultOrgId={orgFilter || auth.orgId || organizations[0]?.id || "root"}
+          auth={auth}
+          onSaved={load}
+        />
+      )}
       {dialog && dialog.kind === "rest" && (
         <ConnectionDialog
           key={dialog.key}
@@ -227,6 +253,8 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
           onSaved={load}
         />
       )}
+
+      {routinesFor && <RoutinesDialog key={routinesFor.id} connection={routinesFor} onClose={() => setRoutinesFor(null)} onSaved={load} />}
 
       <ConfirmDialog
         open={deleteTarget !== null}

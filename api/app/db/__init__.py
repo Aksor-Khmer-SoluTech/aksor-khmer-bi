@@ -30,6 +30,9 @@ from .base import Base, DATABASE_URL, SessionLocal, _gen_id, engine
 from .audit import AuditEvent
 from .clients import ApiClient, ApiClientReport
 from .connections import DataConnection
+from .analyses import Analysis
+from .dashboards import Dashboard
+from .datasets import Dataset, DatasetAccessGrant
 from .jdbc_drivers import JdbcDriver
 from .secrets import Secret
 from .auth_events import AuthEvent
@@ -37,7 +40,7 @@ from .auth_sessions import AuthSession
 from .deployment_terms import DeploymentProtectedTerms
 from .fonts import FontResource
 from .folders import Folder, FolderAccessGrant, ImageResource, ReportShortcut, StylesheetResource
-from .jobs import Job, JobRun
+from .jobs import Job, JobDelivery, JobRun
 from .ldap import LdapConfig, LdapGroupRoleMapping
 from .protected_terms import ProtectedTermSet
 from .render_events import RenderEvent
@@ -67,6 +70,10 @@ __all__ = [
     "CodeReservation",
     "DATABASE_URL",
     "DataConnection",
+    "Analysis",
+    "Dashboard",
+    "Dataset",
+    "DatasetAccessGrant",
     "Secret",
     "DeploymentProtectedTerms",
     "Folder",
@@ -76,6 +83,7 @@ __all__ = [
     "ImageResource",
     "Job",
     "JdbcDriver",
+    "JobDelivery",
     "JobRun",
     "LdapConfig",
     "LdapGroupRoleMapping",

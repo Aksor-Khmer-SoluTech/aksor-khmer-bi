@@ -1757,6 +1757,27 @@ button.access-chip {
   cursor: not-allowed;
 }
 
+/* Print pressed from the keyboard (Ctrl+P / ⌘P): the button answers, so it's clear the report is what prints. */
+.report-viewer-btn-pressed {
+  animation: report-viewer-press 0.6s ease-out;
+}
+@keyframes report-viewer-press {
+  0%,
+  30% {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .report-viewer-btn-pressed {
+    animation: none;
+  }
+}
+
 .report-viewer-page-input {
   display: flex;
   align-items: center;
@@ -2188,6 +2209,15 @@ button.access-chip {
   background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
 }
 
+/* A table of inputs (a dataset's fields) rather than a list to open: no pointer, no hover wash. */
+.data-table.static-rows tbody tr:not(.detail-row) {
+  cursor: default;
+}
+
+.data-table.static-rows tbody tr:not(.detail-row):hover {
+  background: none;
+}
+
 /* An expanded row and the panel under it are one connected block, so it
    doesn't read as two more rows of the list: the row takes the accent tint
    with an accent bar down its left edge; the panel below repeats that bar
@@ -2199,12 +2229,14 @@ button.access-chip {
   background: var(--accent-soft);
 }
 
-.data-table tr.active-row td {
+/* Child combinators throughout: a table inside the expanded panel (a job's run history, say) is a table of its own,
+   not more cells of this row. */
+.data-table > tbody > tr.active-row > td {
   border-bottom-color: transparent;
   box-shadow: inset 0 1px 0 var(--accent-border);
 }
 
-.data-table tr.active-row td:first-child {
+.data-table > tbody > tr.active-row > td:first-child {
   box-shadow:
     inset 3px 0 0 var(--accent),
     inset 0 1px 0 var(--accent-border);
@@ -2215,7 +2247,7 @@ button.access-chip {
   cursor: default;
 }
 
-.data-table tr.detail-row td {
+.data-table > tbody > tr.detail-row > td {
   padding: 0;
   background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
   border-bottom: 1px solid var(--accent-border);
@@ -5644,5 +5676,121 @@ textarea[readonly] {
   .nrw-grid-2,
   .nrw-kinds {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Analyze (AnalyzePage.tsx): the R / C toggles beside each field, the date grouping inside a shelf pill, the pivot. */
+.analyze-chip {
+  appearance: none;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font: 600 0.68rem/1.4 var(--font-mono);
+  cursor: pointer;
+}
+.analyze-chip:hover {
+  border-color: var(--accent-border);
+  color: var(--accent-strong);
+}
+.analyze-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.analyze-bucket {
+  width: auto;
+  padding: 0 22px 0 6px;
+  height: 22px;
+  font-size: 0.72rem;
+  background-position: right 4px center;
+  background-size: 12px 12px;
+  border-radius: 999px;
+  border-color: var(--accent-border);
+  background-color: var(--bg-raised);
+}
+.analyze-filter > label {
+  margin-bottom: 0;
+}
+.analyze-table td,
+.analyze-table th {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.analyze-table td:first-child,
+.analyze-table th:first-child {
+  text-align: left;
+}
+.analyze-table tr.analyze-total td {
+  font-weight: 700;
+  background: var(--bg-panel);
+}
+.analyze-table thead th.text-center {
+  text-align: center;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* A data source that failed to run (SourceRunError.tsx): shown where its data would have been, so the person who
+   just pressed Run sees it without scrolling. The heading names the kind of failure; the server's message is set in
+   mono -- it often quotes SQL, a URL or a status -- and the hint says where to look. */
+.source-run-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  animation: source-run-error-in 0.22s ease-out;
+}
+.source-run-error-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg-raised));
+  color: var(--danger-strong);
+}
+.source-run-error-title {
+  margin: 0 0 4px;
+  font-weight: 650;
+  color: var(--danger-strong);
+}
+.source-run-error-message {
+  margin: 0 0 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.source-run-error-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+/* Inside the wizard's result panel, it fills the panel instead of the empty-state art. */
+.nrw-result .source-run-error {
+  margin: 14px;
+}
+@keyframes source-run-error-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-run-error {
+    animation: none;
   }
 }

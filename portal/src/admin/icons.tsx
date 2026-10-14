@@ -80,6 +80,11 @@ export function ClientsIcon() {
 /** Admin's Connections screen -- a cable: the named base URLs (with their headers and
  * authentication) that reports fetch their data and choice lists through. Distinct from
  * ClientsIcon's server, which is the machines calling *in*; this is where Aksor calls *out*. */
+/** Manage's Datasets screen -- shared sources with their fields and measures. */
+export function DatasetsIcon() {
+  return <Layers {...ICON_PROPS} />;
+}
+
 export function ConnectionsIcon() {
   return <Cable {...ICON_PROPS} />;
 }

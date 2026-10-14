@@ -134,6 +134,12 @@ def _render_bytes(report_id: str, fmt: str, context: dict, parameters: dict | No
     makes (app/routers/reports.py's `_render_one`), so a scheduled render
     and an on-demand one are guaranteed to behave identically.
     """
+    return render_with_data(report_id, fmt, context, parameters)[0]
+
+
+def render_with_data(report_id: str, fmt: str, context: dict, parameters: dict | None = None) -> tuple[bytes, dict]:
+    """_render_bytes, also handing back the data it rendered -- a job split by a filter (app/job_delivery.py) skips
+    a value whose data came back empty instead of mailing an empty report."""
     from doc_engine import ConversionError
     from doc_engine import render as doc_render
 
@@ -151,13 +157,14 @@ def _render_bytes(report_id: str, fmt: str, context: dict, parameters: dict | No
         raise PermanentJobError(f"Report {report_id!r} is a .{meta['template_ext']} template; format {fmt!r} unsupported")
 
     context = _fetch_context(meta, parameters, context)
+    data = context
     try:
         context = resolve_image_refs(context, meta["org_id"])
     except ImageResolutionError as exc:
         raise PermanentJobError(str(exc)) from exc
 
     try:
-        return doc_render(context, fmt, template_path=template_path)
+        return doc_render(context, fmt, template_path=template_path), data
     except ConversionError as exc:
         raise RetryableJobError(f"Rendering failed: {exc}") from exc
 
@@ -176,7 +183,13 @@ def _write_file(destination_path: str, content: bytes) -> str:
     return f"wrote {len(content)} bytes to {destination_path}"
 
 
-def execute_render_report(config: dict, job_id: str) -> str:
+def execute_render_report(config: dict, job_id: str, run_id: str | None = None) -> str:
+    if run_id is not None:
+        # A scheduled/triggered run: every file it makes, and where each went, is recorded (job_delivery.py) --
+        # which is also what emails it and splits it by a filter.
+        from . import job_delivery
+
+        return job_delivery.run(config, job_id, run_id)
     report_id = config["report_id"]
     fmt = config["format"]
     context = config.get("context") or {}
@@ -282,8 +295,19 @@ _EXECUTORS = {
 }
 
 
-def execute(job: Job) -> str:
+def execute_data_alert(config: dict, job_id: str, run_id: str | None = None) -> str:
+    """A data alert's check (app/data_alerts.py): the measure now, against its threshold; emails when it crosses."""
+    from . import data_alerts
+
+    return data_alerts.run(config, job_id, run_id)
+
+
+def execute(job: Job, run_id: str | None = None) -> str:
+    if job.job_type == "data_alert":
+        return execute_data_alert(job.config, job.id, run_id)
     executor = _EXECUTORS.get(job.job_type)
     if executor is None:
         raise PermanentJobError(f"Unknown job_type: {job.job_type!r}")
+    if job.job_type == "render_report":
+        return execute_render_report(job.config, job.id, run_id)
     return executor(job.config, job.id)

@@ -191,6 +191,62 @@ before doc_engine ever runs, then doc_engine turns those bytes into a
 chart PNG. Only `.docx` templates support this — `.xlsx` has no
 equivalent mechanism yet, the same limitation charts already have.
 
+## Barcodes and QR codes
+
+Aksor does not draw barcodes or QR codes itself: the caller makes the picture (a PNG) and hands it to the template.
+What works depends on the template type — each way below was rendered and checked.
+
+| Template | How the code gets in | Notes |
+|---|---|---|
+| `.docx` | Upload the PNG to Resources, send its id as an image: `{"image_id": "…", "width_mm": 50}` | Works in the body, a table cell, and the page header or footer. |
+| `.html` | Send the PNG as a `data:` URI string in the JSON and draw it as a CSS background | `<img src="{{ field }}">` is refused at registration (every `src` must be `{{ resource('…') }}`); a background is not. |
+| `.xlsx` | Not supported | Excel templates take no images (same limit as charts). |
+
+Make the PNG in your own service. With the Python packages `qrcode` and `python-barcode`:
+
+```python
+import base64, io, qrcode
+from barcode import Code128
+from barcode.writer import ImageWriter
+
+qr = io.BytesIO(); qrcode.make("EACL2007091100012163").save(qr, "PNG")
+bc = io.BytesIO(); Code128("EACL2007091100012163", writer=ImageWriter()).write(bc, options={"write_text": False})
+as_data_uri = lambda b: "data:image/png;base64," + base64.b64encode(b.getvalue()).decode()
+```
+
+**docx.** Type `{{ QR_IMG }}` and `{{ BARCODE_IMG }}` where the pictures belong, each alone in its paragraph or
+cell. For every document: upload the two PNGs (`POST /api/v1/images`, form fields `file`, `name`, `org_id`), then
+render with the returned ids:
+
+```json
+{ "QR_IMG": {"image_id": "3f845517dc00", "width_mm": 13},
+  "BARCODE_IMG": {"image_id": "b9712afcebe5", "width_mm": 50} }
+```
+
+Uploaded images stay in Resources until deleted, so a service that renders many documents should delete them
+afterwards (`DELETE /api/v1/images/<id>`).
+
+**html.** Send the `data:` URI strings, and give each code a sized box:
+
+```json
+{ "QR_IMG": "data:image/png;base64,iVBOR…", "BARCODE_IMG": "data:image/png;base64,iVBOR…" }
+```
+
+```html
+<style>
+  .qr      { width: 50px;  height: 50px; background: url("{{ QR_IMG }}") no-repeat; background-size: 100% 100%; }
+  .barcode { width: 190px; height: 30px; background: url("{{ BARCODE_IMG }}") no-repeat; background-size: 100% 100%; }
+</style>
+<div class="qr"></div>
+<div class="barcode"></div>
+```
+
+A code that never changes (a store link, a logo) needs none of this: upload it once and use
+`<img src="{{ resource('qr-store') }}">` (html) or paste it into the Word file.
+
+Scan the printed result before relying on it: keep a QR at least about 12 mm wide and a barcode's bars unsmoothed
+(`background-size: 100% 100%` on a PNG made wide enough).
+
 ## Khmer segmentation — automatic, no action needed
 
 Every string in your JSON body that contains Khmer is run through ICU word
@@ -434,7 +490,7 @@ header, a count — each under its own name, and each giving one of three shapes
 |---|---|---|---|
 | **List** | every row, as a list | `[]` | fine (up to the row limit) |
 | **Object** | that row, as an object | `null` | the run fails, naming the query |
-| **One value** | that row's first column | `null` | the run fails, naming the query |
+| **Single value** | that row's first column | `null` | the run fails, naming the query |
 
 They run at the same time (4 at once by default, `JDBC_MAX_PARALLEL`) and are merged into one object, every name
 always present — `{"rows": [...], "info": {"receiptCode": "R-0012", "ref": "A/77"}, "count": 2}` — so the template
@@ -447,13 +503,59 @@ Oracle and Db2 return unquoted column names in capitals (`info.TITLE`); alias a 
 (`SELECT title AS "title"`) to name it exactly. Sample data and REST sources are unchanged — each is already one object.
 
 In the Data source tab (and the New Template wizard), **Add query** turns the one query into cards, each with its
-result name, its shape (List / Object / One value) and its SQL. Through the API, `queries` replaces `query` /
+result name, its shape (List / Object / Single value) and its SQL. Through the API, `queries` replaces `query` /
 `root_key`:
 
 ```json
 {"type": "jdbc", "connection": "erp",
  "queries": [{"name": "rows", "shape": "list",   "query": "SELECT ... WHERE receipt_id = :id"},
              {"name": "info", "shape": "object", "query": "SELECT receipt_code AS \"receiptCode\", ref FROM receipts WHERE id = :id"}]}
+```
+
+**Data spread over several databases** (a service each — sales, customers, stock): give a query a **Database** of
+its own on its card. The connection at the top becomes the *Default connection*, which every other query uses.
+Each query runs on its own database with that connection's login, and the results merge into the one object as
+usual, the queries side by side; on an uploaded driver, one request per database. A query only sees its own
+database, so it can't join across them — return the other side as its own list (`customers`) and look it up in the
+template — and results from different databases are read at slightly different moments. If one fails, the error
+names the query and its connection. Through the API, add `"connection"` to the query:
+
+```json
+{"type": "jdbc", "connection": "sales-db",
+ "queries": [{"name": "rows",     "shape": "list",   "query": "SELECT ... FROM sales WHERE branch = :branch"},
+             {"name": "customer", "shape": "object", "query": "SELECT name FROM customers WHERE id = :customer_id", "connection": "crm-db"}]}
+```
+
+A dataset's Source tab is the same editor, so a dataset can span services too — every report built on it gets that.
+A connection that any query uses, in a report or a dataset, can't be deleted.
+
+**Stored procedures and functions (SQL Server).** A query is a `SELECT` by rule — `EXEC` is refused, because what a
+procedure does can't be seen from its name, and it may write. Instead, a connection manager **approves** what reports
+may call, and authors pick from that list:
+
+1. **Approve** — Manage → Connections → a SQL Server connection's **Procedures** button. **Discover** lists every
+   stored procedure, table-valued function and scalar function the connection's login may run, with its parameters
+   (read from the catalog with that login); tick the ones reports may call and **Save**. You can also type one in
+   (`dbo.GetSalesByBranch`, its kind, `@branch nvarchar(10), @from date`). Routines with `OUTPUT` parameters aren't
+   offered. If the login could also change data, Discover says so: give reports a login that may only `EXECUTE`
+   these routines (and `SELECT` the table-valued ones) — the login is the real limit on what a procedure can do.
+2. **Call** — on a query card, switch **SQL query** to **Procedure / function**, choose one, and give each parameter a
+   filter (what the person running it picks, checked against their access first) or a fixed value. A procedure's
+   first result set goes under the card's result name; **Name another result set** maps its second, third… to names
+   of their own — a header and its lines from one call. A table-valued function gives rows; a scalar function one
+   value.
+
+The server builds the call from the approved name (`{call [dbo].[GetBranchSales](?, ?)}`,
+`SELECT * FROM [dbo].[fn_SalesFrom](?)`) and binds every value — nothing is typed into SQL, so nothing can be
+injected. Approval is checked again on every run: take a routine off the list and the reports calling it stop at once,
+with a message saying so. It runs on every run, preview and scheduled job. Row counts a procedure sends before its
+results are skipped (no `SET NOCOUNT ON` needed). Procedures run in the JDBC driver service, so it must be the
+version from this release; an older one is a clear "too old to call stored procedures" error. Through the API:
+
+```json
+{"name": "info", "shape": "object", "routine": "dbo.GetBranchSales",
+ "arguments": {"@branch": {"filter": "branch"}, "@title": {"value": "Daily sales"}},
+ "more_results": [{"name": "lines", "shape": "list"}]}
 ```
 
 **Connections** (Manage → Connections; permission `connection:manage`, held by system
@@ -509,6 +611,105 @@ database or keys. An uploaded driver also unlocks a custom JDBC URL, used exactl
 editor) is a per-deployment setting in the portal's `config.js`, not the API's; see
 [`portal/README.md`](../portal/README.md#date-and-time-display). The values a report *receives*
 are always ISO (`2026-09-30`, `08:30`, `2026-09-30T08:30`).
+
+### Datasets: one source, its filters and its measures, shared by many reports
+
+When several reports read the same data — a daily sales sheet, a branch summary, a monthly letter — define it once
+as a **dataset** under Manage → Datasets (permission `dataset:manage`, held by system administrators,
+`ROLE_ORG_ADMIN` and `ROLE_REPORT_ADMIN`). A dataset holds:
+
+- **Source** and **Filters** — exactly what a report's own Data source and Parameters tabs hold (sample data, a REST
+  API or a database, and the filters it's run with).
+- **Fields** — press **Run it** and every column the source returns is listed, each with a type (text, number,
+  money, date, date & time, yes/no), an English and a Khmer label, how it's shown, and whether report authors see it.
+- **Measures** — named figures worked out over the rows on every run: *Sum*, *Count of rows*, *Count distinct*,
+  *Average*, *Minimum*, *Maximum*, each optionally *only where* a field equals a value, and *Ratio of two measures*.
+  Each has a display format such as `#,##0 ៛`, `$#,##0.00` or `0.0%`. **Run it** shows each one's value.
+
+A report uses it from its Data source tab: choose **A dataset** and pick it. The report then asks for the dataset's
+filters (its own Parameters tab shows a note instead) and its template gets the dataset's data plus two extra keys:
+
+```
+{{ measures.gross }}           → 100,000 ៛     (formatted, ready to print)
+{{ measure_values.gross }}     → 100000        (the number, for charts or your own arithmetic)
+```
+
+A change to the dataset — a new measure, a fixed query — reaches every report built on it from its next run; the
+dataset's **Used by** tab lists them. A dataset can't be deleted while a report uses it, and a connection can't be
+deleted while a dataset uses it.
+
+**Who gets which rows — the dataset's Access tab.** A new dataset is *open*: each report's own Access Privilege
+decides who runs it and with which filter values, exactly as for a report with its own source. Switch it to *Only the
+people and roles below* and the dataset decides too, for every report built on it, whoever made the report:
+
+- Add a role or a person, with **Run its reports** or **Build & run** (may also choose it as a report's data source),
+  optionally until a date.
+- For each filter with a list of choices, leave **All values** or tick **Only these** — Siem Reap staff get
+  `សៀមរាប (BR02)` and nothing else, in every report on the dataset.
+- Both have to allow a value: a person needs a report grant to run the report *and* a dataset grant, and gets only the
+  values both allow. Someone without a dataset grant is refused (`403`) with the dataset named.
+- A person's grants add up (their own and their roles'); one that leaves a filter on *All values* leaves it open.
+- Dataset managers (`dataset:manage`) and superusers aren't limited. Revoking the last grant doesn't open the dataset
+  back up — that's only ever the switch at the top. Every change is in the audit log, and dataset grants show in
+  Manage → Access Review next to report and folder grants.
+
+The limits are checked before the source is called, on the run page (only allowed values are offered), on a run, and
+when a job is saved. As with report grants, a scheduled job keeps running with the values it was saved with, and a
+report run by an API client is not limited by user grants.
+
+To turn an existing report's data into a dataset, open its Data source tab and choose **Save this report's data as a
+dataset**: its source and filters move to the new dataset and the report is switched to it, so it keeps running as
+before and the next report can share it.
+
+### Analyze: slice a dataset as a table or a chart
+
+**Analyze** (**Dashboards → Explore data** in the top bar, for people with the `analyze:use` permission — given to
+`ROLE_REPORT_ADMIN` and `ROLE_ORG_ADMIN` by default; add it to other roles under Manage → Roles) works on any
+dataset you may use:
+
+1. Choose the dataset and set its filters — only the values you're allowed are offered, as on a report's run page.
+2. Press **R** or **C** beside a field to put it in rows or columns (up to three each); a date field can be grouped
+   **by day, month or year**. Tick the **values** to show: the dataset's measures, or *Rows (count)*.
+3. Read it as a **Table** (every value, with row, column and grand totals) or a **Bar** or **Line** chart (the first
+   value; one series per column).
+
+Every measure is worked out over each cell's own rows, so a ratio such as *Cost share* is right in every cell and in
+the totals, never a sum of ratios. The data is fetched once per filter set and kept for five minutes, so moving a
+field answers at once; a change to the dataset is fetched afresh. A pivot is limited to 500 rows by 60 columns —
+group a date by month or year, or narrow the filters, for more.
+
+**Export** gives the view as a file: **PDF** and **Word** with the title, the filters, the chart and the table — Khmer
+text wrapped and shaped like every report — or **Excel**, where the numbers stay numbers in each measure's format
+(`#,##0 ៛`, `0.0%`). Every export is in the audit log. **Save view** keeps the dataset, filters and layout under a
+name, with its own link (`#/analyze/<id>`); saved views are yours alone.
+
+Who sees which rows is the dataset's to decide: an *open* dataset is open to everyone with `analyze:use`, and a
+*restricted* one only to its grants, each within their filter values (the dataset's **Access** tab). Analyze has no
+report grants to narrow it, so restrict a dataset whose rows not everyone should see. Hidden fields stay hidden here.
+
+### Dashboards and data alerts
+
+A **dashboard** (top bar → **Dashboards**) puts the numbers you watch on one page. In Explore data, arrange a view and
+choose **Add to dashboard**: pick a dashboard (or make a new one) and how the tile shows it — a table, a bar or line
+chart, or, for a view with nothing in rows and columns, a single big **number** (KPI) with any further values under
+it. On the dashboard, **Edit** renames, resizes (narrow, wide, full width), reorders and removes tiles.
+
+The filters across the top are shared: each applies to every tile whose dataset has a filter of that name (*Branch*
+on three tiles is one choice), offering only the values you're allowed. Saving in Edit keeps the current values as
+the dashboard's starting filters.
+
+**Share** gives roles the right to open a dashboard — not to change it. Viewers don't need `analyze:use`, so a report
+viewer can follow a dashboard. Each viewer sees every tile with their own access: a restricted dataset only gives
+them their values, and a tile whose dataset they can't use says so instead of showing data. To keep rows from
+someone, restrict the dataset; sharing a dashboard never widens that.
+
+A **data alert** emails when a number crosses a line: in Explore data choose **Alert me**, pick the measure, *below*
+or *above*, the threshold, how often to check (hourly, daily, weekdays, Mondays) and who gets the email (through a
+mail server under Manage → Connections; needs `job:manage`). It checks with the filters set in the view, across all
+the data, and emails when the condition first holds — not again until it has recovered. Each check is a run of a
+*Data alert* job under Manage → Jobs, whose run history shows the value it saw ("Not triggered: Net sales is
+244,435,000 ៛…"); stop or change it there. Like a report job, it may only watch what its creator could analyze when
+saving it.
 
 ### Embedding a report that fetches its own data
 

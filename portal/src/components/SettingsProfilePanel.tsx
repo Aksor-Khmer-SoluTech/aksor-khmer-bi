@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import FieldLabel, { DISPLAY_NAME_MAX, EMAIL_MAX } from "./FieldLabel";
 import { api, ApiError } from "../api";
 import { invalidateAvatar } from "../avatarStore";
 import type { User } from "../types";
@@ -25,7 +26,8 @@ export default function SettingsProfilePanel({ user, onUpdated }: { user: User; 
     setError(null);
     setSaved(false);
     try {
-      const updated = await api.users.updateMe({ email: email || null, display_name: displayName || null });
+      // "" clears a field; null would leave it unchanged (so a cleared email used to come back).
+      const updated = await api.users.updateMe({ email: email.trim(), display_name: displayName.trim() });
       onUpdated(updated);
       setSaved(true);
     } catch (err) {
@@ -106,13 +108,18 @@ export default function SettingsProfilePanel({ user, onUpdated }: { user: User; 
       </label>
       <div className="row">
         <label>
-          <span>Email</span>
-          <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+          <FieldLabel length={email.length} max={EMAIL_MAX}>
+            Email
+          </FieldLabel>
+          <input type="email" maxLength={EMAIL_MAX} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
         </label>
         <label>
-          <span>Display name</span>
+          <FieldLabel length={displayName.length} max={DISPLAY_NAME_MAX}>
+            Display name
+          </FieldLabel>
           <input
             type="text"
+            maxLength={DISPLAY_NAME_MAX}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="How your name shows up around the console"

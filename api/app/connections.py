@@ -37,8 +37,9 @@ from .rbac import ROOT_ORG_ID
 _log = logging.getLogger("aksor_khmer_bi.connections")
 
 # The kind is stored with each connection and says how to read its `config`:
-# "rest" -- {"base_url", "headers", "auth"}; "jdbc" -- a database (app/jdbc.py).
-KINDS = ("rest", "jdbc")
+# "rest" -- {"base_url", "headers", "auth"}; "jdbc" -- a database (app/jdbc.py); "smtp" -- a mail server that
+# jobs send reports through (app/mailer.py).
+KINDS = ("rest", "jdbc", "smtp")
 NAME_RE = report_data.CONNECTION_NAME_RE
 MAX_NAME_LENGTH = report_data.MAX_CONNECTION_NAME_LENGTH
 MAX_BASE_URL_LENGTH = 500
@@ -67,6 +68,10 @@ def validate_config(
         raise DataConfigError(f"Connection kind {kind!r} isn't supported -- only {', '.join(KINDS)} for now")
     if kind == "jdbc":
         return jdbc.validate_config(config, secret_names, drivers)
+    if kind == "smtp":
+        from . import mailer
+
+        return mailer.validate_config(config, secret_names)
     if "base_url" not in config:
         raise DataConfigError("This is a REST connection -- it needs a base URL")
     base_url = _validate_base_url(config.get("base_url"))
@@ -105,6 +110,16 @@ def names_for_org(org_id: str | None) -> set[str]:
         return set(session.scalars(select(db.DataConnection.name).where(db.DataConnection.org_id == _org(org_id))))
 
 
+def routines_for_org(org_id: str | None) -> dict[str, dict]:
+    """{connection name: {"engine", "routines"}} for the organization's database connections -- what a query card
+    may call on each (app/routines.py)."""
+    with db.SessionLocal() as session:
+        rows = session.scalars(
+            select(db.DataConnection).where(db.DataConnection.org_id == _org(org_id), db.DataConnection.kind == "jdbc")
+        )
+        return {r.name: {"engine": (r.config or {}).get("engine"), "routines": (r.config or {}).get("routines") or []} for r in rows}
+
+
 def kinds_for_org(org_id: str | None) -> dict[str, str]:
     """{connection name: kind} -- what a report's data source is checked against, so
     a JDBC query can't name a REST connection or the other way round."""
@@ -126,7 +141,29 @@ def resolve_jdbc(config: dict, org_id: str | None, *, where: str) -> dict:
         "username": creds["username"],
         "password": creds["password"],
         "driver": jdbc_drivers.describe(config["driver_id"], org_id) if config.get("driver_id") else None,
+        # What a query on it may call -- checked again on every run (routines.build_call), not only at save.
+        "routines": config.get("routines") or [],
     }
+
+
+def resolve_smtp(config: dict, org_id: str | None, *, where: str) -> dict:
+    """A Mail Server connection's config ready to send through: its password decrypted for this one session (or no
+    sign-in at all, for an internal relay). The result holds a password -- it goes to mailer.Session only."""
+    creds = _resolve_auth(config.get("auth"), org_id, where=where)
+    return {
+        **{key: config.get(key) for key in ("host", "port", "security", "from_address", "from_name")},
+        "username": creds["username"] if creds else None,
+        "password": creds["password"] if creds else None,
+    }
+
+
+def smtp_config_by_name(name: str, org_id: str | None) -> dict | None:
+    """A Mail Server connection's saved config, or None if no such mail server exists in the organization."""
+    with db.SessionLocal() as session:
+        row = session.scalar(
+            select(db.DataConnection).where(db.DataConnection.org_id == _org(org_id), db.DataConnection.name == name)
+        )
+        return dict(row.config) if row is not None and row.kind == "smtp" else None
 
 
 def _resolve_auth(auth: dict | None, org_id: str | None, *, where: str) -> dict | None:
@@ -180,7 +217,21 @@ def materialize(source: dict, org_id: str | None) -> dict:
     if source.get("type") == "jdbc":
         if connection["kind"] != "jdbc":
             raise DataSourceError(f"This report's connection {name!r} isn't a database connection -- ask whoever manages this report")
-        return {**source, "jdbc": resolve_jdbc(connection["config"], org_id, where=f"Connection {name!r}")}
+        resolved = {**source, "jdbc": resolve_jdbc(connection["config"], org_id, where=f"Connection {name!r}")}
+        if source.get("queries"):
+            # A query on a database of its own (data spread over services) carries that connection, resolved the same
+            # way -- each connection with only its own login, looked up once however many queries use it.
+            own: dict[str, dict] = {}
+            queries = []
+            for query in source["queries"]:
+                other = query.get("connection")
+                if other and other != name:
+                    if other not in own:
+                        own[other] = _jdbc_connection(other, org_id)
+                    query = {**query, "jdbc": own[other]}
+                queries.append(query)
+            resolved["queries"] = queries
+        return resolved
     if connection["kind"] != "rest":
         raise DataSourceError(f"This report's connection {name!r} can't be used here")
 
@@ -198,6 +249,20 @@ def materialize(source: dict, org_id: str | None) -> dict:
     }
 
 
+def _jdbc_connection(name: str, org_id: str | None) -> dict:
+    with db.SessionLocal() as session:
+        row = session.scalar(
+            select(db.DataConnection).where(db.DataConnection.org_id == _org(org_id), db.DataConnection.name == name)
+        )
+        connection = None if row is None else {"kind": row.kind, "config": row.config}
+    if connection is None:
+        _log.error("Report query names connection %r, which doesn't exist in organization %r", name, _org(org_id))
+        raise DataSourceError(f"This report's connection {name!r} no longer exists -- ask whoever manages this report")
+    if connection["kind"] != "jdbc":
+        raise DataSourceError(f"This report's connection {name!r} isn't a database connection -- ask whoever manages this report")
+    return resolve_jdbc(connection["config"], org_id, where=f"Connection {name!r}")
+
+
 # --- who uses a connection ------------------------------------------------
 
 
@@ -205,6 +270,9 @@ def _names_in(parameters: list | None, data_source: dict | None) -> set[str]:
     used: set[str] = set()
     if data_source and data_source.get("connection"):
         used.add(data_source["connection"])
+    for query in (data_source or {}).get("queries") or []:
+        if query.get("connection"):
+            used.add(query["connection"])
     for parameter in parameters or []:
         source = parameter.get("options_source") or {}
         if source.get("connection"):

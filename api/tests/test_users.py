@@ -210,3 +210,50 @@ def test_change_own_password_then_authenticate_with_new_one(make_local_user):
     verify = client.get("/api/v1/auth/verify", headers={"Authorization": f"Basic {token}"})
     assert verify.status_code == 200
     assert verify.json()["username"] == "selfie5"
+
+
+# --- what a username, email and display name may be -------------------------------------------------------------
+
+
+def _new_user(auth_headers, **fields):
+    body = {"username": "dara", "auth_source": "local", "password": "sekrit123", **fields}
+    return client.post("/api/v1/users", params={"org_id": ROOT_ORG_ID}, json=body, headers=auth_headers)
+
+
+def test_user_fields_have_limits_the_form_shows(auth_headers):
+    from app.models.rbac import DISPLAY_NAME_MAX, EMAIL_MAX, USERNAME_MAX
+
+    for fields, fragment in (
+        ({"username": ""}, "at least 1 character"),
+        ({"username": "   "}, "Enter a username"),
+        ({"username": " dara"}, "start or end with a space"),
+        ({"username": "dara|root"}, "can't contain |"),
+        ({"username": "d" * (USERNAME_MAX + 1)}, f"at most {USERNAME_MAX} characters"),
+        ({"email": "not-an-email"}, "doesn't look like an email address"),
+        ({"email": "a@b.c" + "x" * EMAIL_MAX}, f"at most {EMAIL_MAX} characters"),
+        ({"display_name": "D" * (DISPLAY_NAME_MAX + 1)}, f"at most {DISPLAY_NAME_MAX} characters"),
+    ):
+        resp = _new_user(auth_headers, **fields)
+        assert resp.status_code == 422, (fields, resp.text)
+        assert fragment in resp.text, (fields, resp.text)
+
+
+def test_user_fields_at_their_limits_and_in_khmer_are_fine(auth_headers):
+    from app.models.rbac import DISPLAY_NAME_MAX, USERNAME_MAX
+
+    resp = _new_user(auth_headers, username="d" * USERNAME_MAX, email="  ", display_name="ស" * DISPLAY_NAME_MAX)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["email"] is None  # a blank email is no email
+    khmer = _new_user(auth_headers, username="សុខា", email="sokha@example.com", display_name="សុខ សុភា")
+    assert khmer.status_code == 200, khmer.text
+
+
+def test_an_edit_can_clear_the_email_but_not_set_a_bad_one(auth_headers):
+    user_id = _new_user(auth_headers, email="dara@example.com", display_name="Dara").json()["id"]
+    bad = client.patch(f"/api/v1/users/{user_id}", json={"email": "dara(at)example"}, headers=auth_headers)
+    assert bad.status_code == 422
+    cleared = client.patch(f"/api/v1/users/{user_id}", json={"email": "", "display_name": ""}, headers=auth_headers)
+    assert cleared.status_code == 200, cleared.text
+    assert (cleared.json()["email"], cleared.json()["display_name"]) == (None, None)
+    kept = client.patch(f"/api/v1/users/{user_id}", json={"is_locked": False}, headers=auth_headers)
+    assert kept.json()["email"] is None  # left out: unchanged

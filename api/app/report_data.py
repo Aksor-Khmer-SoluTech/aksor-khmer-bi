@@ -166,17 +166,30 @@ def validate_data_config(
     connection_names: set[str] | None = None,
     secret_names: set[str] | None = None,
     connection_kinds: dict[str, str] | None = None,
+    dataset_names: set[str] | None = None,
+    connection_routines: dict[str, dict] | None = None,
 ) -> tuple[list[dict], dict | None]:
     """Strict validation + normalization of a PUT /data-config body.
     Returns cleaned copies; raises DataConfigError with a message a
     manager can act on. `connection_names`/`secret_names` are what exists in
     the report's organization: a source naming any other is refused. None
-    skips that check (callers with no database to ask)."""
+    skips that check (callers with no database to ask).
+
+    A report built on a dataset ({"type": "dataset", "dataset": name}) takes
+    its filters from the dataset (datasets.resolve_into), so it keeps none of
+    its own -- they'd be ignored, and confusing."""
+    if isinstance(data_source, dict) and data_source.get("type") == "dataset":
+        name = data_source.get("dataset")
+        if not isinstance(name, str) or not name:
+            raise DataConfigError("Choose the dataset this report is built on")
+        if dataset_names is not None and name not in dataset_names:
+            raise DataConfigError(f"There's no dataset named {name!r} in this organization")
+        return [], {"type": "dataset", "dataset": name}
     cleaned_parameters = _validate_parameters(parameters, connection_names, secret_names, connection_kinds)
     if data_source is None:
         return cleaned_parameters, None
     return cleaned_parameters, _validate_data_source(
-        data_source, {p["name"] for p in cleaned_parameters}, connection_names, secret_names, connection_kinds
+        data_source, {p["name"] for p in cleaned_parameters}, connection_names, secret_names, connection_kinds, connection_routines
     )
 
 
@@ -323,7 +336,12 @@ def source_parameter_names(data_source: dict | None) -> list[str]:
 
         names: list[str] = []
         for query in jdbc_queries(data_source):
-            for name in jdbc.validate_query(query.get("query") if isinstance(query, dict) else None):
+            if isinstance(query, dict) and query.get("routine"):
+                # A procedure or function: the filters its arguments take.
+                used = [a["filter"] for a in (query.get("arguments") or {}).values() if isinstance(a, dict) and a.get("filter")]
+            else:
+                used = jdbc.validate_query(query.get("query") if isinstance(query, dict) else None)
+            for name in used:
                 if name not in names:
                     names.append(name)
         return names
@@ -491,7 +509,11 @@ def _validate_static_source(raw: dict) -> dict:
 
 
 def _validate_jdbc_source(
-    raw: dict, parameter_names: set[str], connection_names: set[str] | None, connection_kinds: dict[str, str] | None
+    raw: dict,
+    parameter_names: set[str],
+    connection_names: set[str] | None,
+    connection_kinds: dict[str, str] | None,
+    connection_routines: dict[str, dict] | None = None,
 ) -> dict:
     from . import jdbc
 
@@ -536,8 +558,34 @@ def _validate_jdbc_source(
             raise DataConfigError(f"The result name {name!r} is also a filter's name -- the filter's value would replace it; rename one")
         shape = item.get("shape") or "list"
         if shape not in QUERY_SHAPES:
-            raise DataConfigError(f"Query {name!r}: its result is a list, one row (object) or one value -- not {shape!r}")
-        cleaned.append({"name": name, "shape": shape, "query": _validate_one_query(item.get("query"), parameter_names, f"Query {name!r}")})
+            raise DataConfigError(f"Query {name!r}: its result is a list, an object (one row) or a single value -- not {shape!r}")
+        # Its own database, when the data is spread over several (a service each). The source's connection is the
+        # default: naming that one again is the same as naming none, so it's stored as none.
+        own = _validate_connection_ref(item.get("connection"), connection_names, f"query {name!r}")
+        if own is not None and connection_kinds is not None and connection_kinds.get(own) not in (None, "jdbc"):
+            raise DataConfigError(f"Query {name!r}: the connection {own!r} isn't a database connection")
+        if item.get("routine"):
+            # A stored procedure or function its connection approved, instead of SQL (app/routines.py).
+            from . import routines
+
+            target = (connection_routines or {}).get(own or connection) if connection_routines is not None else None
+            entry = {"name": name, "shape": shape, **routines.validate_query_routine(
+                item, target["routines"] if target else ([] if connection_routines is not None else None),
+                target["engine"] if target else None, parameter_names, name,
+            )}
+        else:
+            entry = {"name": name, "shape": shape, "query": _validate_one_query(item.get("query"), parameter_names, f"Query {name!r}")}
+        if own is not None and own != connection:
+            entry["connection"] = own
+        for extra in entry.get("more_results") or []:
+            if extra["name"] == name or any(extra["name"] in [q["name"], *[m["name"] for m in q.get("more_results") or []]] for q in cleaned):
+                raise DataConfigError(f"Two results are named {extra['name']!r} -- each needs its own name")
+            if extra["name"] in parameter_names:
+                raise DataConfigError(f"The result name {extra['name']!r} is also a filter's name -- rename one")
+        cleaned.append(entry)
+    taken = [n for q in cleaned for n in [q["name"], *[m["name"] for m in q.get("more_results") or []]]]
+    if len(taken) != len(set(taken)):
+        raise DataConfigError("Two results have the same name -- each needs its own name")
     return {**common, "queries": cleaned}
 
 
@@ -558,9 +606,13 @@ def _validate_one_query(query: Any, parameter_names: set[str], where: str) -> st
     return query.strip()
 
 
+def _kind_phrase(kind: str) -> str:
+    return {"jdbc": "a database connection", "smtp": "a mail server", "rest": "a REST connection"}.get(kind, f"a {kind} connection")
+
+
 def jdbc_queries(data_source: dict) -> list[dict]:
-    """A database source's queries as [{name, shape, query}], whichever way it was saved: a single query is one
-    list named after its root_key (default rows)."""
+    """A database source's queries as [{name, shape, query, connection?}], whichever way it was saved: a single query
+    is one list named after its root_key (default rows). A query without a connection of its own uses the source's."""
     if data_source.get("queries") is not None:
         return data_source["queries"]
     return [{"name": data_source.get("root_key") or "rows", "shape": "list", "query": data_source.get("query")}]
@@ -572,17 +624,18 @@ def _validate_data_source(
     connection_names: set[str] | None = None,
     secret_names: set[str] | None = None,
     connection_kinds: dict[str, str] | None = None,
+    connection_routines: dict[str, dict] | None = None,
 ) -> dict:
     kind = raw.get("type") or "rest"
     if kind == "static":
         return _validate_static_source(raw)
     if kind == "jdbc":
-        return _validate_jdbc_source(raw, parameter_names, connection_names, connection_kinds)
+        return _validate_jdbc_source(raw, parameter_names, connection_names, connection_kinds, connection_routines)
     if kind != "rest":
         raise DataConfigError(f"Data source type {kind!r} isn't supported")
     connection = _validate_connection_ref(raw.get("connection"), connection_names, "data source")
     if connection is not None and connection_kinds is not None and connection_kinds.get(connection) not in (None, "rest"):
-        raise DataConfigError(f"The connection {connection!r} is a database connection -- use it with a database source")
+        raise DataConfigError(f"The connection {connection!r} is {_kind_phrase(connection_kinds[connection])} -- a REST source needs a REST connection")
     url = _validate_request_url(raw.get("url"), connection, "data source")
 
     method = raw.get("method") or "GET"
@@ -650,7 +703,7 @@ def _validate_options_source(
     docstring), so there's nothing to resolve here yet."""
     connection = _validate_connection_ref(raw.get("connection"), connection_names, "options source")
     if connection is not None and connection_kinds is not None and connection_kinds.get(connection) not in (None, "rest"):
-        raise DataConfigError(f"The connection {connection!r} is a database connection -- a choice list is fetched from a REST API")
+        raise DataConfigError(f"The connection {connection!r} is {_kind_phrase(connection_kinds[connection])} -- a choice list is fetched from a REST API")
     url = _validate_request_url(raw.get("url"), connection, "options source")
 
     method = raw.get("method") or "GET"
@@ -883,8 +936,23 @@ def _apply_auth(auth: dict | None, headers: dict[str, str]) -> httpx.Auth | None
 def fetch_report_data(data_source: dict, params: dict[str, str], types: dict[str, str] | None = None) -> dict:
     """Call the report's data source with the already-validated `params`
     and return its JSON object. Raises DataSourceError (safe to show) on
-    any failure."""
+    any failure. A source that comes from a dataset carries its measures:
+    they're computed over the fetched rows and added as `measures` (text, by
+    each measure's format) and `measure_values` (numbers) -- see datasets.py."""
+    data = _fetch(data_source, params, types)
+    measures = data_source.get("measures")
+    if measures:
+        from . import datasets
+
+        data["measures"], data["measure_values"] = datasets.compute_measures(measures, data)
+    return data
+
+
+def _fetch(data_source: dict, params: dict[str, str], types: dict[str, str] | None = None) -> dict:
     kind = data_source.get("type") or "rest"
+    if kind == "dataset":
+        # resolve_into puts the dataset's own source here; still a reference means the dataset is gone.
+        raise DataSourceError(f"The dataset {data_source.get('dataset')!r} this report is built on no longer exists -- ask whoever manages it")
     if kind == "static":
         return copy.deepcopy(data_source.get("static_data") or {})
     if kind == "jdbc":
@@ -959,42 +1027,97 @@ def _shaped(name: str, shape: str, rows: list[dict]) -> Any:
 
 def _run_queries(data_source: dict, params: dict[str, str], types: dict[str, str] | None) -> dict:
     """Every query of a database source, at the same time (up to JDBC_MAX_PARALLEL), merged into one object -- each
-    under its own name, always present. All or nothing: if one fails the run fails, naming that query, since a
-    report printed with part of its data missing is worse than an error."""
+    under its own name, always present. A query may read its own database (`connection` on the query, resolved into
+    its `jdbc` by connections.materialize); the rest use the source's. All or nothing: if one fails the run fails,
+    naming that query and its connection, since a report printed with part of its data missing is worse than an
+    error."""
     from . import jdbc
 
     queries = jdbc_queries(data_source)
+    default = data_source.get("connection")
 
-    def run(query: dict) -> Any:
+    def conn_of(query: dict) -> dict:
+        return query.get("jdbc") or data_source["jdbc"]
+
+    def label(query: dict) -> str:
+        return query.get("connection") or default or ""
+
+    def run(query: dict) -> dict[str, Any]:
         started = monotonic()
-        rows = jdbc.run_query(data_source["jdbc"], query["query"], params, query["name"], types=types)[query["name"]]
-        _log.info("Query %r: %d row(s) in %d ms", query["name"], len(rows), (monotonic() - started) * 1000)
-        return _shaped(query["name"], query["shape"], rows)
+        rows = jdbc.run_query(conn_of(query), query["query"], params, query["name"], types=types)[query["name"]]
+        _log.info("Query %r on %r: %d row(s) in %d ms", query["name"], label(query), len(rows), (monotonic() - started) * 1000)
+        return {query["name"]: _shaped(query["name"], query["shape"], rows)}
 
-    if len(queries) == 1:
-        return {queries[0]["name"]: run(queries[0])}
+    def run_batch(group: list[dict]) -> dict[str, Any]:
+        # An uploaded driver: all of one database's queries in one worker request (one JVM, one connection) --
+        # starting a JVM per query would cost more than the queries. Errors there already name the query.
+        from . import routines
 
-    if data_source["jdbc"].get("driver"):
-        # An uploaded driver: all of them in one worker request (one JVM, one connection) -- starting a JVM per
-        # query would cost more than the queries. Errors there already name the query.
-        rows = jdbc.run_batch_via_worker(data_source["jdbc"], [(q["name"], q["query"]) for q in queries], params)
-        results = {q["name"]: _shaped(q["name"], q["shape"], rows[q["name"]]) for q in queries}
+        conn = conn_of(group[0])
+        items: list[tuple] = []
+        for q in group:
+            if q.get("routine"):
+                # Built from its connection's approved list -- checked again now, on this run.
+                sql, values, is_call, _ = routines.build_call(q, conn.get("routines"), params)
+                items.append((q["name"], sql, {"call": is_call, "names": names_of(q), "params": values}))
+            else:
+                items.append((q["name"], q["query"]))
+        rows = jdbc.run_batch_via_worker(conn, items, params)
+        out: dict[str, Any] = {}
+        for q in group:
+            out[q["name"]] = _shaped(q["name"], q["shape"], rows[q["name"]])
+            for more in q.get("more_results") or []:
+                out[more["name"]] = _shaped(more["name"], more["shape"], rows[more["name"]])
+        return out
+
+    def names_of(query: dict) -> list[str]:
+        return [query["name"]] + [m["name"] for m in query.get("more_results") or []]
+
+    every_name = [name for q in queries for name in names_of(q)]
+    for query in queries:
+        if query.get("routine") and not conn_of(query).get("driver"):
+            raise DataSourceError(f"The query {query['name']!r} calls {query['routine']}, which needs a SQL Server connection")
+
+    if len(queries) == 1 and not queries[0].get("routine"):
+        return run(queries[0])
+
+    # One task per query on a built-in driver; one per database on an uploaded driver (a batch).
+    batches: dict[str, list[dict]] = {}
+    tasks: list[tuple[list[dict], Any]] = []
+    for query in queries:
+        if conn_of(query).get("driver"):
+            batches.setdefault(label(query), []).append(query)
+        else:
+            tasks.append(([query], lambda group: run(group[0])))
+    tasks += [(group, run_batch) for group in batches.values()]
+    if len(tasks) == 1:
+        group, fn = tasks[0]
+        results = fn(group)
         _check_total(results)
-        return results
+        return {name: results[name] for name in every_name}
 
-    results: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=min(len(queries), _max_parallel()), thread_name_prefix="report-query") as pool:
-        futures = {query["name"]: pool.submit(run, query) for query in queries}
-        for name, future in futures.items():  # in the order they were defined, so the first failure named is stable
+    merged: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=min(len(tasks), _max_parallel()), thread_name_prefix="report-query") as pool:
+        futures = [(group, pool.submit(fn, group)) for group, fn in tasks]
+        failure: tuple[int, Exception, dict] | None = None
+        for group, future in futures:
             try:
-                results[name] = future.result()
+                merged.update(future.result())
             except DataSourceError as exc:
-                for other in futures.values():
+                # The earliest-defined failing query is the one named, so the message is stable.
+                first = min(group, key=queries.index)
+                if failure is None or queries.index(first) < failure[0]:
+                    failure = (queries.index(first), exc, first)
+                for _, other in futures:
                     other.cancel()  # not started yet: don't (one already running finishes, and is discarded)
-                message = str(exc) if repr(name) in str(exc) else f"The query {name!r}: {exc}"
-                raise type(exc)(message) from exc
-    _check_total(results)
-    return results
+        if failure is not None:
+            _, exc, query = failure
+            text = str(exc) if repr(query["name"]) in str(exc) else f"The query {query['name']!r}: {exc}"
+            if label(query) and label(query) != default:
+                text += f" (on the connection {label(query)!r})"
+            raise type(exc)(text) from exc
+    _check_total(merged)
+    return {name: merged[name] for name in every_name}
 
 
 def _check_total(results: dict[str, Any]) -> None:

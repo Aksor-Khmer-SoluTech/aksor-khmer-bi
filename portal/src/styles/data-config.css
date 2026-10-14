@@ -292,6 +292,12 @@ label > span.req-url:focus-within {
   margin: -4px 0 10px;
 }
 
+/* Under the SQL editor the row needs air of its own: the editor's frame is heavier than a URL field's, and
+   the negative pull above (made for the URL row) left the chips touching it. */
+.sql-field + .req-chips {
+  margin-top: 10px;
+}
+
 .req-chips-label {
   margin-right: 2px;
   font-size: 0.72rem;
@@ -1262,7 +1268,8 @@ input.jdbc-url {
 .sql-field-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 0.85rem;
+  /* The same as every field label (label > span): "SQL query" sits under "Result name" in a query card. */
+  font-size: 0.82rem;
   font-weight: 500;
   color: var(--text-dim);
 }

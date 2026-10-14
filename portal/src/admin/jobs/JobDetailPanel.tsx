@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useState, type FormEvent } from "react";
+import { ChevronDown, ChevronUp, RotateCw } from "lucide-react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { TableSkeleton } from "../../components/Skeletons";
-import type { Job, JobRun } from "../../types";
+import type { Job, JobDelivery, JobRun } from "../../types";
 import JobFields, { draftFromJob, draftToBody, type JobDraft } from "./JobFields";
 
 type Tab = "settings" | "runs";
@@ -28,6 +29,7 @@ export default function JobDetailPanel({
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [runs, setRuns] = useState<JobRun[] | null>(null);
+  const [openRun, setOpenRun] = useState<string | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
@@ -160,20 +162,45 @@ export default function JobDetailPanel({
                   <th>Started</th>
                   <th>Finished</th>
                   <th>Result</th>
+                  {job.job_type === "render_report" && <th />}
                 </tr>
               </thead>
               <tbody>
                 {runs.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <span className={`badge badge-${r.status}`}>{r.status}</span>
-                    </td>
-                    <td className="muted">{r.triggered_by}</td>
-                    <td className="muted">{r.attempt_number}</td>
-                    <td className="muted">{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
-                    <td className="muted">{r.finished_at ? new Date(r.finished_at).toLocaleString() : "—"}</td>
-                    <td className="muted">{r.result_summary ?? "—"}</td>
-                  </tr>
+                  <Fragment key={r.id}>
+                    <tr>
+                      <td>
+                        <span className={`badge badge-${r.status}`}>{r.status}</span>
+                      </td>
+                      <td className="muted">{r.triggered_by}</td>
+                      <td className="muted">{r.attempt_number}</td>
+                      <td className="muted">{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
+                      <td className="muted">{r.finished_at ? new Date(r.finished_at).toLocaleString() : "—"}</td>
+                      <td className="muted">{r.result_summary ?? "—"}</td>
+                      {job.job_type === "render_report" && (
+                        <td>
+                          {(r.status === "success" || r.status === "failed") && (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              aria-expanded={openRun === r.id}
+                              onClick={() => setOpenRun(openRun === r.id ? null : r.id)}
+                            >
+                              {openRun === r.id ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
+                              Files
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                    {openRun === r.id && (
+                      <tr className="detail-row">
+                        <td colSpan={7}>
+                          <RunDeliveries jobId={job.id} runId={r.id} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -184,11 +211,119 @@ export default function JobDetailPanel({
       <ConfirmDialog
         open={deleteOpen}
         title="Delete job"
-        body="Scheduled firings stop within one reconcile cycle; run history is kept."
+        body="Scheduled firings stop within one reconcile cycle. Its run history, and the record of what each run sent, are deleted with it."
         confirmLabel="Delete"
         onConfirm={confirmDelete}
         onCancel={() => setDeleteOpen(false)}
       />
+    </div>
+  );
+}
+
+const DELIVERY_BADGE: Record<JobDelivery["status"], { cls: string; label: string }> = {
+  sent: { cls: "badge-success", label: "Sent" },
+  saved: { cls: "badge-success", label: "Saved" },
+  failed: { cls: "badge-failed", label: "Failed" },
+  skipped: { cls: "badge-retrying", label: "Skipped" },
+};
+
+const size = (bytes: number | null) => (bytes === null ? "—" : bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
+
+/** One line per file a run produced -- per value, for a job split by a filter: who it went to, whether it got
+ * there, and why not. A failed email can be re-sent with the same file (kept JOB_OUTPUT_DAYS on the server). */
+function RunDeliveries({ jobId, runId }: { jobId: string; runId: string }) {
+  const [rows, setRows] = useState<JobDelivery[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  function load() {
+    api.jobs.deliveries(jobId, runId).then(setRows).catch(() => setError("Couldn't load what this run sent"));
+  }
+  useEffect(load, [jobId, runId]);
+
+  async function resend() {
+    setResending(true);
+    setError(null);
+    try {
+      const { queued } = await api.jobs.resend(jobId, runId);
+      setNotice(`Re-sending ${queued} email${queued === 1 ? "" : "s"}…`);
+      // The worker sends them; look again shortly for the outcome.
+      window.setTimeout(() => {
+        load();
+        setNotice(null);
+      }, 4000);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't re-send");
+    } finally {
+      setResending(false);
+    }
+  }
+
+  if (error) return <p className="alert alert-error">{error}</p>;
+  if (rows === null) return <p className="muted">Loading…</p>;
+  if (rows.length === 0) return <p className="muted">This run didn't record any files (it ran before delivery history existed, or failed before making one).</p>;
+
+  const retryable = rows.filter((d) => d.can_resend).length;
+  const split = rows.some((d) => d.burst_value !== null);
+  return (
+    <div className="stack">
+      <table className="data-table">
+        <thead>
+          <tr>
+            {split && <th>Value</th>}
+            <th>Sent to</th>
+            <th>Result</th>
+            <th>File</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d) => {
+            const recipients = [...d.email_to, ...d.email_cc];
+            return (
+              <tr key={d.id}>
+                {split && (
+                  <td>
+                    {d.burst_label ?? d.burst_value} {d.burst_label && d.burst_label !== d.burst_value && <span className="mono muted">{d.burst_value}</span>}
+                  </td>
+                )}
+                <td title={recipients.join(", ")}>
+                  {recipients.length ? (
+                    <>
+                      {recipients[0]}
+                      {recipients.length > 1 && <span className="muted"> +{recipients.length - 1}</span>}
+                    </>
+                  ) : d.saved_to ? (
+                    <span className="mono muted">{d.saved_to}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
+                <td>
+                  <span className={`badge ${DELIVERY_BADGE[d.status].cls}`}>{DELIVERY_BADGE[d.status].label}</span>
+                  {d.sent_at && <span className="muted"> {new Date(d.sent_at).toLocaleTimeString()}</span>}
+                  {d.attempts > 1 && <span className="muted"> · try {d.attempts}</span>}
+                  {d.reason && <div className={d.status === "failed" ? "text-[0.78rem] text-danger" : "text-[0.78rem] text-text-faint"}>{d.reason}</div>}
+                </td>
+                <td className="mono muted" title={d.file_name ?? undefined}>
+                  {size(d.size_bytes)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {(retryable > 0 || notice) && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="muted text-[0.8rem]">{notice ?? "Files are kept on the server for a while, so a re-send uses the same report."}</span>
+          {retryable > 0 && (
+            <button type="button" className="btn btn-sm" onClick={resend} disabled={resending || notice !== null}>
+              {resending ? <span className="spinner" /> : <RotateCw size={13} aria-hidden="true" />}
+              Re-send the {retryable} that failed
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -25,17 +25,15 @@
       rel="stylesheet"
     />
     <script src="/config.js"></script>
-    <!-- Overrides the <title> above with this deployment's actual brand,
-         mirroring the top bar's own "name · productName" order (see
-         src/branding.ts) — synchronous and pre-paint like the theme
-         script above, so the tab never flashes the generic default
-         before swapping to the configured one. -->
+    <!-- Overrides the <title> above with this deployment's actual brand
+         (see src/branding.ts) — synchronous and pre-paint like the theme
+         script above, so the tab never flashes the generic default. The
+         brand alone: what the everyday pages are titled; App.tsx's
+         DocumentTitle adds the product name ("· Control Plane") in Manage. -->
     <script>
       (function () {
         try {
-          var brand = window.PORTAL_BRAND_NAME || "Control Plane";
-          var product = window.PORTAL_PRODUCT_NAME;
-          document.title = product ? brand + " · " + product : brand;
+          document.title = window.PORTAL_BRAND_NAME || "Control Plane";
         } catch (e) {}
       })();
     </script>

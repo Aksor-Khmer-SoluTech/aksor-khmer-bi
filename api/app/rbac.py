@@ -61,6 +61,8 @@ PERMISSIONS: tuple[tuple[str, str], ...] = (
     ("secret:manage", "Create/rotate/revoke/delete named credentials (a connection's or data source's token or password) stored encrypted in the database"),
     ("driver:manage", "Upload, download and delete JDBC driver .jar files -- code the JDBC driver service runs, so granted separately from connection:manage"),
     ("font:manage", "Add and remove fonts under Resources > Fonts -- installed for the whole server, so every organization's documents are drawn with them"),
+    ("dataset:manage", "Create/update/delete datasets: a governed source, filters, fields and measures that many reports build on"),
+    ("analyze:use", "Analyze datasets: pivot, chart and export them (a restricted dataset still only gives its grants' values)"),
 )
 
 # name -> set of permission codes. ROLE_ADMINISTRATOR is handled specially
@@ -84,8 +86,11 @@ _ORG_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "connection:manage",
         "secret:manage",
         "driver:manage",
+        "dataset:manage",
+        "analyze:use",
     ),
-    "ROLE_REPORT_ADMIN": ("report:manage", "report:render", "report:view", "folder:manage", "protected_terms:manage"),
+    # Report admins already define each report's own data source; a dataset is that same work, shared.
+    "ROLE_REPORT_ADMIN": ("report:manage", "report:render", "report:view", "folder:manage", "protected_terms:manage", "dataset:manage", "analyze:use"),
     "ROLE_REPORT_VIEWER": ("report:view", "report:render"),
     "ROLE_JOB_OPERATOR": ("job:trigger", "job:view"),
     "ROLE_USER": ("report:view",),

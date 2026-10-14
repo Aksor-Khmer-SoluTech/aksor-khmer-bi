@@ -70,7 +70,7 @@ def run_job(self, job_id: str, run_id: str) -> str:
         session.commit()
 
         try:
-            result_summary = execute(job)
+            result_summary = execute(job, run.id)
         except RetryableJobError as exc:
             if self.request.retries < job.max_retries:
                 run.status = "retrying"
@@ -100,3 +100,18 @@ def run_job(self, job_id: str, run_id: str) -> str:
         run.finished_at = _now_iso()
         session.commit()
         return result_summary
+
+
+@celery_app.task(name="resend_deliveries")
+def resend_deliveries(run_id: str) -> str:
+    """A run's failed emails, sent again with the files and messages that failed (app/job_delivery.py). Each one's
+    outcome is written to its own row of the run history."""
+    from . import job_delivery
+    from .report_data import DataSourceError
+
+    try:
+        return job_delivery.resend(run_id)
+    except DataSourceError as exc:  # the mail server's password Secret gone or revoked
+        _log.warning("Re-sending run %s failed: %s", run_id, exc)
+        return f"couldn't re-send: {exc}"
+

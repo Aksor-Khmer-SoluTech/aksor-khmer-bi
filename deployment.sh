@@ -348,7 +348,7 @@ EOF
 cmd_init() {
   require_docker
   ensure_network
-  mkdir -p "${DATA_DIRS[@]}" data/logs "$BACKUP_DIR"
+  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs "$BACKUP_DIR"
   if [ -f .env ]; then
     info ".env already exists -- leaving it untouched"
     return
@@ -388,7 +388,7 @@ cmd_up() {
     cmd_doctor || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"
   fi
   ensure_network
-  mkdir -p "${DATA_DIRS[@]}" data/logs
+  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs
   start_infra
   info "starting app (api, scheduler, worker, portal) -- migrations run as the api starts"
   pull_app_images

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import FieldLabel, { DISPLAY_NAME_MAX, EMAIL_MAX } from "../../components/FieldLabel";
 import { Plus } from "lucide-react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
@@ -81,8 +82,9 @@ export default function UserDetailPanel({
     setProfileSaved(false);
     try {
       const updated = await api.users.update(user.id, {
-        email: email || null,
-        display_name: displayName || null,
+        // "" clears a field; null would leave it unchanged.
+        email: email.trim(),
+        display_name: displayName.trim(),
         is_active: isActive,
         is_locked: isLocked,
         // Only local accounts have a password to expire; the server rejects it for ldap.
@@ -175,12 +177,16 @@ export default function UserDetailPanel({
         <form onSubmit={saveProfile} className="stack">
           <div className="row">
             <label>
-              <span>Email</span>
-              <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <FieldLabel length={email.length} max={EMAIL_MAX}>
+                Email
+              </FieldLabel>
+              <input type="email" maxLength={EMAIL_MAX} value={email} onChange={(e) => setEmail(e.target.value)} />
             </label>
             <label>
-              <span>Display name</span>
-              <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              <FieldLabel length={displayName.length} max={DISPLAY_NAME_MAX}>
+                Display name
+              </FieldLabel>
+              <input type="text" maxLength={DISPLAY_NAME_MAX} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
             </label>
           </div>
           <div className="row">

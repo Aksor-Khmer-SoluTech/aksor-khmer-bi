@@ -2,6 +2,7 @@ import { Cable, Check, Copy, Database, Download, FileText, FlaskConical, Play, T
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { has } from "../admin/sections";
 import { api, ApiError } from "../api";
+import SourceRunError, { toRunFailure, type RunFailure, type SourceKind } from "./SourceRunError";
 import { EMPTY_SOURCE, parseStaticData, toDataSource, type EditableSource } from "../dataConfig";
 import { downloadBlob } from "../download";
 import type { Route } from "../hooks";
@@ -193,6 +194,8 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A failed Run: shown in the result panel under the Run button, where the data would have been.
+  const [runError, setRunError] = useState<RunFailure | null>(null);
   const [published, setPublished] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -254,10 +257,13 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
 
   async function run() {
     setError(null);
+    setRunError(null);
     if (source.type === "static") {
       const parsed = parseStaticData(source.staticText);
       if (parsed.error || !parsed.value) {
-        setError(parsed.error ?? "Paste the sample data first");
+        setPreview(null);
+        // The heading already says it isn't valid JSON; keep the parser's own words (where, and what it found).
+        setRunError({ status: -1, message: (parsed.error ?? "Paste the sample data first").replace(/^Not valid JSON — /, "") });
         return;
       }
     }
@@ -273,7 +279,7 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
       }
     } catch (err) {
       setPreview(null);
-      setError(err instanceof ApiError ? err.message : "Couldn't run the data source");
+      setRunError(toRunFailure(err, "Couldn't run the data source"));
     } finally {
       setRunning(false);
     }
@@ -637,7 +643,15 @@ export default function NewReportWizard({ auth, reportId, navigate }: { auth: Au
               </div>
             </div>
 
-            <DataResult preview={preview} running={running} view={view} onView={setView} />
+            <DataResult
+              preview={preview}
+              running={running}
+              view={view}
+              onView={setView}
+              failure={runError}
+              kind={source.type}
+              onRetry={() => void run()}
+            />
           </div>
         </section>
       )}
@@ -851,8 +865,31 @@ function otherValues(data: Record<string, unknown>, tableKey: string): { path: s
   return lines.slice(0, 24);
 }
 
-function DataResult({ preview, running, view, onView }: { preview: DataPreview | null; running: boolean; view: "table" | "json"; onView: (v: "table" | "json") => void }) {
+function DataResult({
+  preview,
+  running,
+  view,
+  onView,
+  failure,
+  kind,
+  onRetry,
+}: {
+  preview: DataPreview | null;
+  running: boolean;
+  view: "table" | "json";
+  onView: (v: "table" | "json") => void;
+  failure: RunFailure | null;
+  kind: SourceKind;
+  onRetry: () => void;
+}) {
   const table = useMemo(() => (preview ? firstTable(preview.data) : null), [preview]);
+  if (failure && !running) {
+    return (
+      <div className="nrw-result">
+        <SourceRunError failure={failure} kind={kind} onRetry={onRetry} />
+      </div>
+    );
+  }
   if (!preview || preview.missing.length) {
     return (
       <div className="nrw-result nrw-result-empty">

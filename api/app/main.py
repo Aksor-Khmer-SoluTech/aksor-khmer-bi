@@ -16,10 +16,13 @@ from .report_ref import ReportRefMiddleware
 from .rbac import seed_defaults
 from .render_errors import RenderError, render_error_handler
 from .routers import (
+    analyze,
+    dashboards,
     audit,
     auth,
     clients,
     connections,
+    datasets,
     example_lookups,
     folders,
     fonts,
@@ -86,7 +89,7 @@ app = FastAPI(
         "line-breaking/justify hold up regardless of field length. Swagger "
         "UI at /docs, ReDoc at /redoc. See docs/building-a-report.md."
     ),
-    version="1.0.0-beta.4",
+    version="1.0.0-beta.5",
     lifespan=_lifespan,
 )
 
@@ -124,6 +127,9 @@ app.include_router(users.router)
 app.include_router(roles.router)
 app.include_router(clients.router)
 app.include_router(connections.router)
+app.include_router(datasets.router)
+app.include_router(analyze.router)
+app.include_router(dashboards.router)
 app.include_router(grants.router)
 app.add_exception_handler(RenderError, render_error_handler)
 app.include_router(ldap.router)

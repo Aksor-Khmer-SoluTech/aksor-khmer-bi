@@ -17,11 +17,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 
-from .. import audit, db, report_data, report_store
+from .. import audit, db, job_delivery, report_data, report_store
 from ..auth import ensure_org_scope, require_permission
 from ..celery_app import celery_app
 from ..cron import cron_trigger
-from ..models import JobCreate, JobOut, JobRunOut, JobsSummary, JobUpdate, SchedulePreview, SchedulePreviewRequest
+from ..models import JobCreate, JobDeliveryOut, JobOut, JobRunOut, JobsSummary, JobUpdate, SchedulePreview, SchedulePreviewRequest
 from ..rbac import AuthContext
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
@@ -114,12 +114,23 @@ def _renders_report(job_type: str, config: dict) -> bool:
     return job_type == "render_report" or (job_type == "file_output" and config.get("source") == "render_report")
 
 
-def _check_report_config(context: AuthContext, org_id: str, job_type: str, config: dict) -> None:
+def _check_report_config(context: AuthContext, org_id: str, job_type: str, config: dict) -> dict:
     """A job that renders a report runs it later, unattended, with no one's grants in force -- so it may only do what
     its creator could do now: run that report (in the job's organization), in a format it has, with filter values
-    their grants allow. Checked on every save of the config; the executor then trusts the stored values."""
+    their grants allow -- including every value it is split by. Checked on every save of the config; the executor
+    then trusts the stored values. Returns the config to store (its delivery settings normalized)."""
+    if job_type == "data_alert":
+        # A data alert checks a dataset measure later, unattended: only what its creator may analyze now.
+        from .. import data_alerts
+
+        try:
+            return data_alerts.validate(context, org_id, config)
+        except report_data.ParameterError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+        except report_data.DataConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not _renders_report(job_type, config):
-        return
+        return config
     from . import reports  # the run page's own checks, so a job can never be allowed more than a person
 
     report_id = config.get("report_id")
@@ -135,15 +146,26 @@ def _check_report_config(context: AuthContext, org_id: str, job_type: str, confi
     allowed = reports._ALLOWED_FORMATS[meta["template_ext"]]
     if config.get("format") not in allowed:
         raise HTTPException(status_code=400, detail=f"This report gives {', '.join(sorted(allowed))}, not {config.get('format')!r}")
-    if job_type == "render_report" and not config.get("destination_path"):
-        raise HTTPException(status_code=400, detail="Say where to save the file (destination_path)")
+    delivery: dict = {}
+    if job_type == "render_report":
+        try:
+            delivery = job_delivery.validate(config, definitions, limits, org_id)
+        except report_data.ParameterError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+        except report_data.DataConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if "parameters" in config:
         if not isinstance(config["parameters"], dict) or not all(isinstance(v, str) for v in config["parameters"].values()):
             raise HTTPException(status_code=400, detail="parameters must map each filter's name to a text value")
+        checked = dict(config["parameters"])
+        if "burst" in delivery:  # the split filter takes each value in turn; any one of them stands in for the check
+            checked[delivery["burst"]["by"]] = delivery["burst"]["values"][0]["value"]
         try:
-            report_data.resolve_run_parameters(definitions, limits, config["parameters"])
+            report_data.resolve_run_parameters(definitions, limits, checked)
         except report_data.ParameterError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    stored = {k: v for k, v in config.items() if k not in ("email", "burst")}
+    return {**stored, **delivery}
 
 
 @router.post(
@@ -178,7 +200,7 @@ def create_job(
 ) -> JobOut:
     ensure_org_scope(context, org_id)
     _validate_trigger_fields(body.trigger_type, body.cron_expression, body.interval_seconds, body.run_at)
-    _check_report_config(context, org_id, body.job_type, body.config)
+    config = _check_report_config(context, org_id, body.job_type, body.config)
 
     now = _now_iso()
     with db.SessionLocal() as session:
@@ -189,7 +211,7 @@ def create_job(
             name=body.name,
             description=body.description,
             job_type=body.job_type,
-            config=body.config,
+            config=config,
             trigger_type=body.trigger_type,
             cron_expression=body.cron_expression,
             interval_seconds=body.interval_seconds,
@@ -313,7 +335,7 @@ def update_job(
 
         _validate_trigger_fields(row.trigger_type, row.cron_expression, row.interval_seconds, row.run_at)
         if body.config is not None:
-            _check_report_config(context, row.org_id, row.job_type, row.config)
+            row.config = _check_report_config(context, row.org_id, row.job_type, row.config)
         row.updated_at = _now_iso()
         session.commit()
         changes = audit.diff(before, _snapshot(row), list(_AUDITED_FIELDS))
@@ -336,6 +358,9 @@ def delete_job(job_id: str, request: Request, context: AuthContext = Depends(req
         if row is None:
             raise HTTPException(status_code=404, detail="Job not found")
         ensure_org_scope(context, row.org_id)
+        # Its history goes with it: what each run delivered, then the runs themselves.
+        session.query(db.JobDelivery).filter(db.JobDelivery.job_id == job_id).delete()
+        session.query(db.JobRun).filter(db.JobRun.job_id == job_id).delete()
         session.delete(row)
         session.commit()
         audit.record(
@@ -396,3 +421,65 @@ def list_job_runs(
             query = query.where(db.JobRun.status == status)
         rows = session.execute(query).scalars().all()
         return [_run_to_out(row) for row in rows]
+
+
+def _delivery_out(row: db.JobDelivery) -> JobDeliveryOut:
+    from pathlib import Path
+
+    return JobDeliveryOut(
+        id=row.id, run_id=row.run_id, burst_value=row.burst_value, burst_label=row.burst_label, status=row.status,
+        reason=row.reason, file_name=row.file_name, size_bytes=row.size_bytes, saved_to=row.saved_to,
+        email_to=row.email_to or [], email_cc=row.email_cc or [], subject=row.subject, sent_at=row.sent_at,
+        attempts=row.attempts,
+        can_resend=row.status == "failed" and bool(row.email_to or row.email_cc) and bool(row.file_path) and Path(row.file_path).is_file(),
+    )
+
+
+def _scoped_run(session, job_id: str, run_id: str, context: AuthContext) -> db.JobRun:
+    job = session.get(db.Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_org_scope(context, job.org_id)
+    run = session.get(db.JobRun, run_id)
+    if run is None or run.job_id != job_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+@router.get(
+    "/{job_id}/runs/{run_id}/deliveries",
+    summary="What a run produced and where each file went -- one line per file (per value, for a job split by a filter)",
+    response_model=list[JobDeliveryOut],
+)
+def list_run_deliveries(job_id: str, run_id: str, context: AuthContext = Depends(require_permission("job:view"))) -> list[JobDeliveryOut]:
+    with db.SessionLocal() as session:
+        _scoped_run(session, job_id, run_id, context)
+        rows = session.execute(
+            select(db.JobDelivery).where(db.JobDelivery.run_id == run_id).order_by(db.JobDelivery.created_at)
+        ).scalars().all()
+        return [_delivery_out(row) for row in rows]
+
+
+@router.post(
+    "/{job_id}/runs/{run_id}/resend",
+    status_code=202,
+    summary="Send a run's failed emails again, with the same files",
+)
+def resend_run_deliveries(job_id: str, run_id: str, request: Request, context: AuthContext = Depends(require_permission("job:trigger"))) -> dict:
+    with db.SessionLocal() as session:
+        _scoped_run(session, job_id, run_id, context)
+        rows = session.execute(
+            select(db.JobDelivery).where(db.JobDelivery.run_id == run_id, db.JobDelivery.status == "failed")
+        ).scalars().all()
+        count = sum(1 for row in rows if _delivery_out(row).can_resend)
+        job = session.get(db.Job, job_id)
+    if count == 0:
+        raise HTTPException(status_code=400, detail="Nothing to re-send: no failed email of this run still has its file")
+    celery_app.send_task("resend_deliveries", args=[run_id])
+    audit.record(
+        audit.Actor.of(context, request), "job.resend", "job", job_id,
+        label=job.name, org_id=job.org_id, summary=f'Re-sent {count} failed email{"s" if count != 1 else ""} of job "{job.name}"',
+        details={"run_id": run_id, "count": count},
+    )
+    return {"queued": count}
+

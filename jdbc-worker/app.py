@@ -11,6 +11,8 @@ is where that happens, and it is deliberately boring and powerless --
   platform's PostgreSQL or Redis;
 * the filesystem is read-only, it runs as an unprivileged user with capped
   memory/CPU/processes (docker-compose.yml), and drivers are mounted read-only;
+* a stored procedure is only ever one the API built from a name an administrator approved (api/app/routines.py),
+  its values bound -- this service runs what it's sent, and the API is the gate;
 * every request runs in a fresh JVM that is killed at the timeout, so a driver
   can't keep state between requests or between organizations (a report with
   several queries sends them as one request: one JVM, one connection, run in
@@ -58,6 +60,10 @@ app = FastAPI(title="Aksor Khmer BI JDBC driver service", docs_url=None, redoc_u
 class Statement(BaseModel):
     sql: str = Field(..., max_length=20_000)
     args: list[str] = Field(default_factory=list, max_length=200)
+    # A stored procedure: run through JDBC's CALL, answering its first `result_sets` result sets (the first as
+    # {columns, rows}, the rest under `more`). The API only sends one it built from an approved name (app/routines.py).
+    call: bool = False
+    result_sets: int = Field(1, ge=1, le=10)
 
 
 class Query(BaseModel):
@@ -78,7 +84,8 @@ class Query(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    # protocol 2: stored-procedure calls and several result sets per statement.
+    return {"status": "ok", "protocol": 2}
 
 
 def _sha256(path: Path) -> str:
@@ -111,7 +118,10 @@ def query(body: Query, x_worker_token: str = Header("")) -> JSONResponse:
     job = {
         "jar": str(jar), "class": body.driver_class, "url": body.jdbc_url, "user": body.username, "password": body.password,
         "max_rows": body.max_rows,
-        "queries": [{"sql": q.sql, "args": q.args} for q in body.queries] if body.queries else [{"sql": body.sql, "args": body.args}],
+        "queries": (
+            [{"sql": q.sql, "args": q.args, "call": q.call, "result_sets": q.result_sets} for q in body.queries]
+            if body.queries else [{"sql": body.sql, "args": body.args}]
+        ),
     }
     statements = len(job["queries"])
     # A minimal environment: nothing of this service's own reaches the driver's JVM.

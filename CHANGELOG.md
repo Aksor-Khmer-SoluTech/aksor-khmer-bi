@@ -3,12 +3,111 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-beta.5] - 2026-10-14
+
+### Added
+- **Report jobs email their files, and split them into one file per value** (bursting, as in Oracle BI Publisher).
+  A job's new *Where it goes* section saves the report to a folder, emails it, or both; *One file per value* splits
+  it by a filter with a list of choices — one run, one file and one set of recipients per branch, say, each with
+  only that branch's data. The subject and message fill in `{{ report }}`, `{{ date }}` and each filter (with its
+  label), Khmer included; a value with no data can be skipped rather than mailed empty. Every value you split by
+  is checked against your own access when you save, so a job never sends data its creator couldn't run.
+- **Mail servers** under Manage → Connections (*New Mail Server*), with presets for Google Workspace, Microsoft 365
+  and any SMTP server, the password kept as a Secret, and *Send a test email*.
+- **What each run sent:** a job's Run history opens each run's files — who each went to, sent / saved / failed
+  (with the mail server's reason) / skipped — and *Re-send the ones that failed* sends them again with the very
+  same file, kept on the server for `JOB_OUTPUT_DAYS` (30) days. A run where nothing went out and the cause may
+  pass (the database or mail server down) is retried with the job's retry settings; once something went out it
+  isn't, so nobody gets the same file twice.
+- **Datasets** (Manage → Datasets): a source and its filters defined once, with what each field means (type,
+  English and Khmer label, format, hidden) and named **measures** — sum, count, count distinct, average, minimum,
+  maximum (optionally *only where* a field equals a value) and ratios — each with a format such as `#,##0 ៛` or
+  `0.0%`. *Run it* finds the fields and shows each measure's value. A report built on a dataset (Data source →
+  *A dataset*) asks for its filters and gets `{{ measures.<key> }}` (formatted) and `{{ measure_values.<key> }}`
+  (numbers) besides the data; a change to the dataset reaches all of them on their next run. *Save this report's
+  data as a dataset* turns an existing report's source into one. New permission `dataset:manage`, given to
+  `ROLE_ORG_ADMIN` and `ROLE_REPORT_ADMIN`.
+- **Who gets which rows, per dataset** (a dataset's *Access* tab). Restrict a dataset to the people and roles it
+  lists, each with *Run its reports* or *Build & run* and, per filter, all values or only some (say Siem Reap staff:
+  `សៀមរាប (BR02)` only) — for every report built on it, on top of each report's own grants: both must allow a value.
+  Open is the default, so existing datasets behave as before; revoking the last grant never opens one back up.
+  Dataset grants show in Access Review, and every change is audited.
+- **Upgrade note:** migrations `0007_job_deliveries` and `0008_datasets` run at start-up. `docker-compose.yml` mounts a new
+  `data/job_outputs` folder on `api` and `worker` — run `./deployment.sh update`, which creates it.
 
 ### Changed
-- A database source's query cards label the one-row shape **Object** (was *One row*): List / Object / One value.
+- **Dashboards** (top bar): Analyze views as tiles on one page — tables, bar and line charts, or a single big number
+  (KPI) — with the filters they share across the top (one *Branch* for every tile that has it). Owners add tiles from
+  Explore data, then rename, resize, reorder and **share** them with roles; viewers don't need `analyze:use`, and
+  each sees every tile with their own access (a restricted dataset still only gives them their values). Changes are
+  audited. The top bar's *Analyze* became *Dashboards*, with *Explore data* inside it.
+- **Data alerts**: from Explore data, *Alert me* emails when a measure drops below or rises above a threshold, checked
+  hourly, daily, on weekdays or on Mondays — once when it crosses, not again until it recovers. It's a new job type
+  (*Data alert*, under Manage → Jobs) whose run history shows the value each check saw; it may only watch what its
+  creator could analyze.
+  **Upgrade note:** migration `0010_dashboards` runs at start-up.
+- **Analyze** (top bar): slice a dataset into a pivot — fields in rows and columns (a date grouped by day, month or
+  year), measures in values — as a table with totals or a bar or line chart, Khmer labels throughout. Measures are
+  worked out per cell, so a ratio is right everywhere. The data is fetched once per filter set and kept five minutes,
+  so re-arranging answers at once. **Export** as PDF or Word (title, filters, chart and table, Khmer shaped and
+  wrapped) or Excel (numbers kept as numbers, in each measure's format); exports are audited. **Save view** keeps a
+  layout under its own link, private to you. New permission `analyze:use`, given to `ROLE_REPORT_ADMIN` and
+  `ROLE_ORG_ADMIN`; a restricted dataset still only gives its grants' values.
+  **Upgrade note:** migration `0009_analyses` runs at start-up.
+- **Stored procedures and functions (SQL Server).** A connection manager approves what reports may call — under
+  Manage → Connections → *Procedures*, with **Discover** listing what the connection's login may run (and warning
+  when that login could also change data) — and a query card switches to *Procedure / function*, picks one and gives
+  each parameter a filter or a fixed value. A procedure's several result sets each get a name (a header and its
+  lines from one call); table-valued and scalar functions work too. The call is built on the server from the
+  approved name with every value bound, and approval is checked on every run. Datasets get it too.
+  **Upgrade note:** procedures run in the JDBC driver service — update its image with this release (an older one
+  answers with a clear "too old to call stored procedures").
+- **A query can read its own database.** For data spread over several databases (a service each), each query card
+  of a database source has a *Database* of its own; the top connection becomes the default the others use. The
+  queries still run side by side and merge into one object, each on its own database with that connection's login
+  (an uploaded driver gets one request per database), and an error names the query and its connection. Datasets get
+  it too, since they share the editor. A connection any query uses can't be deleted. Existing reports are unchanged.
+- **When a data source fails to run, it says so where you're looking.** In the New Template wizard and a dataset's
+  *Run it*, a failed run of sample data, a REST API or a database now shows in place of the data, under the Run
+  button (not in a banner at the top of the page): a heading that names the problem (couldn't connect, the API
+  answered HTTP 404, the database rejected the query, it took too long, too much data, the sample isn't valid
+  JSON…), the server's own message, what to check, and *Try again*.
+- **Ctrl+P (⌘P on a Mac) prints the report** when one is showing in the report viewer: it does what the toolbar's
+  Print button does (the button flashes), instead of printing the portal page around the report. Before a report
+  has rendered, the browser's own print works as before.
+- **Questions and answers.** The Guides home now opens on the questions people ask most — 33 of them, in eight
+  categories (templates, Khmer text, data and datasets, output, schedules and email, sign-in, running the server) —
+  each opening in place with a short answer and a link to the section that explains it fully. The common ones are
+  one click from the search box. They're a guide of their own too (`docs/faq.md`), so search finds them and GitHub
+  shows them.
+- **Guides are easier to find your way in.** *Guides* opens on a home page: a search box, a card for each topic
+  (looping, formatting, missing data…) with its links, and the guides by what they're for. Search results are
+  grouped by guide (a few each, *Show more* for the rest), matching topics come first, and snippets read as text
+  rather than raw Markdown. Arrow keys and Enter work from the search box; Esc goes back.
+- **New user** (and a user's Profile, and your own in Settings) marks what's required and counts characters:
+  username required, up to 100 (no `|`, which separates name and organization at sign-in); email optional, up to
+  254 and checked to look like an address; display name optional, up to 100. The API enforces the same — before,
+  any length was accepted. Existing accounts are untouched.
+- The browser tab names the page: **Aksor Khmer · Home**, **· Reports** (a report's run page too), **· My runs**,
+  **· Starred**, and **Aksor Khmer · Control Plane** in Manage; signed out, just **Aksor Khmer** (was *Aksor Khmer ·
+  Control Plane* everywhere).
+- A database source's query cards name their shapes **List / Object / Single value** (were *List / One row / One
+  value*), each with an icon: `[ ]`, `{ }` and `#`.
+- A report built on a dataset can be limited by filter value from its own Access Privilege tab too (the dataset's
+  filters are offered there; before, that list was empty for such a report).
 - Several queries in a database source can be put in order by dragging a card's handle (or with the keyboard:
-  space, then the arrow keys).
+  space, then the arrow keys), or with each card's up and down arrows when there are many.
+
+### Fixed
+- Searching the guides kept the open guide's scroll position, so results started part-way down with the count out
+  of sight; they now start at the top, and clearing the search puts the guide back where you were. Opening a result
+  lands exactly on its heading (it used to stop short while code blocks finished drawing) and highlights it.
+- Clearing your email or display name in Settings → Profile (or an administrator clearing a user's) didn't stick:
+  the empty field was sent as "no change".
+- A job's Run history table inside the expanded job showed squashed, tinted cells: the expanded row's styling
+  leaked into tables inside it.
+- Deleting a job now removes its run history with it, instead of leaving it (or failing on PostgreSQL, whose
+  foreign keys refuse to orphan the runs).
 
 ## [1.0.0-beta.4] - 2026-10-11
 

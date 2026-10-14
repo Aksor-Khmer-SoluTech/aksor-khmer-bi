@@ -69,3 +69,32 @@ class JobRun(Base):
     result_summary: Mapped[str | None] = mapped_column(String, nullable=True)
     triggered_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class JobDelivery(Base):
+    """One file a run produced and where it went -- a line of the job's run history. A run of a job split by a
+    filter (bursting: one file per branch, say) has one per value; an unsplit run has one. `status`:
+    "sent" (emailed), "saved" (written to the folder, no email), "failed" (`reason` says why), or "skipped" (no
+    data for that value, or nobody to send it to). The file itself is kept for a while (`file_path`, under
+    data/job_outputs) so a failed email can be re-sent with the very same report."""
+
+    __tablename__ = "job_deliveries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_gen_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("job_runs.id"), nullable=False, index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    burst_value: Mapped[str | None] = mapped_column(String, nullable=True)
+    burst_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    saved_to: Mapped[str | None] = mapped_column(String, nullable=True)
+    email_to: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    email_cc: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    subject: Mapped[str | None] = mapped_column(String, nullable=True)
+    body: Mapped[str | None] = mapped_column(String, nullable=True)
+    sent_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)

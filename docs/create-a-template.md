@@ -264,7 +264,9 @@ Recipes for the usual display jobs. Each result below was produced by running th
 expression with `date` = `"2026-09-30"`, `ts` = `"2026-09-30T08:30"`, `amount` = `1234.5`,
 `qty` = `3`, `price` = `2.5`, `pct` = `0.256`, `n` = `7`.
 
-**Combining text with `~`** — `~` joins values and literals (including `"/"`); `+` is for
+#### Combining text
+
+`~` joins values and literals (including `"/"`); `+` is for
 numbers only, so `"a" + 1` is an error.
 
 | Write | Result |
@@ -273,7 +275,9 @@ numbers only, so `"a" + 1` is an error.
 | `{{ first ~ " " ~ last }} ({{ first[0] }}.{{ last[0] }}.)` | `Dara Sok (D.S.)` |
 | `{{ phone[:3] }} {{ phone[3:6] }} {{ phone[6:] }}` | `012 345 678` (from `012345678`) |
 
-**Arithmetic** — `+ - * /`, `//` (whole-number divide), `%` (remainder), parentheses.
+#### Arithmetic
+
+`+ - * /`, `//` (whole-number divide), `%` (remainder), parentheses.
 
 | Write | Result |
 |---|---|
@@ -281,7 +285,9 @@ numbers only, so `"a" + 1` is an error.
 | `{{ 10 / 4 }}` / `{{ 10 // 4 }}` / `{{ 10 % 4 }}` | `2.5` / `2` / `2` |
 | `{{ (qty * price) \| round(1) }}` | `7.5` |
 
-**Rounding and math functions** — Jinja has no `round()`, `ceil()`, `floor()` or `sqrt()`
+#### Rounding and math functions
+
+Jinja has no `round()`, `ceil()`, `floor()` or `sqrt()`
 *functions*; these are **filters** (`value | filter`) or operators, and they are the whole
 list. Rounding returns a decimal (`1235.0`), so add `| int` when you want a whole number.
 Values: `x` = `1234.567`, `neg` = `-7.25`, `amt` = `-12.5`, `a` = `10`, `b` = `4`.
@@ -317,7 +323,9 @@ Two things that surprise people:
 Round **before** you format (`"{:,.2f}".format(x | round(2, "ceil"))`) when the rounding
 rule matters; `"{:.2f}".format(x)` alone uses the half-to-even rule.
 
-**Numbers** — format with `"{...}".format(value)`; the part after `:` is the format.
+#### Numbers
+
+Format with `"{...}".format(value)`; the part after `:` is the format.
 
 | Write | Result |
 |---|---|
@@ -331,7 +339,9 @@ rule matters; `"{:.2f}".format(x)` alone uses the half-to-even rule.
 | `{{ "{:,.2f}".format(amount).replace(",", "X").replace(".", ",").replace("X", ".") }}` | `1.234,50` — swap the separators |
 | `{{ "{:,.2f}".format(items \| sum(attribute="line")) }}` | a formatted column total |
 
-**Dates and times** — they arrive as ISO text, so slice (`[start:end]`, counting from 0):
+#### Dates and times
+
+They arrive as ISO text, so slice (`[start:end]`, counting from 0):
 
 | Write | Result |
 |---|---|
@@ -342,7 +352,9 @@ rule matters; `"{:.2f}".format(x)` alone uses the half-to-even rule.
 | `{{ ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][date[5:7] \| int - 1] }} {{ date[8:10] \| int }}, {{ date[:4] }}` | `Sep 30, 2026` — month name from a list |
 | `{{ ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"][date[5:7] \| int - 1] }}` | `កញ្ញា` — Khmer month name |
 
-**Khmer digits** — convert `0–9` to `០–៩` with `translate`. It converts every digit in the
+#### Khmer digits
+
+Convert `0–9` to `០–៩` with `translate`. It converts every digit in the
 text, so apply it to the whole formatted string:
 
 | Write | Result |
@@ -353,7 +365,7 @@ text, so apply it to the whole formatted string:
 Define `kh` once near the top and reuse it. In a `.docx` put the `{% set %}` alone in its
 own paragraph as `{%p set kh = … %}` (see [5.1](#51-loops-and-conditions---p--and-tr-)).
 
-**Choosing text from a value**
+#### Choosing text from a value
 
 | Write | Result |
 |---|---|

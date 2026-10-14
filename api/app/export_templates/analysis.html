@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="km">
+<head>
+<meta charset="utf-8">
+<title>{{ title }}</title>
+<style>
+  /* An Analyze export (app/analyze_export.py): title, the filters it was run with, the chart, then the table. Khmer
+     text arrives already segmented, so it wraps at word boundaries; the fonts are the server's own. */
+  @page { size: A4 {{ orientation }}; margin: 14mm 12mm 16mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Khmer OS Siemreap", "DejaVu Sans", sans-serif; color: #6b7280; } }
+  body { font: 9.5pt/1.5 "Khmer OS Siemreap", "DejaVu Sans", sans-serif; color: #172033; }
+  h1 { font: 15pt/1.3 "Khmer OS Muol Light", "Khmer OS Siemreap", "DejaVu Sans", sans-serif; margin: 0 0 4px; }
+  .sub { color: #56607a; margin: 0 0 10px; }
+  .filters { margin: 0 0 12px; padding: 6px 9px; background: #f1f4f9; border-radius: 4px; }
+  .filters span { margin-right: 14px; }
+  .filters b { font-weight: 600; }
+  .chart { margin: 4px 0 12px; }
+  .chart img { width: 100%; height: auto; display: block; }
+  /* The category names and legend are text, not SVG: WeasyPrint shapes Khmer in HTML, not inside an SVG picture. */
+  .cats { display: flex; margin-top: 2px; font-size: 8.5pt; color: #56607a; }
+  .cats span { flex: 1; text-align: center; padding: 0 2px; }
+  .legend { margin-top: 4px; font-size: 8.5pt; color: #56607a; }
+  .legend span { margin-right: 14px; }
+  .legend i { display: inline-block; width: 8pt; height: 8pt; border-radius: 2pt; margin-right: 4px; vertical-align: -1pt; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.5pt; }
+  th, td { border: 0.5pt solid #c9cfdb; padding: 4px 6px; text-align: right; }
+  th.dim, td.dim { text-align: left; }
+  thead th { background: #e7ecf5; font-weight: 600; }
+  tr.total td { font-weight: 700; background: #f1f4f9; }
+  td.empty { color: #9aa1b2; }
+  .foot { margin-top: 8px; color: #6b7280; font-size: 8pt; }
+</style>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <p class="sub">{{ subtitle }}</p>
+  {% if filters %}<p class="filters">{% for f in filters %}<span><b>{{ f.label }}:</b> {{ f.value }}</span>{% endfor %}</p>{% endif %}
+  {% if graph %}
+  <div class="chart">
+    <img src="{{ graph.uri }}" alt="">
+    <div class="cats" style="padding-left: {{ graph.pad_left }}%; padding-right: {{ graph.pad_right }}%">{% for c in graph.categories %}<span>{{ c }}</span>{% endfor %}</div>
+    <div class="legend">{% for s in graph.series %}<span><i style="background: {{ s.color }}"></i>{{ s.name }}</span>{% endfor %}</div>
+  </div>
+  {% endif %}
+  <table>
+    <thead>
+      {% for header in headers %}<tr>{% for cell in header %}<th class="{{ cell.cls }}" colspan="{{ cell.span }}">{{ cell.text }}</th>{% endfor %}</tr>{% endfor %}
+    </thead>
+    <tbody>
+      {% for row in body %}<tr class="{{ row.cls }}">{% for cell in row.cells %}<td class="{{ cell.cls }}">{{ cell.text }}</td>{% endfor %}</tr>{% endfor %}
+    </tbody>
+  </table>
+  <p class="foot">{{ footer }}</p>
+</body>
+</html>

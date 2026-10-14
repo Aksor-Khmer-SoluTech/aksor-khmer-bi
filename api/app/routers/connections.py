@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from .. import audit, connections, db, jdbc, jdbc_drivers, secrets
+from .. import audit, connections, datasets, db, jdbc, jdbc_drivers, mailer, routines, secrets
 from ..auth import ensure_org_scope, get_current_user, require_permission
 from ..models import (
     ConnectionCreate,
@@ -31,8 +31,12 @@ from ..models import (
     ConnectionTest,
     ConnectionTestResult,
     ConnectionUpdate,
+    DiscoveredRoutines,
     JdbcConnectionConfig,
+    RoutinesUpdate,
+    MailServerTest,
     RestConnectionConfig,
+    SmtpConnectionConfig,
 )
 from ..rbac import ROOT_ORG_ID, AuthContext
 
@@ -62,6 +66,8 @@ def _get_scoped(session, connection_id: str, context: AuthContext) -> db.DataCon
 def _location(row: db.DataConnection) -> str:
     """Where a connection points, for lists and the audit trail: a REST base URL or a JDBC URL (neither holds a credential)."""
     config = row.config or {}
+    if row.kind == "smtp":
+        return mailer.display(config)
     return jdbc.display_url(config) if row.kind == "jdbc" else config.get("base_url", "")
 
 
@@ -81,6 +87,7 @@ def _summary(row: db.DataConnection, report_count: int) -> ConnectionSummary:
         credential="none" if not auth else "secret" if secret_name else "env",
         secret_name=secret_name,
         header_names=sorted((config.get("headers") or {}).keys(), key=str.lower),
+        routines=(config.get("routines") or []) if row.kind == "jdbc" else [],
         report_count=report_count,
         updated_at=row.updated_at,
     )
@@ -93,7 +100,11 @@ def _out(row: db.DataConnection, reports: list[dict]) -> ConnectionOut:
         name=row.name,
         kind=row.kind,
         description=row.description,
-        config=JdbcConnectionConfig(**row.config) if row.kind == "jdbc" else RestConnectionConfig(**row.config),
+        config=(
+            JdbcConnectionConfig(**row.config) if row.kind == "jdbc"
+            else SmtpConnectionConfig(**row.config) if row.kind == "smtp"
+            else RestConnectionConfig(**row.config)
+        ),
         reports=[ConnectionReportRef(**r) for r in reports],
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -179,6 +190,41 @@ def test_connection(body: ConnectionTest, request: Request, context: AuthContext
     return result
 
 
+@router.post(
+    "/test-mail",
+    summary="Send a test email with a mail server's settings, without saving them",
+    response_model=ConnectionTestResult,
+)
+def test_mail_server(body: MailServerTest, request: Request, context: AuthContext = Depends(_manage)) -> ConnectionTestResult:
+    """Signs in with the settings given (the password is the named Secret's, resolved on the server) and sends one
+    short email to `to`. The answer says whether it worked and, if not, a message safe to show."""
+    org_id = body.org_id or context.org_id or ROOT_ORG_ID
+    ensure_org_scope(context, org_id)
+    try:
+        config = connections.validate_config("smtp", body.config.model_dump(), secrets.active_names_for_org(org_id))
+        to = mailer.validate_address(body.to, "Send the test to")
+    except connections.DataConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    started = time.monotonic()
+    try:
+        server = connections.resolve_smtp(config, org_id, where="Mail server test")
+        with mailer.Session(server) as session:
+            session.send(mailer.Message(
+                to=[to], cc=[], subject="Aksor Khmer BI: test email",
+                body="This test email shows your mail server settings work: scheduled jobs can send reports through it.",
+            ))
+        result = ConnectionTestResult(ok=True, message=f"Sent to {to}", elapsed_ms=int((time.monotonic() - started) * 1000))
+    except (connections.DataSourceError, mailer.MailError) as exc:
+        result = ConnectionTestResult(ok=False, message=str(exc))
+    audit.record(
+        audit.Actor.of(context, request), "connection.test", "connection", "test",
+        label=f"smtp {config['host']}:{config['port']}", org_id=org_id,
+        summary=f"Sent a test email through {config['host']}:{config['port']} to {to}: {'sent' if result.ok else 'failed'}",
+    )
+    return result
+
+
 @router.get("", summary="List connections visible to the caller", response_model=list[ConnectionSummary])
 def list_connections(
     org_id: str | None = Query(None, description="Superusers may omit this to list every organization's connections"),
@@ -213,9 +259,13 @@ def update_connection(
     point -- so the before/after of what changed is what the audit trail keeps."""
     with db.SessionLocal() as session:
         row = _get_scoped(session, connection_id, context)
+        incoming = body.config.model_dump()
+        if row.kind == "jdbc" and incoming.get("routines") is None:
+            # The approved routines have their own endpoint: an edit of the settings that doesn't send them keeps them.
+            incoming["routines"] = (row.config or {}).get("routines")
         try:
             config = connections.validate_config(
-                row.kind, body.config.model_dump(), secrets.active_names_for_org(row.org_id),
+                row.kind, incoming, secrets.active_names_for_org(row.org_id),
                 jdbc_drivers.engines_by_id(row.org_id),
             )
         except connections.DataConfigError as exc:
@@ -238,6 +288,68 @@ def update_connection(
         return _out(row, connections.reports_using(session, row.org_id).get(row.name, []))
 
 
+@router.put(
+    "/{connection_id}/routines",
+    summary="Set the stored procedures and functions reports may call on a SQL Server connection",
+    response_model=ConnectionOut,
+)
+def set_routines(connection_id: str, body: RoutinesUpdate, request: Request, context: AuthContext = Depends(_manage)) -> ConnectionOut:
+    """What a report's query card may call (app/routines.py). Taking one off stops every report that calls it on its
+    next run -- approval is checked on each run, not only when a report is saved."""
+    with db.SessionLocal() as session:
+        row = _get_scoped(session, connection_id, context)
+        if row.kind != "jdbc":
+            raise HTTPException(status_code=400, detail="Only a database connection has stored procedures and functions")
+        try:
+            approved = routines.validate_routines([r.model_dump() for r in body.routines], (row.config or {}).get("engine") or "")
+        except connections.DataConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        before = {r["name"]: r for r in (row.config or {}).get("routines") or []}
+        after = {r["name"]: r for r in approved}
+        row.config = {**(row.config or {}), "routines": approved}
+        row.updated_at = _now()
+        session.commit()
+        added = sorted(set(after) - set(before))
+        removed = sorted(set(before) - set(after))
+        changed = sorted(n for n in set(after) & set(before) if after[n] != before[n])
+        if added or removed or changed:
+            parts = [f"approved {', '.join(added)}" if added else "", f"withdrew {', '.join(removed)}" if removed else "",
+                     f"changed {', '.join(changed)}" if changed else ""]
+            audit.record(
+                audit.Actor.of(context, request), "connection.routines", "connection", row.id, label=row.name, org_id=row.org_id,
+                summary=f"Routines on {row.name}: " + "; ".join(p for p in parts if p),
+                changes=[{"field": "routines", "before": sorted(before), "after": sorted(after)}],
+            )
+        return _out(row, connections.reports_using(session, row.org_id).get(row.name, []))
+
+
+@router.post(
+    "/{connection_id}/routines/discover",
+    summary="List the stored procedures and functions this SQL Server connection's login may run",
+    response_model=DiscoveredRoutines,
+)
+def discover_routines(connection_id: str, request: Request, context: AuthContext = Depends(_manage)) -> DiscoveredRoutines:
+    """Reads SQL Server's catalog with the connection's own login: every procedure and function it may run, with
+    their parameters, and whether the login could also change data. Approves nothing."""
+    with db.SessionLocal() as session:
+        row = _get_scoped(session, connection_id, context)
+        config, name, org_id = dict(row.config or {}), row.name, row.org_id
+    if row.kind != "jdbc" or config.get("engine") not in routines.ENGINES:
+        raise HTTPException(status_code=400, detail="Discover reads SQL Server's catalog -- this isn't a SQL Server connection")
+    try:
+        found = routines.discover(connections.resolve_jdbc(config, org_id, where=f"Connection {name!r}"))
+    except connections.DataConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except connections.DataSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    audit.record(
+        audit.Actor.of(context, request), "connection.discover", "connection", connection_id, label=name, org_id=org_id,
+        summary=f"Listed the routines {name}'s login may run ({len(found['routines'])} found)"
+        + (" -- the login can also change data" if found["can_write"] else ""),
+    )
+    return DiscoveredRoutines(**found)
+
+
 @router.delete("/{connection_id}", status_code=204, summary="Delete a connection nothing uses")
 def delete_connection(connection_id: str, request: Request, context: AuthContext = Depends(_manage)) -> None:
     """Refused while a report still goes through it: deleting it would break
@@ -250,6 +362,12 @@ def delete_connection(connection_id: str, request: Request, context: AuthContext
             raise HTTPException(
                 status_code=409,
                 detail=f"{row.name!r} is still used by {len(used_by)} report{'s' if len(used_by) != 1 else ''} ({names}) -- point them at another connection first",
+            )
+        in_datasets = datasets.connections_in_use(session, row.org_id).get(row.name, [])
+        if in_datasets:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{row.name!r} is still used by the dataset{'s' if len(in_datasets) != 1 else ''} {', '.join(in_datasets[:5])} -- point {'them' if len(in_datasets) != 1 else 'it'} at another connection first",
             )
         name, org_id, base_url = row.name, row.org_id, _location(row)
         session.delete(row)

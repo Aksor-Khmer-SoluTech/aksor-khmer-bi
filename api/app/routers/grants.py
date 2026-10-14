@@ -90,7 +90,10 @@ def _validate_parameter_limits(report: db.ReportRow, level: str, limits: dict[st
         return {}
     if level not in ("render", "manage"):
         raise HTTPException(status_code=400, detail="Parameter limits only apply to render or manage grants")
-    defined = {p["name"]: p for p in (report.parameters or [])}
+    # A report built on a dataset has its filters there (datasets.resolve_into), not on its own row.
+    from .. import report_store
+
+    defined = {p["name"]: p for p in (report_store.get_report(report.report_id).get("parameters") or [])}
     cleaned: dict[str, list[str]] = {}
     for name, values in limits.items():
         definition = defined.get(name)
@@ -483,8 +486,8 @@ def revoke_folder_grant(
 # GET /grants/reports and GET /grants/folders above both require a
 # scoping id -- there's no way to see "every grant across the org" in one
 # call. This is the first aggregate view, backing the admin Access Review
-# page. Gated on *either* report:manage or folder:manage (not a single
-# blanket permission) since a custom role can hold just one of the two --
+# page. Gated on *any* of report:manage, folder:manage or dataset:manage
+# (not a single blanket permission) since a custom role can hold just one --
 # requiring both would under-expose a caller who legitimately manages
 # only folders (or only reports); requiring only one would over-expose
 # the other category to someone who can't otherwise see it. Each grant
@@ -495,7 +498,7 @@ def revoke_folder_grant(
 
 @router.get(
     "/access-review",
-    summary="Every active report and folder access grant the caller may review, with names resolved server-side",
+    summary="Every active report, folder and dataset access grant the caller may review, with names resolved server-side",
     response_model=list[AccessReviewGrant],
 )
 def list_access_review_grants(
@@ -504,8 +507,9 @@ def list_access_review_grants(
 ) -> list[AccessReviewGrant]:
     can_see_reports = context.has_permission("report:manage")
     can_see_folders = context.has_permission("folder:manage")
-    if not (can_see_reports or can_see_folders):
-        raise HTTPException(status_code=403, detail="Missing required permission: report:manage or folder:manage")
+    can_see_datasets = context.has_permission("dataset:manage")
+    if not (can_see_reports or can_see_folders or can_see_datasets):
+        raise HTTPException(status_code=403, detail="Missing required permission: report:manage, folder:manage or dataset:manage")
 
     if org_id is not None:
         ensure_org_scope(context, org_id)
@@ -577,6 +581,33 @@ def list_access_review_grants(
                         granted_by_name=_granted_by_name(grant.granted_by),
                         expires_at=grant.expires_at,
                         parameter_limits=None,
+                    )
+                )
+
+        if can_see_datasets:
+            # A dataset's grants (app/datasets.py) limit every report built on it -- the same review applies.
+            query = select(db.DatasetAccessGrant, db.Dataset.title, db.Dataset.org_id).join(
+                db.Dataset, db.Dataset.id == db.DatasetAccessGrant.dataset_id
+            ).where(db.DatasetAccessGrant.is_active.is_(True))
+            if org_id is not None:
+                query = query.where(db.Dataset.org_id == org_id)
+            for grant, title, dataset_org_id in session.execute(query).all():
+                results.append(
+                    AccessReviewGrant(
+                        id=grant.id,
+                        grant_type="dataset",
+                        subject_type=grant.subject_type,
+                        subject_id=grant.subject_id,
+                        subject_name=_subject_name(grant.subject_type, grant.subject_id),
+                        resource_id=grant.dataset_id,
+                        resource_name=title,
+                        org_id=dataset_org_id,
+                        permission_level=grant.level,
+                        granted_at=grant.granted_at,
+                        granted_by=grant.granted_by,
+                        granted_by_name=_granted_by_name(grant.granted_by),
+                        expires_at=grant.expires_at,
+                        parameter_limits=grant.parameter_limits,
                     )
                 )
 

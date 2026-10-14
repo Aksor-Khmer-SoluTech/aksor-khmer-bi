@@ -23,6 +23,8 @@ import { downloadBlob } from "../download";
 import ReportSkeleton from "./ReportSkeleton";
 import { FORMATS_BY_EXT, type RenderErrorInfo, type RenderFormat, type RenderResult, type TemplateExt } from "../types";
 
+const PRINT_SHORTCUT = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘P" : "Ctrl+P";
+
 // Bundled, not CDN -- a version mismatch between a CDN worker and this
 // package's own API surface throws at parse time, and self-hosting via
 // Vite's `?url` import keeps the worker byte-for-byte pinned to whatever
@@ -116,6 +118,7 @@ export default function ReportViewer({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const printBtnRef = useRef<HTMLButtonElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const pdfBlobRef = useRef<Blob | null>(null);
   const renderTaskRef = useRef<RenderTask | null>(null);
@@ -379,6 +382,27 @@ export default function ReportViewer({
     }
   }
 
+  // Ctrl+P / ⌘P while a report is showing prints the report -- the toolbar's Print -- not the portal page around it.
+  // Until there's a PDF to print, the browser's own print goes ahead as usual.
+  const printRef = useRef(handlePrint);
+  printRef.current = handlePrint;
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "p" || !pdfBlobRef.current) return;
+      e.preventDefault();
+      const btn = printBtnRef.current;
+      if (btn) {
+        // A brief press on the button, so it's clear which print just ran.
+        btn.classList.remove("report-viewer-btn-pressed");
+        void btn.offsetWidth;
+        btn.classList.add("report-viewer-btn-pressed");
+      }
+      printRef.current();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   function handlePrint() {
     if (!pdfBlobRef.current) return;
     const url = URL.createObjectURL(pdfBlobRef.current);
@@ -540,9 +564,11 @@ export default function ReportViewer({
 
         <div className="report-viewer-divider" />
 
-        <button type="button" className="report-viewer-btn" onClick={handlePrint}
+        <button type="button" className="report-viewer-btn" onClick={handlePrint} ref={printBtnRef}
           disabled={!pdfBlobRef.current}
-          title={parts > 1 ? `Print file ${part} of ${parts}` : "Print"}
+          title={`${parts > 1 ? `Print file ${part} of ${parts}` : "Print"} (${PRINT_SHORTCUT})`}
+          aria-keyshortcuts="Control+P Meta+P"
+          onAnimationEnd={(e) => e.currentTarget.classList.remove("report-viewer-btn-pressed")}
         >
           <Printer size={17} />
         </button>

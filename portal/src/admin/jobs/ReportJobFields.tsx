@@ -4,10 +4,11 @@ import JsonEditor from "../../components/JsonEditor";
 import type { AccessibleReport, RenderFormat, RunForm, RunFormParameter } from "../../types";
 
 /** A "Render report" job's settings as a form instead of JSON: which report, in which format, its filters (the run
- * page's, so a scheduled run asks the report's own data source for exactly what a person would), where the file
- * goes, and -- tucked away -- extra data laid over what the source returns. Edits `config` in place:
+ * page's, so a scheduled run asks the report's own data source for exactly what a person would), and -- tucked
+ * away -- extra data laid over what the source returns. Where the file goes, and splitting it by a filter, is
+ * DeliveryFields' part of the same config. Edits `config` in place:
  *
- *   { report_id, format, parameters: {name: value}, destination_path, context? }
+ *   { report_id, format, parameters: {name: value}, context?, ...DeliveryFields' }
  *
  * A filter left empty is left out of `parameters`, so the server applies its default when the job runs -- a date
  * filter defaulting to now() is the day it fires. The server re-checks all of it on save, against the creator's own
@@ -90,9 +91,12 @@ export default function ReportJobFields({
   config,
   onChange,
   onContextValidity,
+  onForm,
 }: {
   config: ReportJobConfig;
   onChange: (next: ReportJobConfig) => void;
+  /** The chosen report's run form, for DeliveryFields (which filters it can be split by). */
+  onForm?: (form: RunForm | null) => void;
   /** Whether the extra-data JSON parses -- the dialog won't save until it does. */
   onContextValidity: (valid: boolean) => void;
 }) {
@@ -116,12 +120,17 @@ export default function ReportJobFields({
   const reportId = config.report_id ?? "";
   useEffect(() => {
     setForm(null);
+    onForm?.(null);
     setFormError(null);
     if (!reportId) return;
     let cancelled = false;
     api
       .getRunForm(reportId)
-      .then((f) => !cancelled && setForm(f))
+      .then((f) => {
+        if (cancelled) return;
+        setForm(f);
+        onForm?.(f);
+      })
       .catch((err) => !cancelled && setFormError(err instanceof ApiError ? err.message : "Couldn't load that report's filters"));
     return () => {
       cancelled = true;
@@ -133,7 +142,15 @@ export default function ReportJobFields({
   function chooseReport(id: string) {
     const report = reports?.find((r) => r.report_id === id);
     const format = report?.template_ext === "xlsx" ? "xlsx" : "pdf";
-    onChange({ ...config, report_id: id, format, parameters: {}, destination_path: report ? defaultPath(report, format) : config.destination_path });
+    // Another report has other filters: a split by the old one's filter no longer means anything.
+    const { burst: _drop, ...rest } = config;
+    onChange({
+      ...rest,
+      report_id: id,
+      format,
+      parameters: {},
+      ...(config.destination_path !== undefined || !config.email ? { destination_path: report ? defaultPath(report, format) : config.destination_path } : {}),
+    });
   }
 
   function chooseFormat(format: string) {
@@ -218,33 +235,22 @@ export default function ReportJobFields({
         <fieldset className="mb-3.5 rounded-sm border border-border-soft px-4 pt-3 pb-0.5">
           <legend className="px-1 text-[0.78rem] font-medium text-text-dim">Filters for each run</legend>
           <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
-            {form.parameters.map((p) => (
-              <FilterField key={p.name} parameter={p} value={config.parameters?.[p.name] ?? ""} onChange={(v) => setParameter(p.name, v)} />
-            ))}
+            {form.parameters.map((p) =>
+              (config.burst as { by?: string } | undefined)?.by === p.name ? (
+                <div key={p.name} className="run-field">
+                  <span className="field-label">{p.label ?? p.name}</span>
+                  <p className="m-0 rounded-sm bg-bg-panel px-3 py-2.5 text-[0.82rem] text-text-dim">Each value in turn — the job is split by it (below).</p>
+                </div>
+              ) : (
+                <FilterField key={p.name} parameter={p} value={config.parameters?.[p.name] ?? ""} onChange={(v) => setParameter(p.name, v)} />
+              )
+            )}
           </div>
         </fieldset>
       )}
       {form && form.parameters.length === 0 && form.has_data_source && (
         <p className="field-hint -mt-1 mb-3.5">This report has no filters: every run fetches the same query's latest data.</p>
       )}
-
-      <label>
-        <span>
-          Save to <span className="required-mark" aria-hidden="true">*</span>
-        </span>
-        <input
-          type="text"
-          className="mono"
-          required
-          value={config.destination_path ?? ""}
-          placeholder="/data/output/sales-{timestamp}.pdf"
-          onChange={(e) => onChange({ ...config, destination_path: e.target.value })}
-        />
-        <span className="field-hint">
-          A path on the server. <span className="mono">{"{timestamp}"}</span> and <span className="mono">{"{job_id}"}</span> are filled in on each
-          run, so runs don't overwrite each other.
-        </span>
-      </label>
 
       {form && (
         <details className="mb-3.5" open={!form.has_data_source || contextText !== ""}>

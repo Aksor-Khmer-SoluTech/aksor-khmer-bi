@@ -139,10 +139,26 @@ export interface EditableQuery {
   name: string;
   shape: DataSourceQuery["shape"];
   query: string;
+  /** Its own database connection, when the data is spread over several; "" = the source's (default) connection. */
+  connection: string;
+  /** SQL, or a call to a stored procedure or function its connection approved (SQL Server). */
+  mode: "sql" | "routine";
+  routine: string;
+  /** Each of the routine's parameters: a filter's value or a fixed one. */
+  args: Record<string, RoutineArg>;
+  /** A procedure's 2nd, 3rd... result sets, each under its own name. */
+  moreResults: { key: string; name: string; shape: DataSourceQuery["shape"] }[];
+}
+
+export interface RoutineArg {
+  from: "filter" | "value";
+  filter: string;
+  value: string;
 }
 
 /** A database source: which connection (Admin > Connections), and the SELECTs to run on it -- usually one; several
- * run at the same time and are merged into one object, each under its name. */
+ * run at the same time and are merged into one object, each under its name, each on the default connection or one
+ * of its own. */
 export interface EditableJdbc {
   connection: string;
   queries: EditableQuery[];
@@ -154,11 +170,18 @@ export interface EditableJdbc {
 export const MAX_QUERIES = 10;
 
 let queryKeys = 0;
+export const newMoreResult = (): EditableQuery["moreResults"][number] => ({ key: `m${++queryKeys}`, name: "", shape: "list" });
+
 export const newQuery = (patch: Partial<EditableQuery> = {}): EditableQuery => ({
   key: `q${++queryKeys}`,
   name: "",
   shape: "list",
   query: "",
+  connection: "",
+  mode: "sql",
+  routine: "",
+  args: {},
+  moreResults: [],
   ...patch,
 });
 
@@ -167,7 +190,23 @@ export const EMPTY_JDBC: EditableJdbc = { connection: "", queries: [newQuery()],
 
 function toEditableJdbc(s: DataSource): EditableJdbc {
   const queries = s.queries?.length
-    ? s.queries.map((q) => newQuery({ name: q.name, shape: q.shape, query: q.query }))
+    ? s.queries.map((q) =>
+        newQuery({
+          name: q.name,
+          shape: q.shape,
+          query: q.query ?? "",
+          connection: q.connection ?? "",
+          mode: q.routine ? "routine" : "sql",
+          routine: q.routine ?? "",
+          args: Object.fromEntries(
+            Object.entries(q.arguments ?? {}).map(([k, a]) => [
+              k,
+              a.filter ? { from: "filter" as const, filter: a.filter, value: "" } : { from: "value" as const, filter: "", value: a.value ?? "" },
+            ]),
+          ),
+          moreResults: (q.more_results ?? []).map((m) => ({ key: `m${++queryKeys}`, name: m.name, shape: m.shape })),
+        }),
+      )
     : [newQuery({ name: s.root_key ?? "", query: s.query ?? "" })];
   return { connection: s.connection ?? "", queries, typedBinding: s.typed_binding === true };
 }
@@ -180,9 +219,11 @@ export interface EditableSource {
   jdbc: EditableJdbc;
   /** Sample data, as the JSON text being edited. */
   staticText: string;
+  /** The dataset a report is built on (type "dataset"). */
+  dataset: string;
 }
 
-export const EMPTY_SOURCE: EditableSource = { type: "rest", request: EMPTY_REQUEST, jdbc: EMPTY_JDBC, staticText: "" };
+export const EMPTY_SOURCE: EditableSource = { type: "rest", request: EMPTY_REQUEST, jdbc: EMPTY_JDBC, staticText: "", dataset: "" };
 
 export function toEditableSource(s: DataSource): EditableSource {
   const type = s.type ?? "rest";
@@ -191,6 +232,7 @@ export function toEditableSource(s: DataSource): EditableSource {
     request: type === "rest" ? toEditableRequest(s, s.body_template) : EMPTY_REQUEST,
     jdbc: type === "jdbc" ? toEditableJdbc(s) : EMPTY_JDBC,
     staticText: type === "static" && s.static_data ? JSON.stringify(s.static_data, null, 2) : "",
+    dataset: type === "dataset" ? (s.dataset ?? "") : "",
   };
 }
 
@@ -214,22 +256,47 @@ export function toDataSource(e: EditableSource): DataSource {
   if (e.type === "jdbc") {
     const base = { type: "jdbc" as const, connection: e.jdbc.connection || null, ...NO_REQUEST, typed_binding: e.jdbc.typedBinding };
     const [first] = e.jdbc.queries;
-    // One list query is saved the way it always was, so a report that never uses several looks the same.
-    if (e.jdbc.queries.length === 1 && first.shape === "list") {
+    // One list query is saved the way it always was, so a report that never uses several looks the same. (A lone
+    // query has no connection of its own: the source's connection is the one it runs on.) A call to a procedure or
+    // function is always a card of `queries`.
+    if (e.jdbc.queries.length === 1 && first.shape === "list" && first.mode === "sql") {
       return { ...base, query: first.query.trim(), root_key: first.name.trim() || null };
     }
-    return { ...base, queries: e.jdbc.queries.map((q) => ({ name: q.name.trim(), shape: q.shape, query: q.query.trim() })) };
+    const several = e.jdbc.queries.length > 1;
+    return {
+      ...base,
+      queries: e.jdbc.queries.map((q) => {
+        const own = several && q.connection && q.connection !== e.jdbc.connection ? q.connection : null;
+        const where = own ? { connection: own } : {};
+        if (q.mode === "routine") {
+          const more = q.moreResults.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), shape: m.shape }));
+          return {
+            name: q.name.trim() || "rows",
+            shape: q.shape,
+            routine: q.routine,
+            arguments: Object.fromEntries(Object.entries(q.args).map(([k, a]) => [k, a.from === "filter" ? { filter: a.filter } : { value: a.value }])),
+            ...(more.length ? { more_results: more } : {}),
+            ...where,
+          };
+        }
+        return { name: q.name.trim(), shape: q.shape, query: q.query.trim(), ...where };
+      }),
+    };
   }
   if (e.type === "static") {
     return { type: "static", connection: null, ...NO_REQUEST, static_data: parseStaticData(e.staticText).value };
+  }
+  if (e.type === "dataset") {
+    return { type: "dataset", connection: null, ...NO_REQUEST, dataset: e.dataset || null };
   }
   return { type: "rest", ...toRequestShape(e.request), body_template: parseBody(e.request) };
 }
 
 /** Whether the chosen type holds anything worth warning about before it's thrown away. */
 export function sourceConfigured(e: EditableSource): boolean {
-  if (e.type === "jdbc") return Boolean(e.jdbc.connection || e.jdbc.queries.some((q) => q.query.trim()));
+  if (e.type === "jdbc") return Boolean(e.jdbc.connection || e.jdbc.queries.some((q) => q.query.trim() || q.routine));
   if (e.type === "static") return e.staticText.trim() !== "";
+  if (e.type === "dataset") return e.dataset !== "";
   const r = e.request;
   return Boolean(r.connection || r.url.trim() || r.headersText.trim() || r.bodyText.trim() || r.authType !== "none");
 }
@@ -413,6 +480,10 @@ export interface DataConfigDraft {
   /** Change the kind of source. What the previous kind held is cleared from the form -- the
    * tab asks first when there was something (see DataSourceTab). */
   setSourceType: (type: DataSourceType) => void;
+  /** The dataset a report is built on (source type "dataset"). */
+  setDataset: (name: string) => void;
+  /** Load the saved config again (after it was changed elsewhere -- made into a dataset, say). */
+  reload: () => void;
   /** Why the sample data can't be saved, if it can't. */
   staticError: string | null;
   /** A source is saved on the server for this report (as opposed to only being typed into the form). */
@@ -430,9 +501,18 @@ export interface DataConfigDraft {
   connectionsAvailable: boolean;
 }
 
+/** Where a draft's config is loaded from and saved to: a report's data config by default, or -- for a dataset's
+ * editor -- the dataset's own source and filters. */
+export interface DataConfigIO {
+  load: () => Promise<DataConfig>;
+  save: (config: DataConfig) => Promise<DataConfig>;
+}
+
 /** Load a report's data config once one of the two tabs is opened, and hold
- * the edits. `enabled` says a tab that needs it is showing. */
-export function useDataConfigDraft(reportId: string, enabled: boolean): DataConfigDraft {
+ * the edits. `enabled` says a tab that needs it is showing. `io` loads and saves
+ * somewhere else instead (a dataset); `reportId` is then just the cache key. */
+export function useDataConfigDraft(reportId: string, enabled: boolean, io?: DataConfigIO): DataConfigDraft {
+  const [reloads, setReloads] = useState(0);
   const [status, setStatus] = useState<Status>("idle");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [parameters, setParameters] = useState<EditableParameter[]>([]);
@@ -460,15 +540,14 @@ export function useDataConfigDraft(reportId: string, enabled: boolean): DataConf
   }
 
   useEffect(() => {
-    if (!enabled || loadedFor.current === reportId) return;
-    loadedFor.current = reportId;
+    if (!enabled || loadedFor.current === `${reportId}#${reloads}`) return;
+    loadedFor.current = `${reportId}#${reloads}`;
     const mine = ++request.current;
     setStatus("loading");
     setLoadError(null);
     setSaved(false);
     setSaveError(null);
-    api
-      .getDataConfig(reportId)
+    (io ? io.load() : api.getDataConfig(reportId))
       .then((config) => {
         if (mine !== request.current) return;
         apply(config);
@@ -481,7 +560,7 @@ export function useDataConfigDraft(reportId: string, enabled: boolean): DataConf
         setStatus("error");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- apply only sets state
-  }, [reportId, enabled]);
+  }, [reportId, enabled, reloads]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -521,10 +600,8 @@ export function useDataConfigDraft(reportId: string, enabled: boolean): DataConf
     setSaving(true);
     setSaveError(null);
     try {
-      const config = await api.putDataConfig(reportId, {
-        parameters: parameters.map(toParameter),
-        data_source: useSource ? toDataSource(source) : null,
-      });
+      const body = { parameters: parameters.map(toParameter), data_source: useSource ? toDataSource(source) : null };
+      const config = await (io ? io.save(body) : api.putDataConfig(reportId, body));
       apply(config);
       setSaved(true);
     } catch (err) {
@@ -533,7 +610,7 @@ export function useDataConfigDraft(reportId: string, enabled: boolean): DataConf
       setSaving(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- apply only sets state
-  }, [reportId, parameters, useSource, source]);
+  }, [reportId, parameters, useSource, source, io]);
 
   return {
     status,
@@ -584,6 +661,11 @@ export function useDataConfigDraft(reportId: string, enabled: boolean): DataConf
       // A fresh source of the new type: the old one's settings are gone from the form.
       setSource({ ...EMPTY_SOURCE, type });
     },
+    setDataset: (name) => {
+      touch();
+      setSource((prev) => ({ ...prev, dataset: name }));
+    },
+    reload: () => setReloads((n) => n + 1),
     staticError,
     savedSource: baseline.source !== "null",
     parametersDirty: status === "ready" && draftParameters !== baseline.parameters,

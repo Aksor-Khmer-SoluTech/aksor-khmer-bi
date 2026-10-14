@@ -61,6 +61,7 @@ def _resolve_config(parameters: list[dict], data_source: dict | None, org_id: st
         connection_names=connections.names_for_org(org_id),
         secret_names=secrets.active_names_for_org(org_id),
         connection_kinds=connections.kinds_for_org(org_id),
+        connection_routines=connections.routines_for_org(org_id),
     )
 
 

@@ -600,6 +600,16 @@ def get_version_file(report_id: str, version: int | None = None) -> tuple[Path, 
 
 
 def get_report(report_id: str) -> dict:
+    """The report as it runs: one built on a dataset gets the dataset's current source and filters here
+    (datasets.resolve_into), so everything that runs it -- the run page, embeds, jobs, filter grants -- sees an
+    ordinary source. The report's own saved setting is get_report_raw's."""
+    from . import datasets
+
+    return datasets.resolve_into(get_report_raw(report_id))
+
+
+def get_report_raw(report_id: str) -> dict:
+    """The report exactly as saved -- a dataset source still {"type": "dataset", "dataset": name}."""
     with db.SessionLocal() as session:
         row = session.get(ReportRow, report_id)
         if row is None:

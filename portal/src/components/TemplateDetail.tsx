@@ -709,7 +709,12 @@ function AccessTab({ report, onUpdated }: { report: ReportMeta; onUpdated: (r: R
   useEffect(() => {
     api
       .getDataConfig(report.report_id)
-      .then((config) => setLimitableParams(config.parameters.filter((p) => p.options !== null && p.options.length > 0)))
+      .then(async (config) =>
+        // Built on a dataset, the report has no filters of its own: they're the dataset's, which its run form
+        // resolves (this tab is for report managers, so every choice is offered there).
+        config.data_source?.type === "dataset" ? ((await api.getRunForm(report.report_id)).parameters as ReportParameter[]) : config.parameters,
+      )
+      .then((parameters) => setLimitableParams(parameters.filter((p) => p.options != null && p.options.length > 0)))
       .catch(() => setLimitableParams([]));
     setLimits({});
   }, [report.report_id]);
@@ -1201,6 +1206,8 @@ export default function TemplateDetail({
               canManageConnections={has(auth, "connection:manage")}
               canManageSecrets={has(auth, "secret:manage")}
               orgId={report.org_id ?? auth.orgId ?? "root"}
+              report={report}
+              canManageDatasets={has(auth, "dataset:manage")}
             />
           )}
           {tab === "terms" && has(auth, "report:manage") && (

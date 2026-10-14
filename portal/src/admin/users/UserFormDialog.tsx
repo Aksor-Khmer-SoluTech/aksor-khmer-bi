@@ -5,6 +5,7 @@ import { useDialogRef } from "../../hooks";
 import { generatePassword, PASSWORD_HINT, passwordProblem } from "../../passwords";
 import type { AuthSource, Organization, User } from "../../types";
 
+import FieldLabel, { DISPLAY_NAME_MAX, EMAIL_MAX, USERNAME_MAX } from "../../components/FieldLabel";
 import ModalClose from "../../components/ModalClose";
 export default function UserFormDialog({
   open,
@@ -63,9 +64,9 @@ export default function UserFormDialog({
     setPending(true);
     try {
       const user = await api.users.create(orgId, {
-        username,
-        email: email || null,
-        display_name: displayName || null,
+        username: username.trim(),
+        email: email.trim() || null,
+        display_name: displayName.trim() || null,
         auth_source: authSource,
         password: authSource === "local" ? password : null,
         must_change_password: authSource === "local" ? mustChange : false,
@@ -80,23 +81,40 @@ export default function UserFormDialog({
   }
 
   return (
-    <dialog ref={ref} className="modal" onCancel={onClose}>
+    <dialog ref={ref} className="modal modal-wide" onCancel={onClose}>
       <ModalClose />
       <h2 className="panel-title">New user</h2>
       <p className="panel-subtitle">Roles and permissions are granted after creation.</p>
       <form onSubmit={handleSubmit}>
         <label>
-          <span>Username</span>
-          <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} />
+          <FieldLabel required length={username.length} max={USERNAME_MAX}>
+            Username
+          </FieldLabel>
+          <input
+            type="text"
+            required
+            maxLength={USERNAME_MAX}
+            autoComplete="off"
+            spellCheck={false}
+            pattern="[^|]+"
+            title="No | -- it separates the name from the organization at sign-in"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="e.g. sokha or sokha@example.com"
+          />
         </label>
         <div className="row">
           <label>
-            <span>Email</span>
-            <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <FieldLabel length={email.length} max={EMAIL_MAX}>
+              Email
+            </FieldLabel>
+            <input type="email" maxLength={EMAIL_MAX} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
           </label>
           <label>
-            <span>Display name</span>
-            <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            <FieldLabel length={displayName.length} max={DISPLAY_NAME_MAX}>
+              Display name
+            </FieldLabel>
+            <input type="text" maxLength={DISPLAY_NAME_MAX} value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="How their name shows" />
           </label>
         </div>
         {organizations.length > 1 && (

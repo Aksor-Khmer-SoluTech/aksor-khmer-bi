@@ -156,7 +156,7 @@ export interface ReportParameter {
   options_source: OptionsSource | null;
 }
 
-export type DataSourceType = "static" | "rest" | "jdbc";
+export type DataSourceType = "static" | "rest" | "jdbc" | "dataset";
 
 /** Where the server gets a report's data when it's run, by `type`: fixed sample
  * data, a REST API, or a read-only SQL query against a database connection.
@@ -167,7 +167,15 @@ export type DataSourceType = "static" | "rest" | "jdbc";
 export interface DataSourceQuery {
   name: string;
   shape: "list" | "object" | "value";
-  query: string;
+  /** Its SQL -- absent on a card that calls a routine instead. */
+  query?: string | null;
+  /** A database of its own (data spread over services); absent = the source's connection. */
+  connection?: string | null;
+  /** Instead of `query`: an approved stored procedure or function, and each of its parameters' value. */
+  routine?: string | null;
+  arguments?: Record<string, { filter?: string | null; value?: string | null }> | null;
+  /** A procedure's second, third... result sets, each under its own name. */
+  more_results?: { name: string; shape: "list" | "object" | "value" }[] | null;
 }
 
 export interface DataSource {
@@ -189,6 +197,115 @@ export interface DataSource {
   typed_binding?: boolean;
   /** static: the JSON object the template is rendered with. */
   static_data?: Record<string, unknown> | null;
+  /** dataset: the dataset (Manage > Datasets) the report is built on -- its source, filters and measures. */
+  dataset?: string | null;
+}
+
+// --- Datasets (Manage > Datasets; api/app/datasets.py) -------------------------------------------------------------
+
+export type FieldType = "text" | "number" | "money" | "date" | "datetime" | "boolean";
+
+/** What one column of a dataset means and how it reads. `source` is the query result it's in (rows, info…). */
+export interface DatasetField {
+  source: string | null;
+  name: string;
+  type: FieldType;
+  label: string | null;
+  label_km: string | null;
+  format: string | null;
+  hidden: boolean;
+}
+
+export type MeasureKind = "sum" | "count" | "count_distinct" | "avg" | "min" | "max" | "ratio";
+
+/** A named calculation over a dataset's rows; templates read {{ measures.<key> }} (formatted) and
+ * {{ measure_values.<key> }} (the number). */
+export interface DatasetMeasure {
+  key: string;
+  label: string;
+  label_km: string | null;
+  kind: MeasureKind;
+  source: string | null;
+  field: string | null;
+  where: { field: string; value: string } | null;
+  numerator: string | null;
+  denominator: string | null;
+  format: string | null;
+}
+
+export interface DatasetSummary {
+  id: string;
+  org_id: string;
+  name: string;
+  title: string;
+  description: string | null;
+  source_type: string;
+  connection: string | null;
+  parameter_count: number;
+  field_count: number;
+  measure_count: number;
+  report_count: number;
+  access_mode: DatasetAccessMode;
+  grant_count: number;
+  updated_at: string;
+}
+
+export interface Dataset {
+  id: string;
+  org_id: string;
+  name: string;
+  title: string;
+  description: string | null;
+  parameters: ReportParameter[];
+  data_source: DataSource;
+  fields: DatasetField[];
+  measures: DatasetMeasure[];
+  reports: { report_id: string; name: string; code: string | null }[];
+  access_mode: DatasetAccessMode;
+  created_at: string;
+  updated_at: string;
+}
+
+/** "open": the reports built on it decide who runs them. "restricted": only its grants, within their filter limits
+ * (on top of the report's own grants). */
+export type DatasetAccessMode = "open" | "restricted";
+
+export interface DatasetGrant {
+  id: string;
+  subject_type: "user" | "role";
+  subject_id: string;
+  subject_name: string;
+  /** "build" may also choose it as a report's data source. */
+  level: "run" | "build";
+  parameter_limits: Record<string, string[]> | null;
+  granted_at: string;
+  granted_by: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+}
+
+export interface DatasetAccess {
+  mode: DatasetAccessMode;
+  grants: DatasetGrant[];
+}
+
+export interface DatasetWrite {
+  title: string;
+  description: string | null;
+  parameters: ReportParameter[];
+  data_source: DataSource;
+  fields: DatasetField[];
+  measures: DatasetMeasure[];
+}
+
+export interface DatasetPreview {
+  data: Record<string, unknown>;
+  fields: DatasetField[];
+  measures: Record<string, { text: string; value: number | null }>;
+  parameters: ReportParameter[];
+  missing: string[];
+  elapsed_ms: number;
+  truncated: boolean;
 }
 
 export interface DataConfig {
@@ -226,6 +343,37 @@ export interface JdbcConnectionConfig {
   /** A complete JDBC URL used instead of one built from the fields; uploaded drivers only. */
   jdbc_url: string | null;
   auth: DataSourceAuth;
+  /** SQL Server: the stored procedures and functions reports may call. Set through api.connections.setRoutines. */
+  routines?: ApprovedRoutine[] | null;
+}
+
+export type RoutineKind = "procedure" | "table_function" | "scalar_function";
+
+/** A stored procedure or function a connection manager allows reports to call (api/app/routines.py). */
+export interface ApprovedRoutine {
+  /** schema.name, e.g. dbo.GetSalesByBranch */
+  name: string;
+  kind: RoutineKind;
+  parameters: { name: string; type: string | null }[];
+}
+
+export interface DiscoveredRoutines {
+  routines: ApprovedRoutine[];
+  /** The connection's login could change data -- it should only read and execute. */
+  can_write: boolean;
+  /** Left out: they have OUTPUT parameters. */
+  skipped_output: string[];
+}
+
+/** A mail server report jobs email through (kind "smtp"; api/app/mailer.py). The password is a Secret's name. */
+export interface SmtpConnectionConfig {
+  host: string;
+  port: number;
+  security: "starttls" | "tls" | "none";
+  from_address: string;
+  from_name: string | null;
+  /** None for an internal relay that needs no sign-in. */
+  auth: DataSourceAuth | null;
 }
 
 export interface JdbcEngine {
@@ -278,6 +426,8 @@ export interface ConnectionSummary {
   /** The Secret's name, when `credential` is "secret". */
   secret_name: string | null;
   header_names: string[];
+  /** SQL Server: what a report's query card may call. */
+  routines: ApprovedRoutine[];
   report_count: number;
   updated_at: string;
 }
@@ -294,7 +444,7 @@ export interface Connection {
   name: string;
   kind: string;
   description: string | null;
-  config: ConnectionConfig | JdbcConnectionConfig;
+  config: ConnectionConfig | JdbcConnectionConfig | SmtpConnectionConfig;
   reports: ConnectionReportRef[];
   created_at: string;
   updated_at: string;
@@ -615,7 +765,7 @@ export interface Grant {
   parameter_limits?: Record<string, string[]> | null;
 }
 
-export type AccessGrantType = "report" | "folder";
+export type AccessGrantType = "report" | "folder" | "dataset";
 
 /** One row of GET /grants/access-review -- the aggregate view behind the
  * admin Access Review page. Names are already resolved server-side. */
@@ -628,7 +778,8 @@ export interface AccessReviewGrant {
   resource_id: string;
   resource_name: string;
   org_id: string;
-  permission_level: "view" | "render" | "manage";
+  /** "run" / "build" for a dataset grant. */
+  permission_level: "view" | "render" | "manage" | "run" | "build";
   granted_at: string;
   granted_by: string | null;
   granted_by_name: string | null;
@@ -716,7 +867,7 @@ export interface LdapTestResult {
 
 // --- Job scheduling (see api/app/routers/jobs.py, api/app/job_executors.py) --
 
-export type JobType = "render_report" | "rest_call" | "soap_call" | "file_output";
+export type JobType = "render_report" | "rest_call" | "soap_call" | "file_output" | "data_alert";
 export type TriggerType = "cron" | "interval" | "one_off";
 export type JobRunStatus = "queued" | "running" | "success" | "failed" | "retrying";
 
@@ -747,6 +898,28 @@ export interface SchedulePreview {
   timezone: string;
   /** ISO 8601 instants with that zone's offset, earliest first. */
   next_runs: string[];
+}
+
+/** One file a job run produced and where it went (GET /jobs/{id}/runs/{run_id}/deliveries). A run split by a
+ * filter has one per value. */
+export interface JobDelivery {
+  id: string;
+  run_id: string;
+  burst_value: string | null;
+  burst_label: string | null;
+  status: "sent" | "saved" | "failed" | "skipped";
+  /** Why it failed or was skipped; on a sent one, addresses the mail server refused. */
+  reason: string | null;
+  file_name: string | null;
+  size_bytes: number | null;
+  saved_to: string | null;
+  email_to: string[];
+  email_cc: string[];
+  subject: string | null;
+  sent_at: string | null;
+  attempts: number;
+  /** A failed email whose file is still kept. */
+  can_resend: boolean;
 }
 
 export interface JobRun {
@@ -1026,4 +1199,117 @@ export interface TemplateCheck {
   unknown: { placeholder: string; suggestion: string | null }[];
   unused: string[];
   fields: DataField[];
+}
+
+// --- Analyze (api/app/analyze.py) ---------------------------------------------------------------------------------
+
+export interface AnalyzeDataset {
+  name: string;
+  title: string;
+  description: string | null;
+  access_mode: DatasetAccessMode;
+  field_count: number;
+  measure_count: number;
+}
+
+/** A dataset set up for Analyze: its filters narrowed to the caller's values, its visible fields, its measures. */
+export interface AnalyzeForm {
+  dataset: string;
+  title: string;
+  description: string | null;
+  access_mode: DatasetAccessMode;
+  parameters: RunFormParameter[];
+  sources: string[];
+  fields: DatasetField[];
+  measures: { key: string; label: string; label_km: string | null; source: string | null; format: string | null }[];
+}
+
+export type DateBucket = "day" | "month" | "year";
+
+export interface PivotLayout {
+  source?: string | null;
+  rows: string[];
+  columns: string[];
+  /** Measure keys, or "__rows" for the row count. */
+  values: string[];
+  buckets: Record<string, DateBucket>;
+}
+
+export interface PivotValue {
+  v: number | null;
+  t: string;
+}
+
+export interface PivotResult {
+  source: string;
+  row_keys: (string | number | null)[][];
+  column_keys: (string | number | null)[][];
+  /** [row][column] -> one entry per value, or null when no row falls there. */
+  cells: (PivotValue[] | null)[][];
+  row_totals: PivotValue[][];
+  column_totals: PivotValue[][];
+  total: PivotValue[];
+  row_count: number;
+  layout: PivotLayout;
+  labels: {
+    rows: { name: string; label: string; label_km: string | null; type: string }[];
+    columns: { name: string; label: string; label_km: string | null; type: string }[];
+    values: { key: string; label: string; label_km: string | null }[];
+  };
+  values_used: Record<string, string>;
+  elapsed_ms: number;
+}
+
+export type AnalysisChart = "table" | "bar" | "line";
+
+export interface AnalysisView {
+  id: string;
+  org_id: string;
+  title: string;
+  dataset: string;
+  config: { values: Record<string, string>; layout: PivotLayout; view: AnalysisChart };
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Dashboards (api/app/dashboards.py) ----------------------------------------------------------------------------
+
+export type TileView = "table" | "bar" | "line" | "kpi";
+
+export interface DashboardTile {
+  id: string;
+  title: string;
+  dataset: string;
+  values: Record<string, string>;
+  layout: PivotLayout;
+  view: TileView;
+  /** Columns of a 3-column grid. */
+  width: 1 | 2 | 3;
+}
+
+export interface DashboardSummary {
+  id: string;
+  title: string;
+  description: string | null;
+  tile_count: number;
+  owner: string;
+  mine: boolean;
+  shared: boolean;
+  updated_at: string;
+}
+
+export interface Dashboard {
+  id: string;
+  org_id: string;
+  title: string;
+  description: string | null;
+  tiles: DashboardTile[];
+  filters: Record<string, string>;
+  shared_role_ids: string[];
+  owner: string;
+  can_edit: boolean;
+  /** The tiles' filters merged by name, narrowed to your values, with the tiles each applies to. */
+  filter_bar: (RunFormParameter & { tiles: string[] })[];
+  created_at: string;
+  updated_at: string;
 }

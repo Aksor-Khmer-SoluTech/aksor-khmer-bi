@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* Just the chart, for a Word export's picture (rasterized from PDF at 150 dpi): the bars as an SVG picture, the
+     names under them as HTML text -- WeasyPrint shapes Khmer in HTML, not inside an SVG. */
+  @page { size: 180mm 82mm; margin: 2mm 2mm 0; }
+  body { margin: 0; font: 9pt "Khmer OS Siemreap", "DejaVu Sans", sans-serif; color: #56607a; }
+  img { width: 100%; height: auto; display: block; }
+  .cats { display: flex; margin-top: 2px; }
+  .cats span { flex: 1; text-align: center; padding: 0 2px; }
+  .legend { margin-top: 4px; }
+  .legend span { margin-right: 14px; }
+  .legend i { display: inline-block; width: 8pt; height: 8pt; border-radius: 2pt; margin-right: 4px; vertical-align: -1pt; }
+</style>
+</head>
+<body>
+  <img src="{{ graph.uri }}" alt="">
+  <div class="cats" style="padding-left: {{ graph.pad_left }}%; padding-right: {{ graph.pad_right }}%">{% for c in graph.categories %}<span>{{ c }}</span>{% endfor %}</div>
+  <div class="legend">{% for s in graph.series %}<span><i style="background: {{ s.color }}"></i>{{ s.name }}</span>{% endfor %}</div>
+</body>
+</html>

@@ -448,6 +448,8 @@ def validate_config(config: dict, secret_names: set[str] | None, drivers: dict[s
         secret_names,
     )
 
+    from . import routines  # late, like report_data above
+
     return {
         "engine": engine_id,
         "host": host,
@@ -458,6 +460,8 @@ def validate_config(config: dict, secret_names: set[str] | None, drivers: dict[s
         "driver_id": driver_id,
         "jdbc_url": jdbc_url,
         "auth": auth,
+        # SQL Server: the stored procedures and functions reports may call (app/routines.py).
+        "routines": routines.validate_routines(config.get("routines"), engine_id),
     }
 
 
@@ -828,8 +832,9 @@ def worker_settings() -> tuple[str, str]:
     return url, token
 
 
-def _worker_post(conn: dict, statements: list[tuple[str, list]]) -> httpx.Response:
-    """Send one request to the jdbc-worker: one statement as `sql`/`args`, several as `queries`."""
+def _worker_post(conn: dict, statements: list[tuple[str, list]] | list[tuple[str, list, dict]], *, batch: bool = False) -> httpx.Response:
+    """Send one request to the jdbc-worker: one plain statement as `sql`/`args`, several -- or any stored-procedure
+    call -- as `queries`. A statement's third item, when there is one, is {"call": True, "result_sets": n}."""
     url, token = worker_settings()
     if not url or not token:
         _log.error("A JDBC driver upload was used but JDBC_WORKER_URL / JDBC_WORKER_TOKEN aren't set")
@@ -848,10 +853,18 @@ def _worker_post(conn: dict, statements: list[tuple[str, list]]) -> httpx.Respon
         "timeout_seconds": TIMEOUT_SECONDS,
         "max_rows": MAX_ROWS,
     }
-    if len(statements) == 1:
+    def entry(statement: tuple) -> dict:
+        sql, args, *rest = statement
+        options = rest[0] if rest else {}
+        out: dict[str, Any] = {"sql": sql, "args": args}
+        if options.get("call"):
+            out.update(call=True, result_sets=options.get("result_sets", 1))
+        return out
+
+    if len(statements) == 1 and not batch:
         payload.update(sql=statements[0][0], args=statements[0][1])
     else:
-        payload["queries"] = [{"sql": sql, "args": args} for sql, args in statements]
+        payload["queries"] = [entry(statement) for statement in statements]
     try:
         return httpx.post(
             f"{url}/query", json=payload, headers={"X-Worker-Token": token}, timeout=TIMEOUT_SECONDS * len(statements) + 20
@@ -892,14 +905,30 @@ def _run_via_worker(conn: dict, sql: str, params: dict[str, str], root_key: str)
     return _rows_to_data(body["columns"], body["rows"], root_key)
 
 
-def run_batch_via_worker(conn: dict, queries: list[tuple[str, str]], params: dict[str, str]) -> dict[str, list[dict]]:
+WORKER_PROTOCOL = 2  # 2: stored-procedure calls, several result sets per statement
+
+
+def run_batch_via_worker(conn: dict, queries: list[tuple], params: dict[str, str]) -> dict[str, list[dict]]:
     """Several queries of one report on an uploaded driver: one worker request -- one JVM, one connection, run in
     order -- instead of a JVM each. Returns {name: rows}. A failing query is named in the error. A worker from
-    before batches existed answers 422; then each query is sent on its own, as before."""
+    before batches existed answers 422; then each query is sent on its own, as before.
+
+    A query may be (name, sql, {"call": True, "names": [name, more, ...], "params": {...}}): a stored procedure
+    (app/routines.py), called through JDBC's CALL, its result sets under those names in order; "params" are the
+    values it binds (the filters plus its fixed values)."""
     conn = {**conn, "jdbc_url": resolved_url(conn)}
     assert_resolves_safely(conn["host"])
-    statements = [compile_query(sql, "qmark", params) for _, sql in queries]
-    response = _worker_post(conn, statements)
+    statements: list[tuple] = []
+    for query in queries:
+        name, sql, *rest = query
+        options = rest[0] if rest else {}
+        compiled, args = compile_query(sql, "qmark", options.get("params", params))
+        statements.append((compiled, args, {"call": True, "result_sets": len(options.get("names") or [name])}) if options.get("call") else (compiled, args))
+    calls = any(len(s) > 2 for s in statements)
+    # Always as a batch (`queries`), even of one: its answer is the same shape whatever was sent.
+    response = _worker_post(conn, statements, batch=True)
+    if response.status_code == 422 and calls:
+        raise DataSourceError("The JDBC driver service is too old to call stored procedures -- ask whoever runs the server to update it")
     if response.status_code == 422:
         _log.warning("The JDBC worker doesn't take several queries per request (an older image?); sending them one by one")
         return {name: _run_via_worker(conn, sql, params, name)[name] for name, sql in queries}
@@ -910,8 +939,23 @@ def run_batch_via_worker(conn: dict, queries: list[tuple[str, str]], params: dic
         raise error
     if len(response.content) > MAX_RESULT_BYTES:
         raise DataSourceError("The report's query results are too large")
-    results = response.json()["results"]
-    return {name: _rows_to_data(r["columns"], r["rows"], name)[name] for (name, _), r in zip(queries, results)}
+    body = response.json()
+    if calls and body.get("protocol", 1) < WORKER_PROTOCOL:
+        raise DataSourceError("The JDBC driver service is too old to call stored procedures -- ask whoever runs the server to update it")
+    out: dict[str, list[dict]] = {}
+    for query, result in zip(queries, body["results"]):
+        name, _sql, *rest = query
+        options = rest[0] if rest else {}
+        names = options.get("names") or [name]
+        sets = [result] + list(result.get("more") or [])
+        if options.get("call") and len(sets) < len(names):
+            raise DataSourceError(
+                f"The query {name!r}: the procedure returned {len(sets)} result set{'s' if len(sets) != 1 else ''}, "
+                f"but {len(names)} are named -- remove the extra names, or check the procedure"
+            )
+        for each, rows in zip(names, sets):
+            out[each] = _rows_to_data(rows["columns"], rows["rows"], each)[each]
+    return out
 
 
 def resolved_url(conn: dict) -> str:

@@ -17,7 +17,8 @@ export type AdminSection =
   | "api"
   | "monitor"
   | "plugins"
-  | "resources";
+  | "resources"
+  | "datasets";
 const ADMIN_SECTIONS: AdminSection[] = [
   "dashboard",
   "users",
@@ -36,6 +37,7 @@ const ADMIN_SECTIONS: AdminSection[] = [
   "monitor",
   "plugins",
   "resources",
+  "datasets",
 ];
 
 export type Route =
@@ -52,6 +54,10 @@ export type Route =
   // StarredPage).
   | { view: "runs" }
   | { view: "starred" }
+  // #/analyze[/<saved view id>] -- pivot a dataset (AnalyzePage.tsx).
+  | { view: "analyze"; id?: string }
+  // #/dashboards[/<id>] -- the dashboards you own or that are shared with you (DashboardsPage.tsx).
+  | { view: "dashboards"; id?: string }
   // #/reports/<id>/run -- the end-user run page (RunReportPage.tsx).
   | { view: "run"; id: string }
   // `tab` is the tab's URL slug (#/reports/<id>/history); absent means the
@@ -83,6 +89,10 @@ function parseHash(hash: string): Route {
   if (path === "home") return { view: "home" };
   if (path === "runs") return { view: "runs" };
   if (path === "starred") return { view: "starred" };
+  const analyzeMatch = /^analyze(?:\/([^/]+))?\/?$/.exec(path);
+  if (analyzeMatch) return { view: "analyze", id: analyzeMatch[1] && decodeURIComponent(analyzeMatch[1]) };
+  const dashboardsMatch = /^dashboards(?:\/([^/]+))?\/?$/.exec(path);
+  if (dashboardsMatch) return { view: "dashboards", id: dashboardsMatch[1] && decodeURIComponent(dashboardsMatch[1]) };
   if (path === "templates") return { view: "gallery" };
   const newReportMatch = /^templates\/new(?:\/([^/]+))?\/?$/.exec(path);
   if (newReportMatch) return { view: "new-report", id: newReportMatch[1] && decodeURIComponent(newReportMatch[1]) };
@@ -143,6 +153,10 @@ export function useHashRoute(): [Route, (route: Route, options?: { replace?: boo
                     ? "#/runs"
                   : next.view === "starred"
                     ? "#/starred"
+                  : next.view === "analyze"
+                    ? `#/analyze${next.id ? `/${encodeURIComponent(next.id)}` : ""}`
+                  : next.view === "dashboards"
+                    ? `#/dashboards${next.id ? `/${encodeURIComponent(next.id)}` : ""}`
                   : next.view === "gallery"
                     ? "#/templates"
                   : next.view === "new-report"

@@ -47,7 +47,7 @@ from sqlalchemy import delete as sa_delete
 from doc_engine import ConversionError
 from doc_engine import render as doc_render
 
-from .. import audit, batch_limits, font_catalog, clients, connections, db, rbac, render_errors, report_data, report_ref, report_split, report_store, secrets, template_fields
+from .. import audit, datasets, batch_limits, font_catalog, clients, connections, db, rbac, render_errors, report_data, report_ref, report_split, report_store, secrets, template_fields
 from ..auth import ensure_org_scope, get_current_user, optional_auth_context, require_permission, require_report_permission
 from ..auth_events import client_ip
 from ..context_media import ImageResolutionError, resolve_image_refs
@@ -1068,7 +1068,7 @@ def get_data_config(report_id: str) -> dict:
     meant to narrow, and possibly header values for the data source -- so
     it's not part of ReportMeta, which the public GET routes return."""
     try:
-        meta = report_store.get_report(report_id)
+        meta = report_store.get_report_raw(report_id)  # as saved: a dataset stays a reference to it
     except report_store.ReportNotFoundError:
         raise HTTPException(status_code=404, detail="Report not found")
     return {"parameters": meta.get("parameters") or [], "data_source": meta.get("data_source")}
@@ -1083,19 +1083,30 @@ def put_data_config(
     report_id: str, body: DataConfig, request: Request, context: AuthContext = Depends(require_report_permission("manage"))
 ) -> dict:
     try:
-        before = report_store.get_report(report_id)
+        before = report_store.get_report_raw(report_id)
     except report_store.ReportNotFoundError:
         raise HTTPException(status_code=404, detail="Report not found")
     try:
         parameters, data_source = report_data.validate_data_config(
             [p.model_dump() for p in body.parameters],
-            body.data_source.model_dump() if body.data_source else None,
+            body.data_source.model_dump(exclude_none=True) if body.data_source and body.data_source.type == "dataset"
+            else body.data_source.model_dump() if body.data_source else None,
             connection_names=connections.names_for_org(before["org_id"]),
             secret_names=secrets.active_names_for_org(before["org_id"]),
             connection_kinds=connections.kinds_for_org(before["org_id"]),
+            connection_routines=connections.routines_for_org(before["org_id"]),
+            dataset_names=datasets.names_for_org(before["org_id"]),
         )
     except report_data.DataConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    chosen = data_source.get("dataset") if data_source and data_source.get("type") == "dataset" else None
+    previous = (before.get("data_source") or {}).get("dataset") if (before.get("data_source") or {}).get("type") == "dataset" else None
+    if chosen and chosen != previous:
+        # A restricted dataset is built on only by the people its owner allowed to (a "build" grant).
+        with db.SessionLocal() as session:
+            row = datasets.row_by_name(session, before["org_id"], chosen)
+            if row is not None and not datasets.can_build(session, context, row):
+                raise HTTPException(status_code=403, detail=f"Building a report on the dataset {row.title!r} needs its owner's permission (Build & run)")
     updated = report_store.update_data_config(report_id, parameters, data_source)
 
     changes = []
@@ -1251,6 +1262,17 @@ def _authorize_run(report_id: str, context: AuthContext):
         if level == "view":
             raise HTTPException(status_code=403, detail="You can view this report but not run it")
         limits = effective_parameter_limits(session, context, report_id, [d["name"] for d in definitions])
+        if meta.get("dataset"):
+            # A restricted dataset's own access applies too: both it and the report's grants have to allow a value.
+            try:
+                dataset_limits = datasets.effective_limits(session, context, meta["org_id"], meta["dataset"], [d["name"] for d in definitions])
+            except datasets.DatasetAccessDenied as exc:
+                record_access_denied(
+                    username=context.username, org_id=context.org_id, user_id=context.user.id if context.user else None,
+                    permission_code="report:run", resource=report_id, ip_address=None, reason=str(exc),
+                )
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+            limits = datasets.intersect_limits(limits, dataset_limits)
 
     # Outside the DB session -- a live outbound HTTP call has no business
     # holding a connection open. Turns any options_source parameter into

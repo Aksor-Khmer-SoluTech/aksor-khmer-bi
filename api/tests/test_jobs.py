@@ -306,7 +306,7 @@ def test_saving_a_report_job_checks_the_report_format_and_filters(auth_headers):
     assert _report_job(auth_headers, {**base, "parameters": {"p_branch": "BR09"}}, expect=400)["detail"] == "That isn't a valid choice for Branch"
     assert _report_job(auth_headers, {**base, "parameters": {"p_nope": "1"}}, expect=400)["detail"] == "Unknown parameter(s): p_nope"
     assert _report_job(auth_headers, {**base, "parameters": {}}, expect=400)["detail"] == "Choose a value for Branch"
-    assert "destination_path" in _report_job(auth_headers, {**base, "destination_path": ""}, expect=400)["detail"]
+    assert "save it to a folder, email it, or both" in _report_job(auth_headers, {**base, "destination_path": ""}, expect=400)["detail"]
     job = _report_job(auth_headers, base)
 
     # The same checks on an edit of the config -- but not on an edit that leaves it alone.

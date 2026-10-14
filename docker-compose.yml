@@ -128,6 +128,9 @@ services:
       - ./data/image_resources:/app/data/image_resources:z
       - ./data/stylesheet_resources:/app/data/stylesheet_resources:z
       - ./data/avatars:/app/data/avatars:z
+      # Files report jobs produced, kept JOB_OUTPUT_DAYS (30) days so a failed email can be re-sent with the same
+      # report (app/job_delivery.py); `worker` writes them, `api` checks they're still there. Not backed up.
+      - ./data/job_outputs:/app/data/job_outputs:z
       # Dated, size-rotated log files (app/logging_config.py) — same host
       # dir as `scheduler` below; each service's own filename prefix
       # ("api-", "scheduler-") keeps the two from colliding.
@@ -239,6 +242,8 @@ services:
       - ./data/font_resources:/app/data/font_resources:ro,z
       # Jobs that call a data source decrypt Secrets (app/secret_store.py) with the same key `api` uses.
       - ./data/secrets:/app/data/secrets:ro,z
+      # The files report jobs produce, kept for re-sending a failed email (app/job_delivery.py).
+      - ./data/job_outputs:/app/data/job_outputs:z
 
   # Independently deployable/scalable from api — pure static files, no
   # LibreOffice/Python weight (see portal/Dockerfile). Its browser-side

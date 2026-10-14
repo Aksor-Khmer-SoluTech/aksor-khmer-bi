@@ -22,6 +22,56 @@ def _plain(value):
     return str(value)
 
 
+class _TooMany(Exception):
+    pass
+
+
+class _NoResult(Exception):
+    pass
+
+
+def _read(cursor, max_rows: int) -> dict:
+    columns = [d[0] for d in (cursor.description or [])]
+    if not columns:
+        raise _NoResult("the statement returned no columns")
+    rows = cursor.fetchmany(max_rows + 1)
+    if len(rows) > max_rows:
+        raise _TooMany()
+    return {"columns": columns, "rows": [[_plain(v) for v in row] for row in rows]}
+
+
+def _select(cursor, statement: dict, max_rows: int) -> list[dict]:
+    cursor.execute(statement["sql"], statement["args"])
+    return [_read(cursor, max_rows)]
+
+
+def _call(connection, cursor, statement: dict, max_rows: int) -> list[dict]:
+    """A stored procedure, through JDBC's CALL: its result sets in order, up to the number asked for. The row counts
+    SQL Server sends before them (no SET NOCOUNT ON) are skipped. Values are read by the cursor's own converters, so
+    a date or a decimal comes back exactly as it does from a SELECT."""
+    cursor._close_last()
+    prepared = connection.jconn.prepareCall(statement["sql"])
+    cursor._prep = prepared
+    cursor._set_stmt_parms(prepared, statement["args"])
+    is_result = prepared.execute()
+    wanted = max(1, int(statement.get("result_sets") or 1))
+    sets: list[dict] = []
+    while True:
+        if is_result:
+            cursor._rs = prepared.getResultSet()
+            cursor._meta = cursor._rs.getMetaData()
+            cursor._description = None
+            sets.append(_read(cursor, max_rows))
+            if len(sets) >= wanted:
+                break
+        elif prepared.getUpdateCount() == -1:
+            break  # no more results of any kind
+        is_result = prepared.getMoreResults()
+    if not sets:
+        raise _NoResult("the procedure returned no result set")
+    return sets
+
+
 def main() -> None:
     job = json.load(sys.stdin)
     try:
@@ -40,21 +90,20 @@ def main() -> None:
         for index, statement in enumerate(job["queries"]):
             try:
                 cursor = connection.cursor()
-                cursor.execute(statement["sql"], statement["args"])
-                columns = [d[0] for d in (cursor.description or [])]
-                if not columns:
-                    print(json.dumps({"error": "query", "detail": "the statement returned no columns", "index": index}))
-                    return
-                rows = cursor.fetchmany(job["max_rows"] + 1)
+                sets = _call(connection, cursor, statement, job["max_rows"]) if statement.get("call") else _select(cursor, statement, job["max_rows"])
                 cursor.close()
+            except _TooMany:
+                print(json.dumps({"error": "too_many_rows", "detail": f"more than {job['max_rows']} rows", "index": index}))
+                return
+            except _NoResult as exc:
+                print(json.dumps({"error": "query", "detail": str(exc), "index": index}))
+                return
             except Exception as exc:
                 print(json.dumps({"error": "query", "detail": f"{type(exc).__name__}: {exc}", "index": index}))
                 return
-            if len(rows) > job["max_rows"]:
-                print(json.dumps({"error": "too_many_rows", "detail": f"more than {job['max_rows']} rows", "index": index}))
-                return
-            results.append({"columns": columns, "rows": [[_plain(v) for v in row] for row in rows]})
-        print(json.dumps({"results": results}))
+            first, *more = sets
+            results.append({**first, **({"more": more} if more else {})})
+        print(json.dumps({"results": results, "protocol": 2}))
     except Exception as exc:
         print(json.dumps({"error": "query", "detail": f"{type(exc).__name__}: {exc}"}))
     finally:

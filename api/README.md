@@ -255,6 +255,38 @@ tables and `app/rbac.py` for the authorization logic.
   headers and auth at run time), so an API that moves is one edit. The
   name is fixed once created; a connection a report still uses can't be
   deleted (`409`). Created, changed and deleted connections are audited.
+  A SQL Server connection also holds the stored procedures and functions
+  reports may call: `PUT /{id}/routines` approves them, `POST
+  /{id}/routines/discover` lists what its login may run (`app/routines.py`).
+  A query card names one (`routine`, `arguments`, `more_results`) instead of
+  SQL; the call is built from the approved name with every value bound, and
+  approval is checked on every run.
+- **Datasets** — `/api/v1/datasets` (`dataset:manage`; list also for
+  `report:manage`): a source + filters + fields + measures that reports
+  build on (`data_source: {"type": "dataset", "dataset": "<name>"}`).
+  `app/datasets.py` resolves it into the report at run time and adds
+  `measures` / `measure_values` to the data. `POST /preview` and
+  `/preview-options` try an unsaved one; `POST /from-report` moves a
+  report's own source into a new dataset. Deleting one a report uses is
+  refused (`409`); every change is audited. Row-level access:
+  `GET /{id}/access`, `PUT /{id}/access/mode` (`open` | `restricted`),
+  `POST /{id}/access` (a user or role, `run` | `build`, optional
+  `parameter_limits` and `expires_at`), `DELETE /{id}/access/{grant_id}`.
+  A restricted dataset's limits are intersected with the report's own
+  in `_authorize_run` (run form, run, job save); `build` is needed to
+  choose it as a report's source.
+- **Analyze** — `/api/v1/analyze` (`analyze:use`): `GET /datasets`
+  (what the caller may analyze), `GET /datasets/{name}` (its filters
+  narrowed to the caller's values, fields, measures), `POST /pivot`,
+  `POST /export` (`pdf` | `docx` | `xlsx`, audited) and the caller's own
+  saved views under `/views`. `app/analyze.py` checks access like a report
+  run, caches fetched rows five minutes, and works measures out per cell.
+- **Dashboards** — `/api/v1/dashboards`: the caller's own and those
+  shared with their roles (`GET`), making one (`POST`, `analyze:use`), its
+  owner's `PUT` (tiles, shared filters), `PUT /{id}/sharing` (roles) and
+  `DELETE`, and `POST /{id}/tiles/{tile}/run` -- a tile's pivot with the
+  viewer's own access (`app/dashboards.py`). **Data alerts** are jobs,
+  `job_type: "data_alert"` (`app/data_alerts.py`).
 - **Secrets** — `/api/v1/secrets` (`secret:manage` to create/rotate/
   revoke/delete; list also for `connection:manage`/`report:manage`,
   never a value): named credentials (`app/secrets.py`) a connection's
@@ -455,6 +487,14 @@ doesn't depend on the same process that decides *when* things fire:
   transient failures (`RetryableJobError`: network errors, 5xx); a bad
   config, a 4xx, or a permission error (`PermanentJobError`) fails
   immediately with no retry.
+
+A `render_report` job can also **email** its file through a Mail Server
+connection (`kind: "smtp"`, `POST /api/v1/connections`, tried with
+`POST /connections/test-mail`) and **split** it into one file per value of
+a filter with choices (`burst`) — see `app/job_delivery.py` for the config.
+What each run produced is `GET /jobs/{id}/runs/{run_id}/deliveries`, one
+line per file; `POST …/resend` sends the failed emails again with the same
+files.
 
 Four `job_type`s, each with its own `config` shape (see
 `app/job_executors.py`'s module docstring for the exact keys):

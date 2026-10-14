@@ -18,8 +18,11 @@ import MyRunsPage from "./components/MyRunsPage";
 import NewReportWizard from "./components/NewReportWizard";
 import SchedulesPage from "./components/SchedulesPage";
 import StarredPage from "./components/StarredPage";
+import AnalyzePage from "./components/AnalyzePage";
+import DashboardsPage from "./components/DashboardsPage";
 import TemplateDetail from "./components/TemplateDetail";
-import TopBar from "./components/TopBar";
+import TopBar, { EVERYDAY } from "./components/TopBar";
+import { branding } from "./branding";
 import { useHashRoute, type Route } from "./hooks";
 import type { AuthInfo } from "./types";
 import { UserSettingsProvider } from "./userSettings";
@@ -70,7 +73,12 @@ export default function App() {
   if (!checkedSession) return null;
 
   if (!auth) {
-    return <Login onSignedIn={setAuth} />;
+    return (
+      <>
+        <DocumentTitle />
+        <Login onSignedIn={setAuth} />
+      </>
+    );
   }
 
   // Checked before the console renders at all: a flagged account can't use
@@ -103,6 +111,7 @@ export default function App() {
 
   return (
     <UserSettingsProvider>
+      {effectiveRoute.view !== "docs" && <DocumentTitle route={effectiveRoute} />}
       <div className="app-root">
         <div className="bg-texture" />
         <div className="bg-grain" />
@@ -156,6 +165,8 @@ export default function App() {
                   )}
                   {effectiveRoute.view === "runs" && <MyRunsPage navigate={navigate} />}
                   {effectiveRoute.view === "starred" && <StarredPage username={auth.username} navigate={navigate} />}
+                  {effectiveRoute.view === "analyze" && <AnalyzePage auth={auth} viewId={effectiveRoute.id} navigate={navigate} />}
+                  {effectiveRoute.view === "dashboards" && <DashboardsPage auth={auth} dashboardId={effectiveRoute.id} navigate={navigate} />}
                   {effectiveRoute.view === "reports" && (
                     <ReportsPage
                       username={auth.username}
@@ -178,4 +189,20 @@ export default function App() {
       </div>
     </UserSettingsProvider>
   );
+}
+
+/** The browser tab's title: the brand, then where you are -- the everyday page by its top-bar name ("Aksor Khmer ·
+ * Home", "· Reports" -- a report's run page included --, "· My runs", "· Starred"), or the console's own name in
+ * Manage ("Aksor Khmer · Control Plane"). Signed out, the brand alone. The Docs page sets its own ("… ·
+ * Documentation"). index.html sets the brand alone before the app loads, so nothing flashes. */
+function DocumentTitle({ route }: { route?: Route }) {
+  const page = !route
+    ? null
+    : isManageRoute(route)
+      ? branding.productName
+      : (EVERYDAY.find((item) => item.isActive(route))?.label ?? null);
+  useEffect(() => {
+    document.title = page ? `${branding.name} · ${page}` : branding.name;
+  }, [page]);
+  return null;
 }

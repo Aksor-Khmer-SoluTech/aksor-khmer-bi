@@ -200,9 +200,9 @@ def update_my_profile(
         was_forced = row.must_change_password
 
         if body.email is not None:
-            row.email = body.email
+            row.email = body.email or None  # "" clears it
         if body.display_name is not None:
-            row.display_name = body.display_name
+            row.display_name = body.display_name or None
         if body.new_password is not None:
             if row.auth_source != "local":
                 raise HTTPException(status_code=400, detail="Password is managed by your identity provider")
@@ -678,9 +678,9 @@ def update_user(
         had_totp = row.totp_enabled
 
         if body.email is not None:
-            row.email = body.email
+            row.email = body.email or None  # "" clears it
         if body.display_name is not None:
-            row.display_name = body.display_name
+            row.display_name = body.display_name or None
         if body.is_active is not None:
             row.is_active = body.is_active
         if body.is_locked is not None:

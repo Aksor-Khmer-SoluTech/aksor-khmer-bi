@@ -2,6 +2,7 @@
 the underlying tables and app/rbac.py for the authorization logic these
 are shaped around.
 """
+import re
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, Field
@@ -12,6 +13,52 @@ from ..security import check_password_policy
 # security.check_password_policy for why). Failing it is a 422 naming the
 # field, like any other bad request body.
 NewPassword = Annotated[str, AfterValidator(check_password_policy)]
+
+# A person's names and address, as the New user / edit forms take them (the portal shows the same limits as
+# counters -- UserFormDialog.tsx). Checked only where they are *set*: an account that already exists, or one an
+# LDAP sync created, is never refused for what it already has.
+USERNAME_MAX = 100  # room for a directory name in user@company.example form
+EMAIL_MAX = 254  # the longest address the email standard allows
+DISPLAY_NAME_MAX = 100
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _check_username(value: str) -> str:
+    if not value.strip():
+        raise ValueError("Enter a username")
+    if value != value.strip():
+        raise ValueError("A username can't start or end with a space")
+    if "|" in value:
+        # Signing in reads "name|organization" to pick between organizations (rbac.parse_login_identifier).
+        raise ValueError("A username can't contain | -- it separates the name from the organization at sign-in")
+    if any(ord(ch) < 32 for ch in value):
+        raise ValueError("A username can't contain control characters")
+    return value
+
+
+def _blank_to_none(value: str | None) -> str | None:
+    return value.strip() or None if value is not None else None
+
+
+def _check_email(value: str | None) -> str | None:
+    value = _blank_to_none(value)
+    if value is not None and not _EMAIL_RE.match(value):
+        raise ValueError("That doesn't look like an email address (name@example.com)")
+    return value
+
+
+def _check_email_edit(value: str | None) -> str | None:
+    # On an edit None means "unchanged" and "" means "clear it" -- keep that difference.
+    if value is not None and value.strip() == "":
+        return ""
+    return _check_email(value)
+
+
+Username = Annotated[str, Field(min_length=1, max_length=USERNAME_MAX), AfterValidator(_check_username)]
+Email = Annotated[str | None, Field(max_length=EMAIL_MAX), AfterValidator(_check_email)]
+DisplayName = Annotated[str | None, Field(max_length=DISPLAY_NAME_MAX), AfterValidator(_blank_to_none)]
+EmailEdit = Annotated[str | None, Field(max_length=EMAIL_MAX), AfterValidator(_check_email_edit)]
+DisplayNameEdit = Annotated[str | None, Field(max_length=DISPLAY_NAME_MAX), AfterValidator(lambda v: v.strip() if v is not None else None)]
 
 
 class OrganizationCreate(BaseModel):
@@ -29,9 +76,9 @@ class OrganizationOut(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: str
-    email: str | None = None
-    display_name: str | None = None
+    username: Username
+    email: Email = None
+    display_name: DisplayName = None
     auth_source: Literal["local", "ldap"] = "local"
     password: NewPassword | None = Field(
         None, description="Required when auth_source='local'; ignored (must be omitted) for 'ldap'"
@@ -45,8 +92,8 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    email: str | None = None
-    display_name: str | None = None
+    email: EmailEdit = None
+    display_name: DisplayNameEdit = None
     is_active: bool | None = None
     is_locked: bool | None = None
     password: NewPassword | None = Field(
@@ -75,8 +122,8 @@ class UserSelfUpdate(BaseModel):
     auto-resends that header, so this is the one moment the caller has to
     freshly type the password they're replacing."""
 
-    email: str | None = None
-    display_name: str | None = None
+    email: EmailEdit = None
+    display_name: DisplayNameEdit = None
     new_password: NewPassword | None = Field(None, description="Set a new password; only valid for auth_source='local'")
     current_password: str | None = Field(None, description="Required when new_password is set")
     notify_new_signin: bool | None = Field(
@@ -216,16 +263,17 @@ class AccessReviewGrant(BaseModel):
     """
 
     id: str
-    grant_type: Literal["report", "folder"]
+    grant_type: Literal["report", "folder", "dataset"]
     subject_type: Literal["user", "role"]
     subject_id: str
     subject_name: str
     resource_id: str
     resource_name: str
     org_id: str
-    permission_level: Literal["view", "render", "manage"]
+    # "run" / "build" for a dataset grant.
+    permission_level: Literal["view", "render", "manage", "run", "build"]
     granted_at: str
     granted_by: str | None = None
     granted_by_name: str | None = None
     expires_at: str | None = None
-    parameter_limits: dict[str, list[str]] | None = None  # report grants only; always null for folder grants
+    parameter_limits: dict[str, list[str]] | None = None  # report and dataset grants; always null for folder grants

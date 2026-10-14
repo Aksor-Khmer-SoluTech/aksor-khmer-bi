@@ -38,6 +38,12 @@ export const DOCS: DocMeta[] = [
     group: "Build reports",
   },
   {
+    slug: "faq",
+    title: "Questions and answers",
+    description: "Short answers to what people ask most, by category.",
+    group: "Understand",
+  },
+  {
     slug: "khmer-line-breaking",
     title: "How Khmer text wraps",
     description: "Why Khmer wraps differently across rendering engines.",

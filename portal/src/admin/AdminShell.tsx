@@ -12,6 +12,7 @@ import PluginsPage from "./plugins/PluginsPage";
 import ProtectedTermsPage from "./protected-terms/ProtectedTermsPage";
 import ClientsPage from "./clients/ClientsPage";
 import ConnectionsPage from "./connections/ConnectionsPage";
+import DatasetsPage from "./datasets/DatasetsPage";
 import DriversPage from "./jdbc/DriversPage";
 import ResourcesPage from "../components/ResourcesPage";
 import RolesPage from "./roles/RolesPage";
@@ -42,6 +43,7 @@ export default function AdminShell({
       {active?.id === "roles" && <RolesPage auth={auth} />}
       {active?.id === "clients" && <ClientsPage auth={auth} />}
       {active?.id === "connections" && <ConnectionsPage auth={auth} />}
+      {active?.id === "datasets" && <DatasetsPage auth={auth} />}
       {active?.id === "jdbc-drivers" && <DriversPage auth={auth} />}
       {active?.id === "secrets" && <SecretsPage auth={auth} />}
       {active?.id === "access-review" && <AccessReviewPage auth={auth} />}

@@ -3,6 +3,17 @@
 // vanilla-JS portal's app.js 1:1, plus the newer schema/batch/sample
 // endpoints — see api/app/routers/reports.py.
 import type {
+  Dashboard,
+  DashboardSummary,
+  DashboardTile,
+  AnalysisChart,
+  AnalysisView,
+  AnalyzeDataset,
+  AnalyzeForm,
+  PivotLayout,
+  PivotResult,
+  ApprovedRoutine,
+  DiscoveredRoutines,
   ApiClient,
   ApiClientWithSecret,
   AccessReviewGrant,
@@ -35,10 +46,21 @@ import type {
   Grant,
   ImageResource,
   Job,
+  JobDelivery,
+  Dataset,
+  DatasetAccess,
+  DatasetAccessMode,
+  DatasetGrant,
+  DatasetField,
+  DatasetMeasure,
+  DatasetPreview,
+  DatasetSummary,
+  DatasetWrite,
   JobRun,
   SchedulePreview,
   JobsSummary,
   JdbcConnectionConfig,
+  SmtpConnectionConfig,
   JdbcDriver,
   JdbcEngine,
   JobType,
@@ -754,6 +776,77 @@ export const api = {
     return { blob, filename: filenameFromDisposition(resp, `${id}-batch.zip`) };
   },
 
+  // --- Analyze (api/app/routers/analyze.py) --------------------------
+  analyze: {
+    datasets(): Promise<AnalyzeDataset[]> {
+      return getJSON("/analyze/datasets");
+    },
+    form(name: string): Promise<AnalyzeForm> {
+      return getJSON(`/analyze/datasets/${encodeURIComponent(name)}`);
+    },
+    pivot(dataset: string, values: Record<string, string>, layout: PivotLayout): Promise<PivotResult> {
+      return sendJSON("/analyze/pivot", "POST", { dataset, values, layout });
+    },
+    /** The view as a file -- PDF, Word or Excel -- with its chart when `chart` isn't "table". */
+    async export(body: {
+      dataset: string;
+      values: Record<string, string>;
+      layout: PivotLayout;
+      format: "pdf" | "docx" | "xlsx";
+      chart: AnalysisChart;
+      title?: string;
+    }): Promise<{ blob: Blob; filename: string }> {
+      const resp = await apiFetch("/analyze/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!resp.ok) {
+        const err: ApiErrorBody = await resp.json().catch(() => ({}));
+        throw new ApiError(resp.status, err.detail || `Export failed (${resp.status})`);
+      }
+      return { blob: await resp.blob(), filename: filenameFromDisposition(resp, `${body.dataset}-analysis.${body.format}`) };
+    },
+    views: {
+      list(): Promise<AnalysisView[]> {
+        return getJSON("/analyze/views");
+      },
+      get(id: string): Promise<AnalysisView> {
+        return getJSON(`/analyze/views/${id}`);
+      },
+      create(body: { title: string; dataset: string; config: AnalysisView["config"] }): Promise<AnalysisView> {
+        return sendJSON("/analyze/views", "POST", body);
+      },
+      update(id: string, body: { title: string; dataset: string; config: AnalysisView["config"] }): Promise<AnalysisView> {
+        return sendJSON(`/analyze/views/${id}`, "PUT", body);
+      },
+      delete(id: string): Promise<void> {
+        return del(`/analyze/views/${id}`, "Delete failed");
+      },
+    },
+  },
+
+  // --- Dashboards (api/app/routers/dashboards.py) ------------------------
+  dashboards: {
+    list(): Promise<DashboardSummary[]> {
+      return getJSON("/dashboards");
+    },
+    get(id: string): Promise<Dashboard> {
+      return getJSON(`/dashboards/${id}`);
+    },
+    create(title: string): Promise<Dashboard> {
+      return sendJSON("/dashboards", "POST", { title });
+    },
+    update(id: string, body: { title: string; description?: string | null; tiles: DashboardTile[]; filters: Record<string, string> }): Promise<Dashboard> {
+      return sendJSON(`/dashboards/${id}`, "PUT", body);
+    },
+    share(id: string, roleIds: string[]): Promise<Dashboard> {
+      return sendJSON(`/dashboards/${id}/sharing`, "PUT", { role_ids: roleIds });
+    },
+    delete(id: string): Promise<void> {
+      return del(`/dashboards/${id}`, "Delete failed");
+    },
+    runTile(id: string, tileId: string, filters: Record<string, string>): Promise<PivotResult & { tile: DashboardTile }> {
+      return sendJSON(`/dashboards/${id}/tiles/${encodeURIComponent(tileId)}/run`, "POST", { filters });
+    },
+  },
+
   // --- Admin: organizations, users, roles, permissions, grants ---------
   // See api/app/routers/{organizations,users,roles,grants}.py.
 
@@ -971,19 +1064,31 @@ export const api = {
     create(body: {
       org_id?: string;
       name: string;
-      kind?: "rest" | "jdbc";
+      kind?: "rest" | "jdbc" | "smtp";
       description?: string | null;
-      config: ConnectionConfig | JdbcConnectionConfig;
+      config: ConnectionConfig | JdbcConnectionConfig | SmtpConnectionConfig;
     }): Promise<Connection> {
       return sendJSON("/connections", "POST", { kind: "rest", ...body });
     },
     /** Replaces the description and settings; the name is fixed (reports refer to it). */
-    update(id: string, body: { description?: string | null; config: ConnectionConfig | JdbcConnectionConfig }): Promise<Connection> {
+    update(id: string, body: { description?: string | null; config: ConnectionConfig | JdbcConnectionConfig | SmtpConnectionConfig }): Promise<Connection> {
       return sendJSON(`/connections/${id}`, "PUT", body);
     },
     /** Logs in with a database connection's settings -- saved or not -- and says whether it worked. Saves nothing. */
     test(config: JdbcConnectionConfig, orgId?: string): Promise<ConnectionTestResult> {
       return sendJSON("/connections/test", "POST", { org_id: orgId, config });
+    },
+    /** Sends one test email with a mail server's settings -- saved or not. Saves nothing. */
+    testMail(config: SmtpConnectionConfig, to: string, orgId?: string): Promise<ConnectionTestResult> {
+      return sendJSON("/connections/test-mail", "POST", { org_id: orgId, config, to });
+    },
+    /** SQL Server: replace the stored procedures and functions reports may call. */
+    setRoutines(id: string, routines: ApprovedRoutine[]): Promise<Connection> {
+      return sendJSON(`/connections/${id}/routines`, "PUT", { routines });
+    },
+    /** SQL Server: what the connection's login may run, read from the catalog. Approves nothing. */
+    discoverRoutines(id: string): Promise<DiscoveredRoutines> {
+      return sendJSON(`/connections/${id}/routines/discover`, "POST", {});
     },
     delete(id: string): Promise<void> {
       return del(`/connections/${id}`, "Delete failed");
@@ -1220,6 +1325,60 @@ export const api = {
     },
   },
 
+  // Datasets -- api/app/datasets.py. Listing is open to report managers (to build a report on one).
+  datasets: {
+    list(orgId?: string): Promise<DatasetSummary[]> {
+      return getJSON(`/datasets${qs({ org_id: orgId })}`);
+    },
+    get(id: string): Promise<Dataset> {
+      return getJSON(`/datasets/${id}`);
+    },
+    create(body: DatasetWrite & { org_id?: string; name: string }): Promise<Dataset> {
+      return sendJSON("/datasets", "POST", body);
+    },
+    update(id: string, body: DatasetWrite): Promise<Dataset> {
+      return sendJSON(`/datasets/${id}`, "PUT", body);
+    },
+    delete(id: string): Promise<void> {
+      return del(`/datasets/${id}`, "Delete failed");
+    },
+    /** Run a dataset's source once -- saved or not -- with test values; nothing is saved. */
+    preview(body: {
+      org_id?: string;
+      parameters: ReportParameter[];
+      data_source: DataSource;
+      fields: DatasetField[];
+      measures: DatasetMeasure[];
+      values: Record<string, string>;
+    }): Promise<DatasetPreview> {
+      return sendJSON("/datasets/preview", "POST", body);
+    },
+    previewOptions(source: OptionsSource, orgId?: string): Promise<OptionsPreview> {
+      return sendJSON("/datasets/preview-options", "POST", { org_id: orgId, options_source: source });
+    },
+    /** Make a dataset of a report's own source and filters, and build the report on it. */
+    fromReport(reportId: string, name: string, title: string): Promise<Dataset> {
+      return sendJSON("/datasets/from-report", "POST", { report_id: reportId, name, title });
+    },
+    access: {
+      get(id: string): Promise<DatasetAccess> {
+        return getJSON(`/datasets/${id}/access`);
+      },
+      setMode(id: string, mode: DatasetAccessMode): Promise<DatasetAccess> {
+        return sendJSON(`/datasets/${id}/access/mode`, "PUT", { mode });
+      },
+      grant(
+        id: string,
+        body: { subject_type: "user" | "role"; subject_id: string; level: "run" | "build"; parameter_limits: Record<string, string[]> | null; expires_at: string | null },
+      ): Promise<DatasetGrant> {
+        return sendJSON(`/datasets/${id}/access`, "POST", body);
+      },
+      revoke(id: string, grantId: string): Promise<void> {
+        return del(`/datasets/${id}/access/${grantId}`, "Revoke failed");
+      },
+    },
+  },
+
   jobs: {
     list(orgId?: string): Promise<Job[]> {
       return getJSON(`/jobs${qs({ org_id: orgId })}`);
@@ -1258,6 +1417,13 @@ export const api = {
     },
     run(id: string): Promise<JobRun> {
       return apiFetch(`/jobs/${id}/run`, { method: "POST" }).then((r) => asJson<JobRun>(r));
+    },
+    deliveries(jobId: string, runId: string): Promise<JobDelivery[]> {
+      return getJSON(`/jobs/${jobId}/runs/${runId}/deliveries`);
+    },
+    /** Re-send a run's failed emails, with the same files. */
+    resend(jobId: string, runId: string): Promise<{ queued: number }> {
+      return sendJSON(`/jobs/${jobId}/runs/${runId}/resend`, "POST", {});
     },
     runs(id: string, status?: string): Promise<JobRun[]> {
       return getJSON(`/jobs/${id}/runs${qs({ status })}`);

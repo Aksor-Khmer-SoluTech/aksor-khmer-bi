@@ -8,6 +8,22 @@ from .analytics import JobsSummary, MyDashboard, MyDay, MyRun, MyTopReport, Repo
 from .reports import VersionUpdate
 from .audit import AuditEventOut, AuditPage, ChangelogEntry, ReportChangelog, ReportVersionOut
 from .auth import AuthEventOut, AuthVerifyOut, LoginRequest, SessionOut, SetupAdminRequest, TokenOut
+from .analyze import (
+    AnalysisConfig,
+    AnalysisOut,
+    AnalysisWrite,
+    AnalyzeDataset,
+    DashboardCreate,
+    DashboardOut,
+    DashboardSharing,
+    DashboardSummary,
+    DashboardTile,
+    DashboardUpdate,
+    ExportRequest,
+    PivotLayout,
+    PivotRequest,
+    TileRun,
+)
 from .connections import (
     ConnectionCreate,
     ConnectionOut,
@@ -16,8 +32,31 @@ from .connections import (
     ConnectionTest,
     ConnectionTestResult,
     ConnectionUpdate,
+    ApprovedRoutine,
+    DiscoveredRoutines,
+    RoutinesUpdate,
     JdbcConnectionConfig,
+    MailServerTest,
     RestConnectionConfig,
+    SmtpConnectionConfig,
+)
+from .datasets import (
+    DatasetCreate,
+    DatasetField,
+    DatasetAccess,
+    DatasetAccessMode,
+    DatasetFromReport,
+    DatasetGrantCreate,
+    DatasetGrantOut,
+    DatasetMeasure,
+    DatasetOptionsPreviewRequest,
+    DatasetOut,
+    DatasetPreview,
+    DatasetPreviewRequest,
+    DatasetReportRef,
+    DatasetSummary,
+    DatasetWrite,
+    MeasureResult,
 )
 from .fonts import FontOut, InstalledFont, TemplateFont
 from .jdbc import JdbcDriverOut, JdbcEngineOut
@@ -31,7 +70,7 @@ from .secrets import (
 )
 from .clients import ClientCreate, ClientOut, ClientReportRef, ClientReportsUpdate, ClientUpdate, ClientWithSecret
 from .folders import FolderCreate, FolderOut, FolderUpdate, ImageOut, StylesheetOut
-from .jobs import JobCreate, JobOut, JobRunOut, JobUpdate, SchedulePreview, SchedulePreviewRequest
+from .jobs import JobCreate, JobDeliveryOut, JobOut, JobRunOut, JobUpdate, SchedulePreview, SchedulePreviewRequest
 from .ldap import (
     LdapConfigCreate,
     LdapConfigOut,
@@ -105,6 +144,37 @@ from .system import DiskUsage, SystemMetrics
 from .totp import TotpCodeRequest, TotpEnrollOut
 
 __all__ = [
+    "AnalysisConfig",
+    "AnalysisOut",
+    "AnalysisWrite",
+    "AnalyzeDataset",
+    "DashboardCreate",
+    "DashboardOut",
+    "DashboardSharing",
+    "DashboardSummary",
+    "DashboardTile",
+    "DashboardUpdate",
+    "ExportRequest",
+    "TileRun",
+    "PivotLayout",
+    "PivotRequest",
+    "DatasetCreate",
+    "DatasetField",
+    "DatasetAccess",
+    "DatasetAccessMode",
+    "DatasetFromReport",
+    "DatasetGrantCreate",
+    "DatasetGrantOut",
+    "DatasetMeasure",
+    "DatasetOptionsPreviewRequest",
+    "DatasetOut",
+    "DatasetPreview",
+    "DatasetPreviewRequest",
+    "DatasetReportRef",
+    "DatasetSummary",
+    "DatasetWrite",
+    "MeasureResult",
+
     "AccessReviewGrant",
     "ClientCreate",
     "ClientOut",
@@ -119,7 +189,12 @@ __all__ = [
     "ConnectionTest",
     "ConnectionTestResult",
     "ConnectionUpdate",
+    "ApprovedRoutine",
+    "DiscoveredRoutines",
+    "RoutinesUpdate",
     "JdbcConnectionConfig",
+    "MailServerTest",
+    "SmtpConnectionConfig",
     "FontOut",
     "InstalledFont",
     "TemplateFont",
@@ -160,6 +235,7 @@ __all__ = [
     "JobOut",
     "JobRunOut",
     "JobsSummary",
+    "JobDeliveryOut",
     "JobUpdate",
     "SchedulePreview",
     "SchedulePreviewRequest",

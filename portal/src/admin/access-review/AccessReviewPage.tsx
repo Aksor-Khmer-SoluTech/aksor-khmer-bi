@@ -4,7 +4,7 @@ import ConfirmDialog from "../../components/ConfirmDialog";
 import { TableSkeleton } from "../../components/Skeletons";
 import type { AccessReviewGrant, AuthInfo, Organization } from "../../types";
 
-type TypeFilter = "all" | "report" | "folder";
+type TypeFilter = "all" | "report" | "folder" | "dataset";
 
 function isExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && new Date(expiresAt).getTime() < Date.now();
@@ -52,6 +52,7 @@ export default function AccessReviewPage({ auth }: { auth: AuthInfo }) {
     setRevokeError(null);
     try {
       if (revokeTarget.grant_type === "report") await api.grants.reports.revoke(revokeTarget.id);
+      else if (revokeTarget.grant_type === "dataset") await api.datasets.access.revoke(revokeTarget.resource_id, revokeTarget.id);
       else await api.grants.folders.revoke(revokeTarget.id);
       setGrants((prev) => prev?.filter((g) => g.id !== revokeTarget.id) ?? null);
       setRevokeTarget(null);
@@ -65,7 +66,7 @@ export default function AccessReviewPage({ auth }: { auth: AuthInfo }) {
       <div className="page-header">
         <div>
           <h1 className="page-title">Access Review</h1>
-          <p className="page-subtitle">Every active report and folder grant, in one place — no more opening each one individually.</p>
+          <p className="page-subtitle">Every active report, folder and dataset grant, in one place — no more opening each one individually.</p>
         </div>
       </div>
 
@@ -82,6 +83,7 @@ export default function AccessReviewPage({ auth }: { auth: AuthInfo }) {
           <option value="all">All grant types</option>
           <option value="report">Report grants</option>
           <option value="folder">Folder grants</option>
+          <option value="dataset">Dataset grants</option>
         </select>
         {auth.isSuperuser && (
           <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)} style={{ maxWidth: 220 }}>
@@ -128,7 +130,7 @@ export default function AccessReviewPage({ auth }: { auth: AuthInfo }) {
                   <span className={`badge badge-${g.grant_type}`}>{g.grant_type}</span> {g.resource_name}
                 </td>
                 <td>
-                  {g.permission_level}
+                  {g.permission_level === "build" ? "build & run" : g.permission_level}
                   {g.parameter_limits && Object.keys(g.parameter_limits).length > 0 && (
                     <span className="grant-row-limits">
                       {Object.entries(g.parameter_limits).map(([name, values]) => (

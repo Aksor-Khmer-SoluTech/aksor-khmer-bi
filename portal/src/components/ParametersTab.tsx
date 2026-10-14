@@ -13,7 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronDown, ChevronUp, CircleCheck, FlaskConical, GripVertical, ListOrdered, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "../api";
 import { supportsMonthDay, supportsNow, toOptionsSource, type DataConfigDraft, type EditableParameter } from "../dataConfig";
-import type { OptionsPreview, ParameterType, ReportMeta } from "../types";
+import type { OptionsPreview, OptionsSource, ParameterType, ReportMeta } from "../types";
 import DataConfigSaveBar from "./DataConfigSaveBar";
 import DateTimeField from "./DateTimeField";
 import RequestFields from "./RequestFields";
@@ -49,19 +49,26 @@ const NOW_MEANING: Record<"date" | "datetime" | "time", string> = {
  * (dataConfig.ts) and save together. Managers only: the data config can hold
  * header values and the full option lists a grant is meant to narrow, so it's
  * kept off the public report metadata (api/app/routers/reports.py). */
+type TryOptions = (source: OptionsSource) => Promise<OptionsPreview>;
+
 export default function ParametersTab({
   report,
   draft,
   canManageConnections,
   canManageSecrets,
   orgId,
+  tryOptions,
 }: {
-  report: ReportMeta;
+  /** The report whose filters these are; absent in a dataset's editor (whose filters every report on it shares). */
+  report?: ReportMeta;
   draft: DataConfigDraft;
   canManageConnections: boolean;
   canManageSecrets: boolean;
   orgId: string;
+  /** How a REST-backed choice list is tried: the report's own route by default. */
+  tryOptions?: TryOptions;
 }) {
+  const tryChoices: TryOptions = tryOptions ?? ((source) => api.previewOptions(report!.report_id, source));
   // "Reorder" folds every card down to one line, so a long list can be rearranged without scrolling past forms.
   const [compact, setCompact] = useState(false);
   const sensors = useSensors(
@@ -74,6 +81,20 @@ export default function ParametersTab({
       <div className="panel data-config">
         <h2 className="panel-title">Parameters</h2>
         <LinesSkeleton count={4} />
+      </div>
+    );
+  }
+
+  // A report built on a dataset asks for the dataset's filters; they're edited there, for every report on it.
+  if (report && draft.useSource && draft.source.type === "dataset") {
+    return (
+      <div className="panel data-config">
+        <h2 className="panel-title">Parameters</h2>
+        <p className="panel-subtitle">What a person is asked for when they run this report.</p>
+        <p className="m-0 rounded-[10px] border border-accent-border bg-accent-soft px-3 py-2.5 text-[0.88rem] text-text">
+          This report is built on the dataset <strong className="mono">{draft.source.dataset}</strong>, so it asks for that dataset's filters. Change
+          them on the dataset (Manage → Datasets) — every report built on it follows.
+        </p>
       </div>
     );
   }
@@ -102,7 +123,9 @@ export default function ParametersTab({
     <div className="panel data-config">
       <h2 className="panel-title">Parameters</h2>
       <p className="panel-subtitle">
-        What a person is asked for when they run this report. Where its data comes from is set on the Data source tab.
+        {report
+          ? "What a person is asked for when they run this report. Where its data comes from is set on the Data source tab."
+          : "What a person is asked for when they run any report built on this dataset."}
       </p>
 
       {draft.loadError && <p className="alert alert-error">{draft.loadError}</p>}
@@ -133,7 +156,7 @@ export default function ParametersTab({
                 index={index}
                 count={draft.parameters.length}
                 compact={compact}
-                reportId={report.report_id}
+                tryOptions={tryChoices}
                 draft={draft}
                 canManageConnections={canManageConnections}
                 canManageSecrets={canManageSecrets}
@@ -158,7 +181,7 @@ function ParameterCard({
   index,
   count,
   compact,
-  reportId,
+  tryOptions,
   draft,
   canManageConnections,
   canManageSecrets,
@@ -168,7 +191,7 @@ function ParameterCard({
   index: number;
   count: number;
   compact: boolean;
-  reportId: string;
+  tryOptions: TryOptions;
   draft: DataConfigDraft;
   canManageConnections: boolean;
   canManageSecrets: boolean;
@@ -281,7 +304,7 @@ function ParameterCard({
       ) : (
         <ChoiceSource
           p={p}
-          reportId={reportId}
+          tryOptions={tryOptions}
           draft={draft}
           update={update}
           canManageConnections={canManageConnections}
@@ -366,7 +389,7 @@ function DefaultValue({ p, update }: { p: EditableParameter; update: (patch: Par
  * list, and each choice's value and label, are in the response. */
 function ChoiceSource({
   p,
-  reportId,
+  tryOptions,
   draft,
   update,
   canManageConnections,
@@ -374,7 +397,7 @@ function ChoiceSource({
   orgId,
 }: {
   p: EditableParameter;
-  reportId: string;
+  tryOptions: TryOptions;
   draft: DataConfigDraft;
   update: (patch: Partial<EditableParameter>) => void;
   canManageConnections: boolean;
@@ -472,7 +495,7 @@ function ChoiceSource({
             <code className="mono">tags[0]</code>) or text mixing several ({" "}
             <code className="mono">{"${code} - ${nameEn}"}</code>).
           </p>
-          <ChoicePreview p={p} reportId={reportId} />
+          <ChoicePreview p={p} tryOptions={tryOptions} />
         </>
       )}
     </div>
@@ -481,7 +504,7 @@ function ChoiceSource({
 
 /** "Test": call the source the way the server would -- with what's typed, saved or
  * not -- and show the choices the paths produce, or the reason they can't. */
-function ChoicePreview({ p, reportId }: { p: EditableParameter; reportId: string }) {
+function ChoicePreview({ p, tryOptions }: { p: EditableParameter; tryOptions: TryOptions }) {
   const [state, setState] = useState<
     { status: "idle" } | { status: "loading" } | { status: "ok"; result: OptionsPreview } | { status: "error"; message: string }
   >({ status: "idle" });
@@ -489,7 +512,7 @@ function ChoicePreview({ p, reportId }: { p: EditableParameter; reportId: string
   async function test() {
     setState({ status: "loading" });
     try {
-      setState({ status: "ok", result: await api.previewOptions(reportId, toOptionsSource(p)) });
+      setState({ status: "ok", result: await tryOptions(toOptionsSource(p)) });
     } catch (err) {
       setState({ status: "error", message: err instanceof ApiError && typeof err.message === "string" ? err.message : "Couldn't test this source" });
     }

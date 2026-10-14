@@ -1,4 +1,4 @@
-import { FileText, History, House, Star, type LucideIcon } from "lucide-react";
+import { FileText, History, House, LayoutDashboard, Star, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { canManage, firstManageRoute, isManageRoute } from "../admin/sections";
 import { AdminIcon, DocsIcon, InfoIcon } from "../admin/icons";
@@ -11,11 +11,13 @@ import BrandMark from "./BrandMark";
 import NotificationsMenu from "./NotificationsMenu";
 
 /** The everyday pages -- what most people come for. Everything else is behind Manage. */
-const EVERYDAY: { label: string; icon: LucideIcon; route: Route; isActive: (route: Route) => boolean }[] = [
+export const EVERYDAY: { label: string; icon: LucideIcon; route: Route; isActive: (route: Route) => boolean; visible?: (auth: AuthInfo) => boolean }[] = [
   { label: "Home", icon: House, route: { view: "home" }, isActive: (r) => r.view === "home" },
   { label: "Reports", icon: FileText, route: { view: "reports" }, isActive: (r) => r.view === "reports" || r.view === "run" },
   { label: "My runs", icon: History, route: { view: "runs" }, isActive: (r) => r.view === "runs" },
   { label: "Starred", icon: Star, route: { view: "starred" }, isActive: (r) => r.view === "starred" },
+  // Dashboards shared with you, for everyone; those with analyze:use also make them and explore data (Analyze) there.
+  { label: "Dashboards", icon: LayoutDashboard, route: { view: "dashboards" }, isActive: (r) => r.view === "dashboards" || r.view === "analyze" },
 ];
 
 /** The top bar, and for most people the only navigation there is: brand, then the everyday pages (Home, Reports,
@@ -34,6 +36,8 @@ export default function TopBar({
 }) {
   const [aboutOpen, setAboutOpen] = useState(false);
   const inManage = isManageRoute(route);
+  const everyday = EVERYDAY.filter((item) => !item.visible || item.visible(auth));
+  const crowded = everyday.length > 4;
 
   return (
     <header className="flex flex-none flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-bg-chrome px-5 py-3 max-md:gap-x-2 max-md:px-4 max-md:py-2.5">
@@ -87,7 +91,7 @@ export default function TopBar({
 
       {!inManage && (
         <nav aria-label="Main" className="flex min-w-0 flex-1 items-center gap-1 max-md:order-last max-md:basis-full max-md:justify-between">
-          {EVERYDAY.map(({ label, icon: Icon, route: to, isActive }) => {
+          {everyday.map(({ label, icon: Icon, route: to, isActive }) => {
             const active = isActive(route);
             return (
               <button
@@ -104,7 +108,8 @@ export default function TopBar({
                 data-tour={`nav-${label.toLowerCase().replace(/ /g, "-")}`}
               >
                 <Icon size={16} aria-hidden="true" />
-                <span className="md:max-lg:hidden">{label}</span>
+                {/* Icons only where the labels don't fit beside Manage: below lg for four pages, below xl for five. */}
+                <span className={crowded ? "md:max-xl:hidden" : "md:max-lg:hidden"}>{label}</span>
               </button>
             );
           })}

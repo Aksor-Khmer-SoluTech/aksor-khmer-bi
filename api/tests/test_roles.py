@@ -39,6 +39,8 @@ def test_get_role_includes_permissions(auth_headers):
         "report:view",
         "folder:manage",
         "protected_terms:manage",
+        "dataset:manage",
+        "analyze:use",
     }
 
 

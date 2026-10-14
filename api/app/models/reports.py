@@ -150,8 +150,19 @@ class ReportParameter(BaseModel):
     options_source: OptionsSource | None = None
 
 
+class RoutineArgument(BaseModel):
+    filter: str | None = Field(None, description="The filter whose value it takes")
+    value: str | None = Field(None, description="Or a fixed value")
+
+
+class MoreResult(BaseModel):
+    name: str
+    shape: Literal["list", "object", "value"] = "list"
+
+
 class DataSourceQuery(BaseModel):
-    """One query of a database source with several: its rows go under `name` in the data the template gets."""
+    """One query of a database source with several: its rows go under `name` in the data the template gets. Either
+    SQL (`query`) or a call to a procedure or function its connection approved (`routine` + `arguments`)."""
 
     name: str = Field(..., description="The key its result is under -- letters, digits and underscores, e.g. rows, info")
     shape: Literal["list", "object", "value"] = Field(
@@ -159,7 +170,17 @@ class DataSourceQuery(BaseModel):
         description="list: every row, as a list (none is []); object: the one row it returns, as an object; value: that "
         "row's first column. For the last two, no row is null and more than one fails the run.",
     )
-    query: str = Field(..., description="One SELECT (or WITH ... SELECT); `:name` binds a filter parameter's value")
+    query: str | None = Field(None, description="One SELECT (or WITH ... SELECT); `:name` binds a filter parameter's value")
+    routine: str | None = Field(None, description="Instead of `query`: an approved stored procedure or function, schema.name")
+    arguments: dict[str, RoutineArgument] | None = Field(None, description="Each of the routine's parameters: a filter or a fixed value")
+    more_results: list[MoreResult] | None = Field(
+        None, description="A procedure's second, third... result sets, each under its own name (the first is `name`)"
+    )
+    connection: str | None = Field(
+        None,
+        description="A database connection for this query alone -- for data spread over several databases (a service "
+        "each). Omitted: the source's own connection.",
+    )
 
 
 class DataSource(BaseModel):
@@ -171,10 +192,13 @@ class DataSource(BaseModel):
       (Admin > Connections). Filter parameters are bound as `:p_branch`.
     * `static` -- fixed sample data (`static_data`), for building a template
       before any real source exists.
+    * `dataset` -- a dataset (Manage > Datasets): its source, filters and
+      measures, shared with every report built on it.
 
     See app/report_data.py."""
 
-    type: Literal["rest", "jdbc", "static"] = Field("rest", description="How the data is obtained")
+    type: Literal["rest", "jdbc", "static", "dataset"] = Field("rest", description="How the data is obtained")
+    dataset: str | None = Field(None, description="dataset: the name of the dataset (Manage > Datasets) this report is built on -- its source, filters and measures")
     connection: str | None = Field(
         None,
         description="Name of a connection (Admin > Connections): for `rest`, its base URL, headers and authentication "
