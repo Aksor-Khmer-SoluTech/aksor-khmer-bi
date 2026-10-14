@@ -20,6 +20,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   branch whose sales are unusually high or low — instead of crossing a fixed threshold. No migration.
 
 ### Changed
+- **Top bar in a clearer order**: what there is to look at — *Home, Reports, Dashboards, Analyze* — then, after a thin
+  divider, what's your own — *Starred, My runs*. On phones the pages show as icons, so all six fit; the guided tour
+  follows the same order and now stops at Dashboards and Analyze too.
 - **Analyze has its own place in the top bar**, next to Dashboards, for everyone who can analyze datasets
   (`analyze:use`). Before, it was only reachable through Dashboards → *Explore data*.
 

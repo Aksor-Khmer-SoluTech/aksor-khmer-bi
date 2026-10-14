@@ -1,5 +1,5 @@
 import { ChartColumnBig, FileText, History, House, LayoutDashboard, Star, type LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { canManage, firstManageRoute, has, isManageRoute } from "../admin/sections";
 import { AdminIcon, DocsIcon, InfoIcon } from "../admin/icons";
 import { branding } from "../branding";
@@ -10,20 +10,29 @@ import AccountMenu from "./AccountMenu";
 import BrandMark from "./BrandMark";
 import NotificationsMenu from "./NotificationsMenu";
 
-/** The everyday pages -- what most people come for. Everything else is behind Manage. */
-export const EVERYDAY: { label: string; icon: LucideIcon; route: Route; isActive: (route: Route) => boolean; visible?: (auth: AuthInfo) => boolean }[] = [
-  { label: "Home", icon: House, route: { view: "home" }, isActive: (r) => r.view === "home" },
-  { label: "Reports", icon: FileText, route: { view: "reports" }, isActive: (r) => r.view === "reports" || r.view === "run" },
-  { label: "My runs", icon: History, route: { view: "runs" }, isActive: (r) => r.view === "runs" },
-  { label: "Starred", icon: Star, route: { view: "starred" }, isActive: (r) => r.view === "starred" },
+/** The everyday pages -- what most people come for. Everything else is behind Manage. In two groups: what there is
+ * to look at, from the start page to the deepest (Home, Reports, Dashboards, Analyze), then what's your own (Starred,
+ * My runs), set off by a hairline. */
+export const EVERYDAY: {
+  label: string;
+  icon: LucideIcon;
+  route: Route;
+  isActive: (route: Route) => boolean;
+  visible?: (auth: AuthInfo) => boolean;
+  group: "content" | "mine";
+}[] = [
+  { label: "Home", icon: House, route: { view: "home" }, isActive: (r) => r.view === "home", group: "content" },
+  { label: "Reports", icon: FileText, route: { view: "reports" }, isActive: (r) => r.view === "reports" || r.view === "run", group: "content" },
   // Dashboards shared with you, for everyone; those with analyze:use also make them from Analyze.
-  { label: "Dashboards", icon: LayoutDashboard, route: { view: "dashboards" }, isActive: (r) => r.view === "dashboards" },
+  { label: "Dashboards", icon: LayoutDashboard, route: { view: "dashboards" }, isActive: (r) => r.view === "dashboards", group: "content" },
   // Pivot and chart a dataset (AnalyzePage.tsx) -- only for those with analyze:use.
-  { label: "Analyze", icon: ChartColumnBig, route: { view: "analyze" }, isActive: (r) => r.view === "analyze", visible: (auth) => has(auth, "analyze:use") },
+  { label: "Analyze", icon: ChartColumnBig, route: { view: "analyze" }, isActive: (r) => r.view === "analyze", visible: (auth) => has(auth, "analyze:use"), group: "content" },
+  { label: "Starred", icon: Star, route: { view: "starred" }, isActive: (r) => r.view === "starred", group: "mine" },
+  { label: "My runs", icon: History, route: { view: "runs" }, isActive: (r) => r.view === "runs", group: "mine" },
 ];
 
 /** The top bar, and for most people the only navigation there is: brand, then the everyday pages (Home, Reports,
- * My runs, Starred); on the right the Manage button -- only for someone with something to manage (templates,
+ * Dashboards, Analyze | Starred, My runs); on the right the Manage button -- only for someone with something to manage (templates,
  * schedules, users, connections... see manageItems) -- then notifications, docs, About and the account menu.
  * Manage pages add the grouped left sidebar (AppSidebar); there the everyday links give way to that sidebar's
  * "Back to ..." (the page Manage was opened from). */
@@ -93,11 +102,13 @@ export default function TopBar({
 
       {!inManage && (
         <nav aria-label="Main" className="flex min-w-0 flex-1 items-center gap-1 max-md:order-last max-md:basis-full max-md:justify-between">
-          {everyday.map(({ label, icon: Icon, route: to, isActive }) => {
+          {everyday.map(({ label, icon: Icon, route: to, isActive, group }, i) => {
             const active = isActive(route);
+            const startsGroup = i > 0 && everyday[i - 1].group !== group;
             return (
+              <Fragment key={label}>
+              {startsGroup && <span aria-hidden="true" className="mx-1.5 h-5 w-px flex-none bg-border-strong max-md:mx-0.5" />}
               <button
-                key={label}
                 type="button"
                 className={`inline-flex cursor-pointer items-center gap-1.5 rounded-sm border-none px-3 py-[7px] text-[0.86rem] font-medium whitespace-nowrap transition-[background-color,color] duration-150 ease-out max-md:px-2 ${
                   active
@@ -110,9 +121,11 @@ export default function TopBar({
                 data-tour={`nav-${label.toLowerCase().replace(/ /g, "-")}`}
               >
                 <Icon size={16} aria-hidden="true" />
-                {/* Icons only where the labels don't fit beside Manage: below lg for four pages, below xl for five. */}
-                <span className={crowded ? "md:max-xl:hidden" : "md:max-lg:hidden"}>{label}</span>
+                {/* Icons only where the labels don't fit: beside Manage below lg for four pages; for five or more, below xl
+                    and on phones too, where six labels run off the screen. */}
+                <span className={crowded ? "max-xl:hidden" : "md:max-lg:hidden"}>{label}</span>
               </button>
+              </Fragment>
             );
           })}
         </nav>

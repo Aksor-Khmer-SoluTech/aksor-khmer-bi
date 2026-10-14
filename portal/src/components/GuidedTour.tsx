@@ -23,8 +23,10 @@ const TOURS: Record<TourId, TourStep[]> = {
       body: "A quick look around, one stop at a time. Skip it whenever you like — Show me around in your account menu brings it back.",
     },
     { target: "nav-reports", title: "Reports", body: "Every report you've been given. Open one, pick its filters, and view or download it as PDF, Word or Excel." },
-    { target: "nav-my-runs", title: "My runs", body: "Everything you've run, newest first — run any of them again with one click." },
+    { target: "nav-dashboards", title: "Dashboards", body: "The numbers you watch, on one page — your own and those shared with you, each showing only the data you're allowed." },
+    { target: "nav-analyze", title: "Analyze", body: "Slice a dataset into a table or a chart — rows, columns, totals, trends — then export it or keep the view." },
     { target: "nav-starred", title: "Starred", body: "Star the reports you use most. They're kept here and on your Home page." },
+    { target: "nav-my-runs", title: "My runs", body: "Everything you've run, newest first — run any of them again with one click." },
     { target: "home-cards", title: "Your Home page", body: "Below: your own activity, shortcuts and recent runs. Drag the cards by their handle to arrange them the way you like." },
     { target: "notifications", title: "Notifications", body: "You'll be asked here if your account signs in on a browser it hasn't used before — so you can sign it out if it wasn't you." },
     {
