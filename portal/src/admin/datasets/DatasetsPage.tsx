@@ -31,6 +31,11 @@ const KIND_LABEL: Record<MeasureKind, string> = {
   avg: "Average",
   min: "Minimum",
   max: "Maximum",
+  median: "Median",
+  percentile: "Percentile",
+  stdev: "Standard deviation",
+  variance: "Variance",
+  mode: "Most common value",
   ratio: "Ratio of two measures",
 };
 const FORMATS = ["#,##0", "#,##0.00", "#,##0 ៛", "#,##0.00 ៛", "$#,##0.00", "0%", "0.0%", "DD/MM/YYYY"];
@@ -49,8 +54,9 @@ function formula(m: DatasetMeasure, measures: DatasetMeasure[]): string {
   const name = (key: string | null) => measures.find((x) => x.key === key)?.label ?? key ?? "?";
   if (m.kind === "ratio") return `${name(m.numerator)} ÷ ${name(m.denominator)}`;
   const inner = m.kind === "count" ? (m.field ? `${m.field} filled in` : "rows") : (m.field ?? "?");
-  const fn = { sum: "SUM", count: "COUNT", count_distinct: "COUNT DISTINCT", avg: "AVG", min: "MIN", max: "MAX" }[m.kind];
-  return `${fn}(${inner})${m.where ? ` where ${m.where.field} = ${m.where.value}` : ""}`;
+  const fn = { sum: "SUM", count: "COUNT", count_distinct: "COUNT DISTINCT", avg: "AVG", min: "MIN", max: "MAX", median: "MEDIAN", percentile: "PERCENTILE", stdev: "STDEV", variance: "VARIANCE", mode: "MODE" }[m.kind];
+  const args = m.kind === "percentile" ? `${inner}, ${m.percentile ?? "?"}` : inner;
+  return `${fn}(${args})${m.where ? ` where ${m.where.field} = ${m.where.value}` : ""}`;
 }
 
 // --- the list ---------------------------------------------------------------------------------------------------
@@ -530,7 +536,7 @@ function FieldsTable({ fields, onChange }: { fields: DatasetField[]; onChange: (
 
 // --- measures -------------------------------------------------------------------------------------------------------
 
-const EMPTY_MEASURE: DatasetMeasure = { key: "", label: "", label_km: null, kind: "sum", source: null, field: null, where: null, numerator: null, denominator: null, format: null };
+const EMPTY_MEASURE: DatasetMeasure = { key: "", label: "", label_km: null, kind: "sum", source: null, field: null, where: null, numerator: null, denominator: null, percentile: null, format: null };
 
 function MeasuresEditor({
   measures,
@@ -682,6 +688,20 @@ function MeasuresEditor({
                     ))}
                   </select>
                 </label>
+                {m.kind === "percentile" && (
+                  <label>
+                    <span>Which percentile</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="any"
+                      value={m.percentile ?? ""}
+                      placeholder="90"
+                      onChange={(e) => set({ percentile: e.target.value === "" ? null : Number(e.target.value) })}
+                    />
+                  </label>
+                )}
               </>
             )}
             <label>
@@ -716,7 +736,7 @@ function MeasuresEditor({
             )}
           </div>
           <div className="flex gap-2">
-            <button type="button" className="btn btn-primary btn-sm" onClick={commit} disabled={!m.label.trim() || (m.kind === "ratio" ? !m.numerator || !m.denominator : m.kind !== "count" && !m.field)}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={commit} disabled={!m.label.trim() || (m.kind === "ratio" ? !m.numerator || !m.denominator : m.kind !== "count" && !m.field) || (m.kind === "percentile" && !(m.percentile != null && m.percentile >= 0 && m.percentile <= 100))}>
               {editing!.index === null ? "Add measure" : "Done"}
             </button>
             <button type="button" className="btn btn-sm" onClick={() => setEditing(null)}>

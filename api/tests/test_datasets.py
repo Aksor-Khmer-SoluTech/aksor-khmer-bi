@@ -83,6 +83,61 @@ def test_measures_are_computed_over_the_rows():
     assert texts["discounts"] == "1,500"
 
 
+STATS = {"rows": [{"v": n} for n in (4, 1, 3, 3, 9, None, "x", "2")]}  # numbers 1 2 3 3 4 9; None and "x" skipped
+
+
+@pytest.mark.parametrize("kind, extra, expected", [
+    ("median", {}, 3.0),
+    ("percentile", {"percentile": 50}, 3.0),
+    ("percentile", {"percentile": 0}, 1.0),
+    ("percentile", {"percentile": 100}, 9.0),
+    ("percentile", {"percentile": 90}, 6.5),  # Excel PERCENTILE.INC: 4 + (9 - 4) * 0.5
+    ("percentile", {"percentile": 25}, 2.25),
+    ("stdev", {}, pytest.approx(2.80475786, rel=1e-6)),  # of a sample, as Excel's STDEV.S
+    ("variance", {}, pytest.approx(7.86666667, rel=1e-6)),
+    ("mode", {}, 3.0),
+])
+def test_statistical_measures(kind, extra, expected):
+    measures = datasets.validate_measures([{"key": "m", "label": "M", "kind": kind, "field": "v", **extra}])
+    _, values = datasets.compute_measures(measures, STATS)
+    assert values["m"] == expected
+
+
+def test_statistical_measures_on_too_few_numbers():
+    measures = datasets.validate_measures([
+        {"key": kind, "label": kind, "kind": kind, "field": "v", **({"percentile": 75} if kind == "percentile" else {})}
+        for kind in ("median", "percentile", "stdev", "variance", "mode")
+    ])
+    _, empty = datasets.compute_measures(measures, {"rows": [{"v": None}]})
+    assert all(v is None for v in empty.values())
+    _, one = datasets.compute_measures(measures, {"rows": [{"v": 7}]})
+    assert one == {"median": 7.0, "percentile": 7.0, "stdev": None, "variance": None, "mode": 7.0}
+
+
+def test_mode_on_a_tie_is_the_smallest():
+    measures = datasets.validate_measures([{"key": "m", "label": "M", "kind": "mode", "field": "v"}])
+    _, values = datasets.compute_measures(measures, {"rows": [{"v": n} for n in (5, 2, 5, 2, 8)]})
+    assert values["m"] == 2.0
+
+
+def test_a_ratio_can_use_a_statistical_measure():
+    measures = datasets.validate_measures([
+        {"key": "med", "label": "Median", "kind": "median", "field": "v"},
+        {"key": "avg", "label": "Average", "kind": "avg", "field": "v"},
+        {"key": "skew", "label": "Median / average", "kind": "ratio", "numerator": "med", "denominator": "avg"},
+    ])
+    _, values = datasets.compute_measures(measures, STATS)
+    assert values["skew"] == pytest.approx(3 / (22 / 6))
+
+
+def test_a_measure_saved_before_percentiles_still_computes():
+    # Stored before 5a: no "percentile" key at all.
+    stored = {"key": "m", "label": "M", "kind": "median", "source": None, "field": "v", "where": None,
+              "numerator": None, "denominator": None, "format": None}
+    _, values = datasets.compute_measures([stored], STATS)
+    assert values["m"] == 3.0
+
+
 @pytest.mark.parametrize("value, pattern, text", [
     (1234.5, None, "1,234.50"), (1234, None, "1,234"), (1234.567, "#,##0.00", "1,234.57"), (0.256, "0%", "26%"),
     (12, "0.0", "12.0"), (1500, "#,##0 ៛", "1,500 ៛"), (None, "#,##0", "—"),
@@ -93,7 +148,11 @@ def test_number_formats(value, pattern, text):
 
 @pytest.mark.parametrize("measures, fragment", [
     ([{"key": "Net", "label": "x", "kind": "sum", "field": "a"}], "lowercase letters"),
-    ([{"key": "a", "label": "x", "kind": "median", "field": "a"}], "a measure is one of"),
+    ([{"key": "a", "label": "x", "kind": "geomean", "field": "a"}], "a measure is one of"),
+    ([{"key": "a", "label": "x", "kind": "median"}], "choose the field"),
+    ([{"key": "a", "label": "x", "kind": "percentile", "field": "a"}], "which percentile"),
+    ([{"key": "a", "label": "x", "kind": "percentile", "field": "a", "percentile": 101}], "which percentile"),
+    ([{"key": "a", "label": "x", "kind": "percentile", "field": "a", "percentile": True}], "which percentile"),
     ([{"key": "a", "label": "x", "kind": "sum"}], "choose the field"),
     ([{"key": "a", "label": "x", "kind": "ratio", "numerator": "a", "denominator": "b"}], "isn't another measure"),
     ([{"key": "a", "label": "x", "kind": "sum", "field": "f"}, {"key": "a", "label": "y", "kind": "count"}], "Two measures"),
@@ -143,6 +202,24 @@ def test_preview_gives_data_fields_and_measures(auth_headers):
     fields = {(f["source"], f["name"]): f for f in body["fields"]}
     assert fields[("rows", "amount")]["label_km"] == "ចំនួនទឹកប្រាក់" and fields[("rows", "order_id")]["type"] == "text"
     assert body["data"]["title"] == "របាយការណ៍លក់"
+
+
+def test_statistical_measures_save_and_preview(auth_headers):
+    stats = [
+        {"key": "typical", "label": "Typical sale", "kind": "median", "field": "amount", "format": "#,##0 ៛"},
+        {"key": "p90", "label": "90th percentile", "kind": "percentile", "field": "amount", "percentile": 90},
+        {"key": "spread", "label": "Spread", "kind": "stdev", "field": "amount", "format": "#,##0"},
+    ]
+    resp = client.post("/api/v1/datasets/preview", headers=auth_headers, json={"data_source": {"type": "static", "static_data": SALES}, "measures": stats})
+    assert resp.status_code == 200, resp.text
+    measures = resp.json()["measures"]
+    assert measures["typical"] == {"text": "35,000 ៛", "value": 35000}
+    assert measures["p90"]["value"] == pytest.approx(39000)  # 25,000 35,000 40,000: 35,000 + 5,000 * 0.8
+    assert measures["spread"]["text"] == "7,638"
+    saved = _dataset(auth_headers, name="sales-stats", measures=stats)
+    assert {m["key"]: m["percentile"] for m in saved["measures"]} == {"typical": None, "p90": 90, "spread": None}
+    bad = [{**stats[1], "percentile": 120}]
+    _dataset(auth_headers, name="sales-stats-bad", measures=bad, expect=422)
 
 
 def test_a_report_built_on_a_dataset_runs_with_its_data_and_follows_it(auth_headers):

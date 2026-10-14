@@ -216,7 +216,7 @@ export interface DatasetField {
   hidden: boolean;
 }
 
-export type MeasureKind = "sum" | "count" | "count_distinct" | "avg" | "min" | "max" | "ratio";
+export type MeasureKind = "sum" | "count" | "count_distinct" | "avg" | "min" | "max" | "median" | "percentile" | "stdev" | "variance" | "mode" | "ratio";
 
 /** A named calculation over a dataset's rows; templates read {{ measures.<key> }} (formatted) and
  * {{ measure_values.<key> }} (the number). */
@@ -230,6 +230,8 @@ export interface DatasetMeasure {
   where: { field: string; value: string } | null;
   numerator: string | null;
   denominator: string | null;
+  /** percentile: which one, 0-100 (50 is the median). Absent on measures saved before percentiles existed. */
+  percentile?: number | null;
   format: string | null;
 }
 

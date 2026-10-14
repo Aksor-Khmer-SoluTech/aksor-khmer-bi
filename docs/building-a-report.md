@@ -623,8 +623,15 @@ as a **dataset** under Manage → Datasets (permission `dataset:manage`, held by
 - **Fields** — press **Run it** and every column the source returns is listed, each with a type (text, number,
   money, date, date & time, yes/no), an English and a Khmer label, how it's shown, and whether report authors see it.
 - **Measures** — named figures worked out over the rows on every run: *Sum*, *Count of rows*, *Count distinct*,
-  *Average*, *Minimum*, *Maximum*, each optionally *only where* a field equals a value, and *Ratio of two measures*.
-  Each has a display format such as `#,##0 ៛`, `$#,##0.00` or `0.0%`. **Run it** shows each one's value.
+  *Average*, *Minimum*, *Maximum*, *Median*, *Percentile*, *Standard deviation*, *Variance* and *Most common value*,
+  each optionally *only where* a field equals a value, and *Ratio of two measures*. Each has a display format such
+  as `#,##0 ៛`, `$#,##0.00` or `0.0%`. **Run it** shows each one's value.
+
+  The statistical ones work as in Excel: a *Percentile* asks which one (0–100; 90 means 90% of the values are at or
+  below it) and is interpolated between neighbouring values like `PERCENTILE.INC`; *Standard deviation* and
+  *Variance* are of a sample, like `STDEV.S` and `VAR.S`, so they need at least two values; *Most common value* takes
+  the smallest when several are seen equally often. Text and empty cells are skipped. In Analyze each pivot cell
+  works its median or percentile out over that cell's own rows, so totals are true medians, not averages of them.
 
 A report uses it from its Data source tab: choose **A dataset** and pick it. The report then asks for the dataset's
 filters (its own Parameters tab shows a note instead) and its template gets the dataset's data plus two extra keys:

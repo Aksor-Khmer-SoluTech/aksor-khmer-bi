@@ -6,7 +6,8 @@ area, Power BI a semantic model, Jasper a Domain. A dataset holds:
 * **fields** -- what each column means and how it reads: a type, an English and a Khmer label, a display format,
   hidden or not. Metadata for people (and for Analyze, later); a template still gets the raw values;
 * **measures** -- named calculations, picked rather than typed: sum, count, count distinct, average, minimum,
-  maximum over a field (optionally only where another field has a value), or the ratio of two other measures.
+  maximum, median, a percentile, standard deviation, variance or mode over a field (optionally only where another
+  field has a value), or the ratio of two other measures.
 
 A report built on a dataset saves only {"type": "dataset", "dataset": "<name>"} as its data source. Whenever the
 report is looked up to be run (report_store.get_report), `resolve_into` puts the dataset's current source and filters
@@ -20,6 +21,8 @@ from __future__ import annotations
 
 import math
 import re
+import statistics
+from collections import Counter
 from typing import Any
 
 from sqlalchemy import select
@@ -30,7 +33,7 @@ from .report_data import MAX_VALUE_LENGTH, DataConfigError
 NAME_RE = re.compile(r"^[a-z0-9]+([-_][a-z0-9]+)*$")
 KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 FIELD_TYPES = ("text", "number", "money", "date", "datetime", "boolean")
-MEASURE_KINDS = ("sum", "count", "count_distinct", "avg", "min", "max", "ratio")
+MEASURE_KINDS = ("sum", "count", "count_distinct", "avg", "min", "max", "median", "percentile", "stdev", "variance", "mode", "ratio")
 MAX_FIELDS = 200
 MAX_MEASURES = 50
 LABEL_MAX = 100
@@ -128,6 +131,7 @@ def validate_measures(raw: Any) -> list[dict]:
             "where": None,
             "numerator": None,
             "denominator": None,
+            "percentile": None,
             "format": _format(item.get("format"), key),
         }
         if kind == "ratio":
@@ -141,6 +145,11 @@ def validate_measures(raw: Any) -> list[dict]:
             if kind != "count" and not field:
                 raise DataConfigError(f"{key}: choose the field to {kind.replace('_', ' ')}")
             measure["field"] = field or None
+        if kind == "percentile":
+            p = item.get("percentile")
+            if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 100:
+                raise DataConfigError(f"{key}: choose which percentile, from 0 to 100 (50 is the median)")
+            measure["percentile"] = float(p)
         where = item.get("where")
         if where:
             if not isinstance(where, dict) or not (where.get("field") or "").strip() or "value" not in where:
@@ -207,7 +216,30 @@ def _plain(measure: dict, data: dict) -> float | None:
         return sum(numbers)
     if kind == "avg":
         return sum(numbers) / len(numbers)
+    if kind == "median":
+        return float(statistics.median(numbers))
+    if kind == "percentile":
+        return _percentile(sorted(numbers), measure.get("percentile") or 0.0)
+    if kind in ("stdev", "variance"):
+        # Of a sample (n - 1, as Excel's STDEV.S / VAR.S): the rows are usually some of what could have happened.
+        if len(numbers) < 2:
+            return None
+        return statistics.stdev(numbers) if kind == "stdev" else statistics.variance(numbers)
+    if kind == "mode":
+        # The value seen most often; on a tie, the smallest of them, so the answer doesn't depend on row order.
+        counts = Counter(numbers)
+        top = max(counts.values())
+        return min(n for n, c in counts.items() if c == top)
     return min(numbers) if kind == "min" else max(numbers)
+
+
+def _percentile(ordered: list[float], p: float) -> float:
+    """The p-th percentile (0-100) of sorted numbers, interpolated between neighbours -- Excel's PERCENTILE.INC,
+    so 0 is the minimum, 50 the median and 100 the maximum."""
+    position = (len(ordered) - 1) * p / 100
+    below = math.floor(position)
+    above = min(below + 1, len(ordered) - 1)
+    return ordered[below] + (ordered[above] - ordered[below]) * (position - below)
 
 
 def format_number(value: float | None, pattern: str | None) -> str:

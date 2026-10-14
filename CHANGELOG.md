@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+- **Statistical measures** (Phase 5a). A dataset's measures can now be a *Median*, a *Percentile* (choose which,
+  0–100), a *Standard deviation*, a *Variance* or the *Most common value* of a field, besides sum, count, average and
+  the rest. They work wherever measures do: report templates (`{{ measures.<key> }}`), Analyze pivots and charts,
+  dashboard tiles and data alerts — "tell me when the median sale drops below 30,000 ៛". They follow Excel's
+  `PERCENTILE.INC`, `STDEV.S` and `VAR.S`. Existing datasets are unchanged; no migration.
+
 ### Changed
 - **Analyze has its own place in the top bar**, next to Dashboards, for everyone who can analyze datasets
   (`analyze:use`). Before, it was only reachable through Dashboards → *Explore data*.

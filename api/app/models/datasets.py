@@ -33,12 +33,13 @@ class DatasetMeasure(BaseModel):
     key: str = Field(..., description="e.g. net_sales")
     label: str
     label_km: str | None = None
-    kind: Literal["sum", "count", "count_distinct", "avg", "min", "max", "ratio"]
+    kind: Literal["sum", "count", "count_distinct", "avg", "min", "max", "median", "percentile", "stdev", "variance", "mode", "ratio"]
     source: str | None = Field(None, description="The result it counts over (rows…); the first list when omitted")
     field: str | None = Field(None, description="The column (not for a plain count or a ratio)")
     where: MeasureWhere | None = Field(None, description="Only rows where this field has this value")
     numerator: str | None = Field(None, description="ratio: the measure on top")
     denominator: str | None = Field(None, description="ratio: the measure below")
+    percentile: float | None = Field(None, ge=0, le=100, description="percentile: which one, 0-100 (50 is the median)")
     format: str | None = None
 
 
