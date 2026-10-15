@@ -69,7 +69,7 @@ from .secrets import (
     SecretUpdate,
 )
 from .clients import ClientCreate, ClientOut, ClientReportRef, ClientReportsUpdate, ClientUpdate, ClientWithSecret
-from .folders import FolderCreate, FolderOut, FolderUpdate, ImageOut, StylesheetOut
+from .folders import FolderCreate, FolderOut, FolderUpdate, ImageOut, ResourceUpdate, ResourceUsage, StylesheetOut
 from .jobs import JobCreate, JobDeliveryOut, JobOut, JobRunOut, JobUpdate, SchedulePreview, SchedulePreviewRequest
 from .ldap import (
     LdapConfigCreate,
@@ -231,6 +231,8 @@ __all__ = [
     "FolderUpdate",
     "GrantOut",
     "ImageOut",
+    "ResourceUpdate",
+    "ResourceUsage",
     "JobCreate",
     "JobOut",
     "JobRunOut",

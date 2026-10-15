@@ -883,6 +883,17 @@ export interface ImageResource {
 }
 
 // The CSS counterpart to ImageResource — see api/app/stylesheet_store.py.
+/** A template that uses an image or stylesheet (api/app/resource_usage.py). */
+export interface ResourceUsage {
+  report_id: string;
+  name: string;
+  template_ext: TemplateExt;
+  /** The resource() names an html template maps to it. */
+  as: string[];
+  /** Its data points at the image ({"image_id": …}). */
+  in_data: boolean;
+}
+
 export type StyleFormat = "css" | "scss" | "sass" | "less";
 
 export interface StylesheetResource {

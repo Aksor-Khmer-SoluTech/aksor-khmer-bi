@@ -42,8 +42,18 @@ export default function ResourceTree(props: Props) {
           Folders
         </span>
         {canManageRoot && (
-          <button type="button" className="btn btn-ghost btn-sm icon-only" title="New root folder" onClick={() => setCreatingRoot(true)}>
-            +
+          // A "+" that widens into "+ New folder" on hover or focus, so it says what it does.
+          <button
+            type="button"
+            className="group btn btn-ghost btn-sm gap-0 px-2 hover:gap-1.5 focus-visible:gap-1.5"
+            title="New root folder"
+            aria-label="New root folder"
+            onClick={() => setCreatingRoot(true)}
+          >
+            <span aria-hidden="true">+</span>
+            <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 ease-out group-hover:max-w-[7rem] group-hover:opacity-100 group-focus-visible:max-w-[7rem] group-focus-visible:opacity-100">
+              New folder
+            </span>
           </button>
         )}
       </div>
@@ -142,7 +152,8 @@ function FolderRow({
           }}
           style={{ visibility: hasChildren ? "visible" : "hidden" }}
         >
-          <span className={isOpen ? "chevron chevron-flipped" : "chevron"}>
+          {/* The icon points left; turned to point right when closed and down when open. */}
+          <span className={`chevron ${isOpen ? "-rotate-90" : "rotate-180"}`}>
             <ChevronIcon />
           </span>
         </button>

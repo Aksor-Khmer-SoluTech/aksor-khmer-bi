@@ -136,6 +136,24 @@ def replace_image_content(image_id: str, content: bytes) -> dict:
         return _row_to_dict(row)
 
 
+_KEEP = object()
+
+
+def update_image_meta(resource_id: str, *, name: str | None = None, folder_id: object = _KEEP) -> dict:
+    """Rename and/or move (folder_id None = the organization's top level); the file and its id stay the same."""
+    with db.SessionLocal() as session:
+        row = session.get(ImageResource, resource_id)
+        if row is None:
+            raise ImageNotFoundError(resource_id)
+        if name is not None:
+            row.name = name
+        if folder_id is not _KEEP:
+            row.folder_id = folder_id
+        row.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _row_to_dict(row)
+
+
 def fingerprint(image_id: str) -> str | None:
     """The image's sha256, worked out and kept the first time for a row from before fingerprints. None if its file
     is gone."""

@@ -15,9 +15,9 @@ import hashlib
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
-from .. import audit, db, projects, style_compile, stylesheet_store
+from .. import audit, db, projects, resource_usage, style_compile, stylesheet_store
 from ..auth import ensure_org_scope, get_current_user
-from ..models import StylesheetOut
+from ..models import ResourceUpdate, ResourceUsage, StylesheetOut
 from ..rbac import AuthContext, can_manage_folder_contents, can_view_folder_contents
 
 router = APIRouter(prefix="/api/v1/stylesheets", tags=["stylesheets"])
@@ -188,3 +188,54 @@ def delete_stylesheet(stylesheet_id: str, request: Request, context: AuthContext
         label=meta["name"], org_id=meta["org_id"], summary=f'Deleted stylesheet "{meta["name"]}"',
         details={"size_bytes": meta.get("size_bytes"), "folder_id": meta["folder_id"]},
     )
+
+
+def _check_move(session, context: AuthContext, meta: dict, body: ResourceUpdate) -> None:
+    """Moving needs manage on the folder it leaves and the one it goes to (same organization)."""
+    if not can_manage_folder_contents(session, context, meta["folder_id"]):
+        raise HTTPException(status_code=403, detail="Missing 'manage' access on this stylesheet's folder")
+    if "folder_id" in body.model_fields_set and body.folder_id is not None:
+        folder = session.get(db.Folder, body.folder_id)
+        if folder is None or folder.org_id != meta["org_id"]:
+            raise HTTPException(status_code=404, detail="Folder not found")
+    if "folder_id" in body.model_fields_set and not can_manage_folder_contents(session, context, body.folder_id):
+        raise HTTPException(status_code=403, detail="Missing 'manage' access on the destination folder")
+
+
+@router.patch("/{stylesheet_id}", summary="Rename or move a stylesheet (its id, and every template using it, stay the same)", response_model=StylesheetOut)
+def update_stylesheet(stylesheet_id: str, body: ResourceUpdate, request: Request, context: AuthContext = Depends(get_current_user)) -> StylesheetOut:
+    try:
+        meta = stylesheet_store.get_stylesheet(stylesheet_id)
+    except stylesheet_store.StylesheetNotFoundError:
+        raise HTTPException(status_code=404, detail="Stylesheet not found")
+    with db.SessionLocal() as session:
+        if not can_view_folder_contents(session, context, meta["folder_id"]):
+            raise HTTPException(status_code=404, detail="Stylesheet not found")
+        _check_move(session, context, meta, body)
+        where_to = projects.folder_path(session, body.folder_id) if "folder_id" in body.model_fields_set else None
+    kwargs = {"name": body.name.strip() if body.name else None}
+    if "folder_id" in body.model_fields_set:
+        kwargs["folder_id"] = body.folder_id
+    updated = stylesheet_store.update_stylesheet_meta(stylesheet_id, **kwargs)
+    changes = [c for c in (
+        {"field": "name", "before": meta["name"], "after": updated["name"]} if updated["name"] != meta["name"] else None,
+        {"field": "folder_id", "before": meta["folder_id"], "after": updated["folder_id"]} if updated["folder_id"] != meta["folder_id"] else None,
+    ) if c]
+    if changes:
+        audit.record(
+            audit.Actor.of(context, request), "stylesheet.update", "stylesheet", stylesheet_id, label=updated["name"], org_id=meta["org_id"],
+            summary=f'{"Moved" if where_to else "Renamed"} stylesheet "{updated["name"]}"' + (f" to {where_to}" if where_to else ""), changes=changes,
+        )
+    return _to_out(updated)
+
+
+@router.get("/{stylesheet_id}/usage", summary="The templates that use this stylesheet", response_model=list[ResourceUsage])
+def stylesheet_usage(stylesheet_id: str, context: AuthContext = Depends(get_current_user)) -> list[ResourceUsage]:
+    try:
+        meta = stylesheet_store.get_stylesheet(stylesheet_id)
+    except stylesheet_store.StylesheetNotFoundError:
+        raise HTTPException(status_code=404, detail="Stylesheet not found")
+    with db.SessionLocal() as session:
+        if not can_view_folder_contents(session, context, meta["folder_id"]):
+            raise HTTPException(status_code=404, detail="Stylesheet not found")
+    return [ResourceUsage(**u) for u in resource_usage.used_by("stylesheet", stylesheet_id, meta["org_id"])]

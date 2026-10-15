@@ -20,7 +20,7 @@ import { Download, Package, Upload } from "lucide-react";
 import ResourceContentPane from "./ResourceContentPane";
 import { CardGridSkeleton, TreeSkeleton } from "./Skeletons";
 
-type DragKind = "folder" | "report" | "image";
+type DragKind = "folder" | "report" | "image" | "stylesheet";
 type DraggedItem = { kind: DragKind; id: string; label: string };
 
 /** The Resources repository — a JasperReports-Server-style folder tree
@@ -170,7 +170,9 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
         ? folders?.find((f) => f.id === dragged.id)?.name
         : dragged.kind === "report"
           ? reports?.find((r) => r.report_id === dragged.id)?.name
-          : images?.find((i) => i.id === dragged.id)?.name;
+          : dragged.kind === "image"
+            ? images?.find((i) => i.id === dragged.id)?.name
+            : stylesheets.find((x) => x.id === dragged.id)?.name;
     setActiveDrag({ kind: dragged.kind, id: dragged.id, label: label ?? "" });
   }
 
@@ -178,7 +180,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
     setActiveDrag(null);
     const { active, over } = event;
     if (!over) return;
-    const dragged = active.data.current as { kind: "folder" | "report" | "image"; id: string } | undefined;
+    const dragged = active.data.current as { kind: DragKind; id: string } | undefined;
     const target = over.data.current as { folderId: string | null } | undefined;
     if (!dragged || !target) return;
     if (dragged.kind === "folder" && dragged.id === target.folderId) return;
@@ -194,14 +196,12 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
       } else if (dragged.kind === "report") {
         const updated = await api.updateReport(dragged.id, { folder_id: target.folderId });
         setReports((prev) => prev?.map((r) => (r.report_id === dragged.id ? updated : r)) ?? null);
+      } else if (dragged.kind === "image") {
+        const updated = await api.images.update(dragged.id, { folder_id: target.folderId });
+        setImages((prev) => prev?.map((i) => (i.id === dragged.id ? updated : i)) ?? null);
       } else {
-        // No move-image endpoint exists (images are folder-scoped at
-        // upload time) — re-upload-to-move isn't worth building for a
-        // first pass, so an image drag currently only reorders visually
-        // within its own folder pane, never actually moves between
-        // folders. Left as a known gap rather than a silent failure:
-        setMoveError("Moving an existing image between folders isn't supported yet — delete and re-upload it into the new folder.");
-        return;
+        const updated = await api.stylesheets.update(dragged.id, { folder_id: target.folderId });
+        setStylesheets((prev) => prev.map((x) => (x.id === dragged.id ? updated : x)));
       }
       // Land the drop somewhere visible instead of requiring a second
       // click to expand the folder you just dropped into.
@@ -316,6 +316,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
           )}
           <ResourceContentPane
             folder={selectedFolder}
+            folders={folders}
             reports={reportsInFolder}
             images={imagesInFolder}
             stylesheets={stylesheetsInFolder}
@@ -323,7 +324,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
             onRemoveShortcut={removeShortcut}
             canManage={canManageSelected}
             orgId={auth.orgId ?? "root"}
-            onImageUploaded={(img) => setImages((prev) => [...(prev ?? []), img])}
+            onImageChanged={(img) => setImages((prev) => [...(prev ?? []).filter((i) => i.id !== img.id), img].sort((a, b) => a.name.localeCompare(b.name)))}
             onImageDeleted={(id) => setImages((prev) => prev?.filter((i) => i.id !== id) ?? null)}
             onStylesheetChanged={(sheet) => setStylesheets((prev) => [...prev.filter((s) => s.id !== sheet.id), sheet].sort((a, b) => a.name.localeCompare(b.name)))}
             onStylesheetDeleted={(id) => setStylesheets((prev) => prev.filter((s) => s.id !== id))}

@@ -39,6 +39,22 @@ class FolderOut(BaseModel):
     is_project: bool = Field(False, description="A top-level folder whose contents export and import as one package")
 
 
+class ResourceUpdate(BaseModel):
+    """Rename and/or move an image or stylesheet. Omit folder_id to leave it where it is; null moves it to the top level."""
+    name: str | None = Field(None, min_length=1, max_length=200)
+    folder_id: str | None = None
+
+
+class ResourceUsage(BaseModel):
+    report_id: str
+    name: str
+    template_ext: str
+    as_: list[str] = Field(default_factory=list, alias="as", description="The resource() names an html template maps to it")
+    in_data: bool = Field(False, description="Its data points at the image ({\"image_id\": …})")
+
+    model_config = {"populate_by_name": True}
+
+
 class ResourceDuplicate(BaseModel):
     id: str
     name: str

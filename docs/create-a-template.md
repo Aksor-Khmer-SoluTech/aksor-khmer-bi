@@ -659,6 +659,13 @@ Every `href`/`src` must be exactly one `resource('…')` call; anything else (a 
 URL, a relative path) is rejected at registration. At register time you map each name to
 an uploaded resource. Rendering never touches the network.
 
+**Where's the URL of my logo?** There isn't one, on purpose: a template names a resource (html) or points at its
+id (Word data), and Aksor puts the file in itself. Open any image or stylesheet in Manage → Resources (click its
+card) to get exactly what to paste: the `resource('…')` line for an html template, the `{"image_id": …}` for a Word
+template's data, and **Used by** — the templates that already use it, and under which name. The same panel
+replaces, renames, moves and deletes it; a file can also be dragged onto a folder in the tree. **Upload** takes
+images and stylesheets together (several at once, or dropped onto the folder).
+
 **Stylesheets in CSS, SCSS, Sass or Less.** Upload them under Manage → Resources (*Upload stylesheet*), or from the
 register dialog's *Upload new*. SCSS (`.scss`), Sass's indented syntax (`.sass`) and Less (`.less`) are compiled to
 CSS when uploaded — the template always gets CSS, since that's all the PDF engine reads — and the file you uploaded is

@@ -1,11 +1,10 @@
 import { useDraggable } from "@dnd-kit/core";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Link2 } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { CircleCheck, Link2, MoreHorizontal } from "lucide-react";
 import { UploadIcon } from "../admin/icons";
 import { api, ApiError } from "../api";
-import { useDialogRef } from "../hooks";
-import type { Folder, ImageResource, ReportMeta, StyleFormat, StylesheetResource } from "../types";
-import ModalClose from "./ModalClose";
+import type { Folder, ImageResource, ReportMeta, StylesheetResource } from "../types";
+import ResourceDetails, { STYLE_LABEL, type DetailItem } from "./ResourceDetails";
 
 function ReportCard({ report }: { report: ReportMeta }) {
   const draggable = useDraggable({ id: `drag-report:${report.report_id}`, data: { kind: "report", id: report.report_id } });
@@ -88,151 +87,112 @@ function ImageThumbnail({ image }: { image: ImageResource }) {
   );
 }
 
-function ImageCard({ image, canManage, onDelete }: { image: ImageResource; canManage: boolean; onDelete: () => void }) {
-  const draggable = useDraggable({ id: `drag-image:${image.id}`, data: { kind: "image", id: image.id } });
+type CardAction = "open" | "copy" | "replace" | "move" | "delete";
+
+/** The one "…" menu on an image or stylesheet card -- everything else happens in its details panel. */
+function CardMenu({ canManage, onAction }: { canManage: boolean; onAction: (action: CardAction) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => rootRef.current && !rootRef.current.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  const items: [CardAction, string][] = [
+    ["open", "Details"],
+    ["copy", "Copy reference"],
+    ...(canManage ? ([["replace", "Replace…"], ["move", "Move…"], ["delete", "Delete"]] as [CardAction, string][]) : []),
+  ];
+  return (
+    <div className="relative" ref={rootRef} onPointerDown={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm icon-only"
+        aria-label="More"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+      >
+        <MoreHorizontal size={15} />
+      </button>
+      {open && (
+        <div className="account-panel resource-row-panel right-0 left-auto" role="menu" onClick={(e) => e.stopPropagation()}>
+          {items.map(([action, label]) => (
+            <button
+              key={action}
+              type="button"
+              className={`account-item${action === "delete" ? " account-item-danger" : ""}`}
+              onClick={() => {
+                setOpen(false);
+                onAction(action);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** An image or a stylesheet: its picture (or first lines of CSS), name, type, and the one menu. Click to open it. */
+function FileCard({ item, canManage, onAction }: { item: DetailItem; canManage: boolean; onAction: (action: CardAction) => void }) {
+  const draggable = useDraggable({ id: `drag-${item.kind}:${item.data.id}`, data: { kind: item.kind, id: item.data.id } });
+  const [head, setHead] = useState<string | null>(null);
+  const fmt = item.kind === "stylesheet" ? (item.data.source_format ?? "css") : null;
+  useEffect(() => {
+    if (item.kind !== "stylesheet") return;
+    let live = true;
+    api.stylesheets
+      .source(item.data.id)
+      .then((text) => live && setHead(text.split("\n").slice(0, 6).join("\n")))
+      .catch(() => live && setHead(""));
+    return () => {
+      live = false;
+    };
+  }, [item.kind, item.data.id, item.data.updated_at]);
   return (
     <article
       ref={draggable.setNodeRef}
       {...draggable.listeners}
       {...draggable.attributes}
-      className="card resource-card"
-      style={{ opacity: draggable.isDragging ? 0.4 : 1, cursor: "grab" }}
+      className="card resource-card cursor-pointer"
+      style={{ opacity: draggable.isDragging ? 0.4 : 1 }}
+      onClick={() => onAction("open")}
+      onKeyDown={(e) => e.key === "Enter" && onAction("open")}
+      title="Open — how to use it, where it's used"
     >
-      <ImageThumbnail image={image} />
-      <div className="card-top">
-        <h3 className="card-name">{image.name}</h3>
-        <span className="badge badge-docx">{image.file_ext}</span>
-      </div>
-      <div className="card-meta">
-        <span>
-          {image.width_px}×{image.height_px}px
-        </span>
-        {canManage && (
-          <button
-            type="button"
-            className="link-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          >
-            delete
-          </button>
-        )}
-      </div>
-    </article>
-  );
-}
-
-const STYLE_LABEL: Record<StyleFormat, string> = { css: "CSS", scss: "SCSS", sass: "Sass", less: "Less" };
-const STYLE_ACCEPT = ".css,.scss,.sass,.less";
-
-/** A stylesheet in the library: its first lines as the "thumbnail", the format it was written in, and what you can
- * do with it -- view the source and the compiled CSS, replace it (any format), delete it. */
-function StyleCard({
-  sheet,
-  canManage,
-  onView,
-  onReplace,
-  onDelete,
-}: {
-  sheet: StylesheetResource;
-  canManage: boolean;
-  onView: () => void;
-  onReplace: () => void;
-  onDelete: () => void;
-}) {
-  const [head, setHead] = useState<string | null>(null);
-  const fmt = sheet.source_format ?? "css";
-  useEffect(() => {
-    let live = true;
-    api.stylesheets
-      .source(sheet.id)
-      .then((text) => live && setHead(text.split("\n").slice(0, 7).join("\n")))
-      .catch(() => live && setHead(""));
-    return () => {
-      live = false;
-    };
-  }, [sheet.id, sheet.updated_at]);
-  return (
-    <article className="card resource-card">
-      <button
-        type="button"
-        onClick={onView}
-        className="mb-2 block h-[104px] w-full cursor-pointer overflow-hidden rounded-[8px] border border-border-soft bg-bg-panel p-2 text-left"
-        title="View the source and the compiled CSS"
-      >
-        <pre className="m-0 font-mono text-[0.66rem] leading-[1.45] whitespace-pre text-text-dim">{head ?? "…"}</pre>
-      </button>
-      <div className="card-top">
-        <h3 className="card-name">{sheet.name}</h3>
-        <span className={`badge ${fmt === "css" ? "badge-html" : "badge-xlsx"}`}>{STYLE_LABEL[fmt]}</span>
-      </div>
-      <div className="card-meta">
-        <span>{sheet.size_bytes < 1024 ? `${sheet.size_bytes} B` : `${(sheet.size_bytes / 1024).toFixed(1)} KB`} CSS</span>
-        <span className="flex gap-2.5">
-          <button type="button" className="link-btn" onClick={onView}>
-            view
-          </button>
-          {canManage && (
-            <>
-              <button type="button" className="link-btn" onClick={onReplace}>
-                replace
-              </button>
-              <button type="button" className="link-btn" onClick={onDelete}>
-                delete
-              </button>
-            </>
-          )}
-        </span>
-      </div>
-    </article>
-  );
-}
-
-/** The source as uploaded beside the CSS a template gets -- for SCSS / Sass / Less the two differ. */
-function StyleViewer({ sheet, onClose }: { sheet: StylesheetResource; onClose: () => void }) {
-  const ref = useDialogRef(true);
-  const fmt = sheet.source_format ?? "css";
-  const [tab, setTab] = useState<"source" | "css">("source");
-  const [text, setText] = useState<{ source?: string; css?: string }>({});
-  useEffect(() => {
-    void Promise.all([api.stylesheets.source(sheet.id), fmt === "css" ? Promise.resolve(undefined) : api.stylesheets.css(sheet.id)]).then(([source, css]) =>
-      setText({ source, css }),
-    );
-  }, [sheet.id, fmt]);
-  return (
-    <dialog ref={ref} className="modal modal-wide" onCancel={onClose} onClose={onClose}>
-      <ModalClose />
-      <h2 className="panel-title">
-        {sheet.name} <span className="badge badge-xlsx align-middle">{STYLE_LABEL[fmt]}</span>
-      </h2>
-      {fmt !== "css" && (
-        <div className="segmented segmented-sm mb-2" role="tablist">
-          <button type="button" className={`segmented-btn${tab === "source" ? " active" : ""}`} onClick={() => setTab("source")}>
-            {STYLE_LABEL[fmt]} source
-          </button>
-          <button type="button" className={`segmented-btn${tab === "css" ? " active" : ""}`} onClick={() => setTab("css")}>
-            Compiled CSS — what templates get
-          </button>
+      {item.kind === "image" ? (
+        <ImageThumbnail image={item.data} />
+      ) : (
+        <div className="resource-thumb items-start justify-start overflow-hidden p-2">
+          <pre className="m-0 font-mono text-[0.64rem] leading-[1.45] whitespace-pre text-text-dim">{head ?? "…"}</pre>
         </div>
       )}
-      <pre className="m-0 max-h-[60vh] overflow-auto rounded-[8px] border border-border-soft bg-bg-panel p-3 font-mono text-[0.78rem] leading-[1.5]">
-        {(tab === "source" ? text.source : text.css) ?? "Loading…"}
-      </pre>
-      <div className="dialog-actions">
-        <button type="button" className="btn" onClick={onClose}>
-          Close
-        </button>
+      <div className="card-top items-center">
+        <h3 className="card-name">{item.data.name}</h3>
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <span className={`badge ${item.kind === "image" ? "badge-docx" : fmt === "css" ? "badge-html" : "badge-xlsx"}`}>
+            {item.kind === "image" ? item.data.file_ext : STYLE_LABEL[fmt ?? "css"]}
+          </span>
+          <CardMenu canManage={canManage} onAction={onAction} />
+        </span>
       </div>
-    </dialog>
+    </article>
   );
 }
 
-type Duplicate = { kind: "image" | "stylesheet"; id: string; duplicates: { id: string; name: string; where: string }[] };
+const STYLE_EXT = /\.(css|scss|sass|less)$/i;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i;
+type Filter = "all" | "templates" | "images" | "stylesheets";
+type UploadNote = { name: string; kind: DetailItem["kind"]; id: string; same: { id: string; name: string; where: string }[]; compiled?: string };
 
 export default function ResourceContentPane({
   folder,
+  folders,
   reports,
   images,
   stylesheets,
@@ -240,12 +200,13 @@ export default function ResourceContentPane({
   onRemoveShortcut,
   canManage,
   orgId,
-  onImageUploaded,
+  onImageChanged,
   onImageDeleted,
   onStylesheetChanged,
   onStylesheetDeleted,
 }: {
   folder: Folder | null;
+  folders: Folder[];
   reports: ReportMeta[];
   images: ImageResource[];
   stylesheets: StylesheetResource[];
@@ -253,200 +214,232 @@ export default function ResourceContentPane({
   onRemoveShortcut: (id: string) => void;
   canManage: boolean;
   orgId: string;
-  onImageUploaded: (image: ImageResource) => void;
+  /** Added, replaced, renamed or moved. */
+  onImageChanged: (image: ImageResource) => void;
   onImageDeleted: (id: string) => void;
-  /** Added or replaced. */
   onStylesheetChanged: (sheet: StylesheetResource) => void;
   onStylesheetDeleted: (id: string) => void;
 }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const styleInputRef = useRef<HTMLInputElement>(null);
-  const replaceRef = useRef<{ input: HTMLInputElement | null; id: string | null }>({ input: null, id: null });
-  const [uploading, setUploading] = useState<"image" | "style" | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<StylesheetResource | null>(null);
-  // The file just uploaded was already here (same content): say where, and offer to drop the new copy.
-  const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
+  const [notes, setNotes] = useState<UploadNote[]>([]);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [open, setOpen] = useState<{ item: DetailItem; action: "replace" | "move" | "delete" | null } | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading("image");
+  useEffect(() => {
+    setFilter("all");
+    setNotes([]);
+  }, [folder?.id]);
+
+  function changed(item: DetailItem) {
+    if (item.kind === "image") onImageChanged(item.data);
+    else onStylesheetChanged(item.data);
+    setOpen((o) => (o && o.item.data.id === item.data.id ? { ...o, item } : o));
+  }
+  function deleted(kind: DetailItem["kind"], id: string) {
+    if (kind === "image") onImageDeleted(id);
+    else onStylesheetDeleted(id);
+    setNotes((n) => n.filter((x) => x.id !== id));
+  }
+
+  /** Images and style files in one go, each to its own kind -- told apart by the file name. */
+  async function upload(files: File[]) {
+    if (!files.length) return;
+    setUploading(true);
     setError(null);
+    const done: UploadNote[] = [];
+    const problems: string[] = [];
+    for (const file of files) {
+      try {
+        if (STYLE_EXT.test(file.name)) {
+          const sheet = await api.stylesheets.upload(file.name.replace(STYLE_EXT, ""), orgId, folder?.id ?? null, file);
+          onStylesheetChanged(sheet);
+          const fmt = sheet.source_format ?? "css";
+          done.push({ name: file.name, kind: "stylesheet", id: sheet.id, same: sheet.duplicates ?? [], compiled: fmt !== "css" ? STYLE_LABEL[fmt] : undefined });
+        } else if (IMAGE_EXT.test(file.name) || file.type.startsWith("image/")) {
+          const image = await api.images.upload(file.name.replace(/\.[^.]+$/, ""), orgId, folder?.id ?? null, file);
+          onImageChanged(image);
+          done.push({ name: file.name, kind: "image", id: image.id, same: image.duplicates ?? [] });
+        } else {
+          problems.push(`${file.name}: not an image or a stylesheet (.css, .scss, .sass, .less)`);
+        }
+      } catch (err) {
+        problems.push(`${file.name}: ${err instanceof ApiError ? err.message : "couldn't upload it"}`);
+      }
+    }
+    setNotes(done);
+    setError(problems.length ? problems.join("\n") : null);
+    setUploading(false);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  async function removeNew(note: UploadNote) {
     try {
-      const image = await api.images.upload(file.name, orgId, folder?.id ?? null, file);
-      onImageUploaded(image);
-      setDuplicate(image.duplicates?.length ? { kind: "image", id: image.id, duplicates: image.duplicates } : null);
+      await (note.kind === "image" ? api.images.delete(note.id) : api.stylesheets.delete(note.id));
+      deleted(note.kind, note.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't upload image");
-    } finally {
-      setUploading(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setError(err instanceof ApiError ? err.message : "Couldn't remove it");
     }
   }
 
-  async function handleStyleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading("style");
-    setError(null);
-    try {
-      const name = file.name.replace(/\.(css|scss|sass|less)$/i, "");
-      const sheet = await api.stylesheets.upload(name, orgId, folder?.id ?? null, file);
-      onStylesheetChanged(sheet);
-      setDuplicate(sheet.duplicates?.length ? { kind: "stylesheet", id: sheet.id, duplicates: sheet.duplicates } : null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't upload the stylesheet");
-    } finally {
-      setUploading(null);
-      if (styleInputRef.current) styleInputRef.current.value = "";
+  function act(item: DetailItem, action: CardAction) {
+    if (action === "copy") {
+      void navigator.clipboard?.writeText(`{{ resource('${item.data.name}') }}`).then(() => {
+        setCopied(item.data.id);
+        window.setTimeout(() => setCopied(null), 1500);
+      });
+      return;
     }
+    setOpen({ item, action: action === "open" ? null : action });
   }
 
-  async function handleReplace(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    const id = replaceRef.current.id;
-    if (!file || !id) return;
-    setError(null);
-    try {
-      onStylesheetChanged(await api.stylesheets.replace(id, file));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't replace the stylesheet");
-    } finally {
-      e.target.value = "";
-    }
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!canManage || !e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setDropping(true);
+  }
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    if (!canManage || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    setDropping(false);
+    void upload([...e.dataTransfer.files]);
   }
 
-  async function handleDelete(id: string) {
-    setError(null);
-    try {
-      await api.images.delete(id);
-      onImageDeleted(id);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't delete image");
-    }
-  }
-
-  async function handleDeleteStyle(id: string) {
-    setError(null);
-    try {
-      await api.stylesheets.delete(id);
-      onStylesheetDeleted(id);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't delete the stylesheet");
-    }
-  }
-
-  const empty = reports.length === 0 && images.length === 0 && stylesheets.length === 0 && shortcuts.length === 0;
+  const counts = { templates: reports.length + shortcuts.length, images: images.length, stylesheets: stylesheets.length };
+  const total = counts.templates + counts.images + counts.stylesheets;
+  const show = (f: Filter) => filter === "all" || filter === f;
+  const files: DetailItem[] = [
+    ...(show("images") ? images.map((data) => ({ kind: "image" as const, data })) : []),
+    ...(show("stylesheets") ? stylesheets.map((data) => ({ kind: "stylesheet" as const, data })) : []),
+  ];
 
   return (
-    <div className="resource-content">
+    <div
+      className={`resource-content relative rounded-[12px] ${dropping ? "outline-2 outline-offset-4 outline-accent outline-dashed" : ""}`}
+      onDragOver={onDragOver}
+      onDragLeave={(e) => e.currentTarget === e.target && setDropping(false)}
+      onDrop={onDrop}
+    >
       <div className="resource-content-header">
         <div>
           <h2 className="resource-content-title">{folder ? folder.name : "Root"}</h2>
           {folder?.description && <p className="muted" style={{ margin: "2px 0 0" }}>{folder.description}</p>}
         </div>
         {canManage && (
-          <div className="flex flex-wrap gap-2">
-            <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} />
-            <input ref={styleInputRef} type="file" accept={STYLE_ACCEPT} style={{ display: "none" }} onChange={handleStyleChange} />
-            <input
-              ref={(el) => {
-                replaceRef.current.input = el;
-              }}
-              type="file"
-              accept={STYLE_ACCEPT}
-              style={{ display: "none" }}
-              onChange={handleReplace}
-            />
-            <button type="button" className="btn btn-sm" disabled={uploading !== null} onClick={() => fileInputRef.current?.click()}>
-              {uploading === "image" ? <span className="spinner" /> : <UploadIcon />}
-              Upload image
-            </button>
+          <>
+            <input ref={inputRef} type="file" multiple accept={`image/*,.css,.scss,.sass,.less`} className="hidden" onChange={(e) => void upload([...(e.target.files ?? [])])} />
             <button
               type="button"
               className="btn btn-sm"
-              disabled={uploading !== null}
-              onClick={() => styleInputRef.current?.click()}
-              title="CSS, SCSS, Sass or Less -- compiled to CSS on upload"
+              disabled={uploading}
+              onClick={() => inputRef.current?.click()}
+              title="Images, and stylesheets in CSS, SCSS, Sass or Less — or drop files on this folder"
             >
-              {uploading === "style" ? <span className="spinner" /> : <UploadIcon />}
-              Upload stylesheet
+              {uploading ? <span className="spinner" /> : <UploadIcon />}
+              Upload
             </button>
-          </div>
+          </>
         )}
       </div>
 
-      {error && <p className="alert alert-error whitespace-pre-wrap">{error}</p>}
-      {duplicate ? (
-        <div className="alert alert-warning flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="min-w-0 flex-1 leading-snug">
-            This exact {duplicate.kind === "image" ? "image" : "stylesheet"} is already here as{" "}
-            {duplicate.duplicates.map((d, i) => (
-              <span key={d.id}>
-                {i > 0 && ", "}“<b>{d.name}</b>” <span className="text-text-dim">in {d.where}</span>
-              </span>
+      {total > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Show">
+          {(
+            [
+              ["all", "All", total],
+              ["templates", "Templates", counts.templates],
+              ["images", "Images", counts.images],
+              ["stylesheets", "Stylesheets", counts.stylesheets],
+            ] as const
+          )
+            .filter(([f, , n]) => f === "all" || n > 0)
+            .map(([f, label, n]) => (
+              <button
+                key={f}
+                type="button"
+                role="tab"
+                aria-selected={filter === f}
+                className={`rounded-full border px-2.5 py-0.5 text-[0.78rem] ${filter === f ? "border-accent-border bg-accent-soft text-accent-strong" : "border-border-soft text-text-dim hover:bg-bg-panel"}`}
+                onClick={() => setFilter(f)}
+              >
+                {label} <span className="font-mono text-[0.72rem] opacity-80">{n}</span>
+              </button>
             ))}
-            . A separate copy keeps this folder self-contained (a project moves with its own files); one shared file is updated once, for everyone.
-          </span>
-          <button type="button" className="btn btn-sm" onClick={() => setDuplicate(null)}>
-            Keep both
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => {
-              void (duplicate.kind === "image" ? handleDelete(duplicate.id) : handleDeleteStyle(duplicate.id));
-              setDuplicate(null);
-            }}
-          >
-            Remove the new copy
-          </button>
         </div>
-      ) : null}
+      )}
 
-      {empty ? (
-        <div className="empty-state">
-          <p>Nothing here yet.</p>
-          <p className="muted" style={{ maxWidth: 380, margin: "6px auto 0" }}>
-            Drag a report or image from another folder into this one from the tree on the left, or upload an image or a stylesheet (CSS, SCSS, Sass or
-            Less) directly.
-          </p>
-        </div>
-      ) : (
-        <div className="card-grid">
-          {reports.map((r, i) => (
-            <div key={r.report_id} style={{ "--i": i } as CSSProperties}>
-              <ReportCard report={r} />
-            </div>
-          ))}
-          {shortcuts.map(({ shortcut, report }, i) => (
-            <div key={shortcut.id} style={{ "--i": reports.length + i } as CSSProperties}>
-              <ShortcutCard report={report} canManage={canManage} onRemove={() => onRemoveShortcut(shortcut.id)} />
-            </div>
-          ))}
-          {images.map((img, i) => (
-            <div key={img.id} style={{ "--i": reports.length + shortcuts.length + i } as CSSProperties}>
-              <ImageCard image={img} canManage={canManage} onDelete={() => handleDelete(img.id)} />
-            </div>
-          ))}
-          {stylesheets.map((sheet, i) => (
-            <div key={sheet.id} style={{ "--i": reports.length + shortcuts.length + images.length + i } as CSSProperties}>
-              <StyleCard
-                sheet={sheet}
-                canManage={canManage}
-                onView={() => setViewing(sheet)}
-                onReplace={() => {
-                  replaceRef.current.id = sheet.id;
-                  replaceRef.current.input?.click();
-                }}
-                onDelete={() => void handleDeleteStyle(sheet.id)}
-              />
+      {error && <p className="alert alert-error whitespace-pre-wrap">{error}</p>}
+      {notes.length > 0 && (
+        <div className="mb-3 grid gap-1 rounded-[10px] border border-border-soft px-3 py-2 text-[0.84rem]">
+          {notes.map((n) => (
+            <div key={n.id} className="flex flex-wrap items-center gap-x-2">
+              <CircleCheck size={14} className="shrink-0 text-success" aria-hidden="true" />
+              <span className="min-w-0">
+                {n.name} uploaded{n.compiled ? ` · ${n.compiled} compiled to CSS` : ""}
+                {n.same.length > 0 && (
+                  <span className="text-text-dim">
+                    {" "}
+                    · same file as “{n.same[0].name}” in {n.same[0].where}
+                  </span>
+                )}
+              </span>
+              {n.same.length > 0 && (
+                <button type="button" className="link-btn text-[0.82rem]" onClick={() => void removeNew(n)} title="Remove the copy you just uploaded and keep the one already here">
+                  Use that one
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
-      {viewing && <StyleViewer sheet={viewing} onClose={() => setViewing(null)} />}
+
+      {total === 0 ? (
+        <div className="empty-state">
+          <p>{canManage ? "Drop files here, or press Upload." : "Nothing here yet."}</p>
+          <p className="muted" style={{ maxWidth: 400, margin: "6px auto 0" }}>
+            Images, and stylesheets in CSS, SCSS, Sass or Less. Templates come in from Templates, or drag one here from another folder.
+          </p>
+        </div>
+      ) : (
+        <div className="card-grid">
+          {show("templates") &&
+            reports.map((r, i) => (
+              <div key={r.report_id} style={{ "--i": i } as CSSProperties}>
+                <ReportCard report={r} />
+              </div>
+            ))}
+          {show("templates") &&
+            shortcuts.map(({ shortcut, report }, i) => (
+              <div key={shortcut.id} style={{ "--i": reports.length + i } as CSSProperties}>
+                <ShortcutCard report={report} canManage={canManage} onRemove={() => onRemoveShortcut(shortcut.id)} />
+              </div>
+            ))}
+          {files.map((item, i) => (
+            <div key={`${item.kind}-${item.data.id}`} className="relative" style={{ "--i": counts.templates + i } as CSSProperties}>
+              <FileCard item={item} canManage={canManage} onAction={(a) => act(item, a)} />
+              {copied === item.data.id && (
+                <span className="pointer-events-none absolute top-2 right-2 rounded-full bg-accent px-2 py-0.5 text-[0.72rem] text-accent-ink">Copied</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <ResourceDetails
+          key={`${open.item.kind}-${open.item.data.id}`}
+          item={open.item}
+          folders={folders}
+          canManage={canManage}
+          initialAction={open.action}
+          onChanged={changed}
+          onDeleted={deleted}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </div>
   );
 }

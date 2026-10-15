@@ -290,6 +290,9 @@ tables and `app/rbac.py` for the authorization logic.
   viewer's own access (`app/dashboards.py`). **Data alerts** are jobs,
   `job_type: "data_alert"` (`app/data_alerts.py`); `condition`
   `above` / `below` a threshold, or `outlier` across a `group_by` field.
+- **Images and stylesheets, details** — `PATCH /images/{id}` and `/stylesheets/{id}` (rename, move; audited),
+  `PUT /images/{id}/file` (a new picture, same id), `GET …/{id}/usage` (the templates using it --
+  `app/resource_usage.py`).
 - **Stylesheets** — `/api/v1/stylesheets`: upload `.css`, `.scss`, `.sass` or `.less` (compiled on upload by
   `app/style_compile.py`; `@import`/`@use`/`@forward` refused), `GET /{id}/file` (the compiled CSS a template
   gets), `GET /{id}/source` (what was uploaded), `PUT /{id}/file` (replace, any format; audited).

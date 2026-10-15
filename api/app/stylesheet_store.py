@@ -158,6 +158,24 @@ def replace_stylesheet_content(stylesheet_id: str, content: bytes, source_format
         return _row_to_dict(row)
 
 
+_KEEP = object()
+
+
+def update_stylesheet_meta(resource_id: str, *, name: str | None = None, folder_id: object = _KEEP) -> dict:
+    """Rename and/or move (folder_id None = the organization's top level); the file and its id stay the same."""
+    with db.SessionLocal() as session:
+        row = session.get(StylesheetResource, resource_id)
+        if row is None:
+            raise StylesheetNotFoundError(resource_id)
+        if name is not None:
+            row.name = name
+        if folder_id is not _KEEP:
+            row.folder_id = folder_id
+        row.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _row_to_dict(row)
+
+
 def fingerprint(stylesheet_id: str) -> str | None:
     with db.SessionLocal() as session:
         row = session.get(StylesheetResource, stylesheet_id)

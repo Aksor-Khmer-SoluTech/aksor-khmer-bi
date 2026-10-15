@@ -40,6 +40,7 @@ import type {
   ImportPlan,
   ImportSummary,
   ProjectContents,
+  ResourceUsage,
   FontBlock,
   FontResource,
   InstalledFont,
@@ -1598,6 +1599,19 @@ export const api = {
     delete(id: string): Promise<void> {
       return del(`/images/${id}`, "Delete failed");
     },
+    /** Rename and/or move (folder_id null = the top level); the id, and every template using it, stay the same. */
+    update(id: string, body: { name?: string; folder_id?: string | null }): Promise<ImageResource> {
+      return sendJSON(`/images/${id}`, "PATCH", body);
+    },
+    /** A new picture under the same id -- every template using it changes. */
+    replace(id: string, file: File): Promise<ImageResource> {
+      const form = new FormData();
+      form.set("file", file);
+      return apiFetch(`/images/${id}/file`, { method: "PUT", body: form }).then((r) => asJson<ImageResource>(r));
+    },
+    usage(id: string): Promise<ResourceUsage[]> {
+      return getJSON(`/images/${id}/usage`);
+    },
     // The access token is a header this app attaches itself (see apiFetch
     // above), not a browser-automatic credential a plain <img src="...">
     // could carry — so thumbnails fetch bytes
@@ -1640,6 +1654,12 @@ export const api = {
       const resp = await apiFetch(`/stylesheets/${id}/file`);
       if (!resp.ok) throw new ApiError(resp.status, `Couldn't load it (${resp.status})`);
       return resp.text();
+    },
+    update(id: string, body: { name?: string; folder_id?: string | null }): Promise<StylesheetResource> {
+      return sendJSON(`/stylesheets/${id}`, "PATCH", body);
+    },
+    usage(id: string): Promise<ResourceUsage[]> {
+      return getJSON(`/stylesheets/${id}/usage`);
     },
     replace(id: string, file: File): Promise<StylesheetResource> {
       const form = new FormData();
