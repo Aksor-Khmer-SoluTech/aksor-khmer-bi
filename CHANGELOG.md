@@ -5,7 +5,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-10-15
+
 ### Added
+- **Stored procedures are called from the SQL box, on any database, with nothing to set up first** -- as in Jasper or
+  BI Publisher: `EXEC dbo.GetSales @branch = :branch, @title = N'ខ្មែរ'` on SQL Server, `CALL hr.get_sales(:branch,
+  50)` on Oracle, MySQL, MariaDB, Db2 or PostgreSQL. The connection's database login decides what may run; the
+  connection's **Procedures** list and dialog are gone. Saving checks the form so a filter's value can't become SQL --
+  one call and nothing after it, a plain schema.name, arguments only filters, numbers, 'text', NULL (DEFAULT in an
+  EXEC) -- and every run rebuilds the call with each filter and text value bound. A procedure's further result sets can
+  be named on SQL Server, Oracle and Db2. Cards made by the earlier picker keep running and open as the equivalent
+  EXEC. **Upgrade note:** a procedure runs with the rights its database gives it, so make the connection's login one
+  that may only read and execute what reports need.
+- **A user at a glance**, in **Users**. A user now opens in a large window over the list (full screen on a phone)
+  instead of expanding inside the table: Esc or a click outside closes it, and the address (`#/admin/users?user=<id>`) links straight to them. A strip at the top shows the templates they uploaded (how many
+  they started, how many versions, by file type), how many templates they can open and at what level, and their
+  roles. A new **Templates** tab lists each template with its folder, their versions, the last upload and the access
+  they hold now -- flagging one they uploaded but can no longer open. **Roles & permissions** now maps every
+  permission by area, held or not, with where each comes from (a role, or a direct grant, and when it ends), and
+  lists the folders and templates they were granted, with how many templates each folder covers. Counted with the
+  same rule as their own Reports page. New route `GET /api/v1/users/{id}/overview` (`user:manage`).
+- **Granting from a user's window, clearer.** Their **Roles & permissions** tab now only lists what they hold (each
+  grant still revocable), and **Grant access…** opens its own dialog with three kinds: **a role**, picked from cards
+  that say what each is for and what it would add for this person (“+4 new”, then the exact permissions), with roles
+  they hold marked; **a template** -- view, render or manage, optionally until a date -- without a role
+  (`report:manage`); or **a permission**, searchable, each with its description. A template granted to them directly
+  can be revoked from **Where they have access**.
+- **Roles open in a window too.** In **Roles**, a role now opens in the same large window as a user (linkable:
+  `#/admin/roles?role=<id>`) instead of expanding in the table. Its permissions are grouped by area, with an all/none
+  switch per area; what you tick or untick is marked, and a bar at the bottom counts the changes (+added / −removed)
+  with Save and Reset. Closing with unsaved changes asks first. The list shows readable names and what each built-in
+  role is for.
+- **Grant the system-wide Administrator role from the portal.** A superuser now finds it in a user's
+  **Grant a role…** list, under *System-wide*, after a confirmation that spells out what it gives (every permission,
+  in every organization); an expiry date works as for any role. It was only reachable through the API before -- it
+  belongs to no organization, so the list never showed it. Everyone else still isn't offered it, and the API still
+  refuses them.
+- **Install and update without the repository.** Each release now publishes an *install kit* -- `deployment.sh`, the
+  compose files, `.env.example` and a `config/` folder, a few dozen KB -- so a server needs Docker and nothing else:
+  `curl -fsSL …/install.sh | bash` installs the newest release (checksum checked), `./deployment.sh update` (or
+  `update 1.2.0`, or `update --from <kit>` without internet) backs up and moves to a new one, and
+  `./deployment.sh rollback` goes back, with `--restore` to put back the database too. Git checkouts keep working
+  (`git pull`, then `update`); `./deployment.sh switch-to-kit` moves one over. The portal's API address and branding
+  are now `.env` settings (`PORTAL_API_BASE_URL`, `PORTAL_BRAND_NAME`…), or a `config/portal/config.js` of your own;
+  your own protected-term lists go in `config/protected-terms/` and `config/protected-terms-exclude/`.
+  **Upgrade note:** needs this release's images (the portal writes its config at start). An edited
+  `PORTAL_CONFIG_FILE` and edited protected-term lists under `api/` are copied into `config/` by `deployment.sh`
+  the first time it runs; if you start the stack with `docker compose` yourself, copy them there first.
 - **Stylesheets in SCSS, Sass and Less**, not only CSS, compiled on upload (the template always gets CSS) with the
   source kept: its card shows the source beside the compiled CSS, *replace* takes any of the four formats, and a
   project carries the source. Compile errors give the line and column. Each file must be self-contained -- `@import`,
@@ -42,27 +88,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   as gaps). *Outliers* by z-score or interquartile range, shaded in the table and outlined on the chart. They carry
   into exports, saved views and dashboard tiles. A **data alert** can now email when one group *stands out* — any
   branch whose sales are unusually high or low — instead of crossing a fixed threshold. No migration.
-
-### Changed
-- **Top bar in a clearer order**: what there is to look at — *Home, Reports, Dashboards, Analyze* — then, after a thin
-  divider, what's your own — *Starred, My runs*. On phones the pages show as icons, so all six fit; the guided tour
-  follows the same order and now stops at Dashboards and Analyze too.
-- **Analyze has its own place in the top bar**, next to Dashboards, for everyone who can analyze datasets
-  (`analyze:use`). Before, it was only reachable through Dashboards → *Explore data*.
-
-### Fixed
-- **New template, sample data**: pressing *Use this data* with the editor empty no longer says the data "isn't valid
-  JSON" — it asks you to paste some (or press *Insert example*); invalid JSON is reported once, under the editor,
-  instead of twice; and the editor's placeholder now reads as an example, not as data already entered.
-
-**Upgrade note** — migrations `0011_projects` (a project flag on folders, a content fingerprint on images and
-stylesheets) and `0012_stylesheet_formats` (a stylesheet's source format). Docker installs run them on start; a
-hand-run API needs `alembic upgrade head` and `pip install -r api/requirements.txt` (the Sass and Less compilers,
-`libsass` and `lesscpy`, are new; the images include them).
-
-## [1.0.0-beta.5] - 2026-10-14
-
-### Added
 - **Report jobs email their files, and split them into one file per value** (bursting, as in Oracle BI Publisher).
   A job's new *Where it goes* section saves the report to a folder, emails it, or both; *One file per value* splits
   it by a filter with a list of choices — one run, one file and one set of recipients per branch, say, each with
@@ -93,6 +118,17 @@ hand-run API needs `alembic upgrade head` and `pip install -r api/requirements.t
   `data/job_outputs` folder on `api` and `worker` — run `./deployment.sh update`, which creates it.
 
 ### Changed
+- **Manage → Resources is simpler.** One **Upload** button takes images and stylesheets together (several at once,
+  or dropped onto the folder); chips filter the folder to templates, images or stylesheets; each card has one "…"
+  menu. Clicking an image or stylesheet opens its details: the exact line to use it in an html template, its
+  `image_id` for a Word template's data, which templates already use it, and Replace, Rename, Move and Delete. Images
+  and stylesheets can now be moved between folders (also by dragging them onto the tree), and an image replaced
+  while keeping its id.
+- **Top bar in a clearer order**: what there is to look at — *Home, Reports, Dashboards, Analyze* — then, after a thin
+  divider, what's your own — *Starred, My runs*. On phones the pages show as icons, so all six fit; the guided tour
+  follows the same order and now stops at Dashboards and Analyze too.
+- **Analyze has its own place in the top bar**, next to Dashboards, for everyone who can analyze datasets
+  (`analyze:use`). Before, it was only reachable through Dashboards → *Explore data*.
 - **Dashboards** (top bar): Analyze views as tiles on one page — tables, bar and line charts, or a single big number
   (KPI) — with the filters they share across the top (one *Branch* for every tile that has it). Owners add tiles from
   Explore data, then rename, resize, reorder and **share** them with roles; viewers don't need `analyze:use`, and
@@ -156,6 +192,14 @@ hand-run API needs `alembic upgrade head` and `pip install -r api/requirements.t
   space, then the arrow keys), or with each card's up and down arrows when there are many.
 
 ### Fixed
+- **New template, sample data**: pressing *Use this data* with the editor empty no longer says the data "isn't valid
+  JSON" — it asks you to paste some (or press *Insert example*); invalid JSON is reported once, under the editor,
+  instead of twice; and the editor's placeholder now reads as an example, not as data already entered.
+
+**Upgrade note** — migrations `0011_projects` (a project flag on folders, a content fingerprint on images and
+stylesheets) and `0012_stylesheet_formats` (a stylesheet's source format). Docker installs run them on start; a
+hand-run API needs `alembic upgrade head` and `pip install -r api/requirements.txt` (the Sass and Less compilers,
+`libsass` and `lesscpy`, are new; the images include them).
 - Searching the guides kept the open guide's scroll position, so results started part-way down with the count out
   of sight; they now start at the top, and clearing the search puts the guide back where you were. Opening a result
   lands exactly on its heading (it used to stop short while code blocks finished drawing) and highlights it.
