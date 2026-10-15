@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Cable, Database, Mail, Pencil, Sigma, Trash2 } from "lucide-react";
+import { Cable, Database, Mail, Pencil, Trash2 } from "lucide-react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { TableSkeleton } from "../../components/Skeletons";
@@ -7,7 +7,6 @@ import type { AuthInfo, Connection, ConnectionSummary, Organization } from "../.
 import DbEngineIcon from "../../components/DbEngineIcon";
 import ConnectionDialog from "./ConnectionDialog";
 import JdbcConnectionDialog from "./JdbcConnectionDialog";
-import RoutinesDialog from "./RoutinesDialog";
 import MailServerDialog from "./MailServerDialog";
 
 const AUTH_LABEL: Record<ConnectionSummary["auth_type"], string> = { none: "None", bearer: "Bearer token", basic: "Basic" };
@@ -28,7 +27,6 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
   const [dialog, setDialog] = useState<{ key: number; kind: "rest" | "jdbc" | "smtp"; connection: Connection | null } | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ConnectionSummary | null>(null);
-  const [routinesFor, setRoutinesFor] = useState<ConnectionSummary | null>(null);
 
   useEffect(() => {
     api.organizations.list().then(setOrganizations).catch(() => {});
@@ -189,12 +187,6 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
                 <td className="muted">{new Date(c.updated_at).toLocaleDateString()}</td>
                 <td onClick={(e) => e.stopPropagation()}>
                   <div className="row-actions">
-                    {c.kind === "jdbc" && c.engine === "sqlserver" && (
-                      <button type="button" className="btn btn-sm" onClick={() => setRoutinesFor(c)} title="Stored procedures and functions reports may call">
-                        <Sigma size={13} aria-hidden="true" />
-                        Procedures{c.routines.length > 0 ? ` (${c.routines.length})` : ""}
-                      </button>
-                    )}
                     <button type="button" className="btn btn-sm" onClick={() => edit(c)} disabled={opening === c.id}>
                       {opening === c.id ? <span className="spinner" /> : <Pencil size={13} aria-hidden="true" />}
                       Edit
@@ -254,7 +246,6 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
         />
       )}
 
-      {routinesFor && <RoutinesDialog key={routinesFor.id} connection={routinesFor} onClose={() => setRoutinesFor(null)} onSaved={load} />}
 
       <ConfirmDialog
         open={deleteTarget !== null}

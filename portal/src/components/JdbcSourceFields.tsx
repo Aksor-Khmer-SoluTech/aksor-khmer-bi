@@ -1,10 +1,10 @@
-import { useRef, type CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Braces, Brackets, ChevronDown, ChevronUp, Code2, GripVertical, Hash, Plus, ShieldCheck, Sigma, Trash2, X, type LucideIcon } from "lucide-react";
-import { MAX_QUERIES, newMoreResult, newQuery, type EditableJdbc, type EditableQuery, type RoutineArg } from "../dataConfig";
-import type { ApprovedRoutine, ConnectionSummary, RoutineKind } from "../types";
+import { Braces, Brackets, ChevronDown, ChevronUp, GripVertical, Hash, Plus, ShieldCheck, Trash2, X, type LucideIcon } from "lucide-react";
+import { isCall, MAX_QUERIES, newMoreResult, newQuery, type EditableJdbc, type EditableQuery } from "../dataConfig";
+import type { ApprovedRoutine, ConnectionSummary } from "../types";
 import DbEngineIcon from "./DbEngineIcon";
 import SqlEditor, { bindSnippet, sqlDialectLabel, type SqlEditorHandle, type SqlFilter } from "./SqlEditor";
 
@@ -23,192 +23,73 @@ const CARD = "query-sortable mb-4 flex gap-2 rounded-sm border border-border-sof
 // would make it 2px shorter than the select beside it.)
 const ROW_FIELD = "h-[42px]";
 
-const KIND: Record<RoutineKind, { label: string; icon: LucideIcon; shape: EditableQuery["shape"] }> = {
-  procedure: { label: "Stored procedures", icon: Sigma, shape: "list" },
-  table_function: { label: "Table-valued functions", icon: Braces, shape: "list" },
-  scalar_function: { label: "Scalar functions", icon: Hash, shape: "value" },
-};
+/** The name an EXEC calls (schema defaults to dbo, as on the server). */
+function execTarget(sql: string): string | null {
+  const m = /exec(?:ute)?\s+(\[[^\]]+\]|[\w#@$]+)(?:\s*\.\s*(\[[^\]]+\]|[\w#@$]+))?/i.exec(sql);
+  if (!m) return null;
+  const parts = [m[1], m[2]].filter(Boolean).map((p) => p.replace(/^\[|\]$/g, ""));
+  return parts.length === 2 ? parts.join(".") : `dbo.${parts[0]}`;
+}
 
-/** A card that calls a stored procedure or function its connection approved (api/app/routines.py), instead of SQL:
- * pick it, give each parameter a filter's value or a fixed one, and -- for a procedure -- name its further result
- * sets. Nothing here is SQL: the server builds the call from the approved name and binds every value. */
-function RoutineFields({
-  query,
-  onChange,
-  target,
-  filters,
-  canManageConnections,
-}: {
-  query: EditableQuery;
-  onChange: (patch: Partial<EditableQuery>) => void;
-  target: ConnectionSummary | null;
-  filters: SqlFilter[];
-  canManageConnections: boolean;
-}) {
-  const approved = target?.routines ?? [];
-  const routine: ApprovedRoutine | undefined = approved.find((r) => r.name.toLowerCase() === query.routine.toLowerCase());
-  const setArg = (param: string, patch: Partial<RoutineArg>) =>
-    onChange({ args: { ...query.args, [param]: { ...(query.args[param] ?? { from: "filter", filter: "", value: "" }), ...patch } } });
+/** A card saved by the earlier picker that called a *function* opens as `EXEC dbo.fn @p = …` (all the saved card
+ * says); a function is called with SELECT, so rewrite it as one, its arguments in the function's parameter order. */
+function functionCallFromExec(sql: string, r: ApprovedRoutine): string {
+  const given = new Map<string, string>();
+  for (const m of sql.matchAll(/(@[\w#@$]+)\s*=\s*(:\w+|N?'(?:[^']|'')*'|-?\d+(?:\.\d+)?|NULL)/gi)) given.set(m[1].toLowerCase(), m[2]);
+  const args = r.parameters.map((p) => given.get(p.name.toLowerCase()) ?? "NULL").join(", ");
+  return r.kind === "table_function" ? `SELECT *\nFROM ${r.name}(${args})` : `SELECT ${r.name}(${args}) AS value`;
+}
 
-  function pick(name: string) {
-    const next = approved.find((r) => r.name === name);
-    // Each parameter starts on the filter of the same name, when there is one (@branch -> branch).
-    const args: Record<string, RoutineArg> = {};
-    for (const p of next?.parameters ?? []) {
-      const kept = query.args[p.name];
-      const same = filters.find((f) => f.name.toLowerCase() === p.name.slice(1).toLowerCase());
-      args[p.name] = kept ?? (same ? { from: "filter", filter: same.name, value: "" } : { from: "value", filter: "", value: "" });
-    }
-    onChange({
-      routine: name,
-      args,
-      shape: next ? (next.kind === "scalar_function" ? "value" : query.shape === "value" ? "list" : query.shape) : query.shape,
-      moreResults: next?.kind === "procedure" ? query.moreResults : [],
-    });
-  }
-
-  if (!target) return <p className="field-hint">Choose the database first.</p>;
-  if (approved.length === 0 && !query.routine) {
-    return (
-      <p className="field-hint">
-        No stored procedure or function is approved on <span className="mono">{target.name}</span> yet.{" "}
-        {canManageConnections ? (
-          <a href="#/admin/connections">Approve some under Manage → Connections → Procedures</a>
-        ) : (
-          "Ask someone who manages connections to approve the ones reports may call"
-        )}
-        .
-      </p>
-    );
-  }
-
+/** A stored procedure's further result sets, each named for the template (the 1st is the card's own name). */
+function MoreResults({ query, onChange }: { query: EditableQuery; onChange: (patch: Partial<EditableQuery>) => void }) {
   return (
-    <div className="grid gap-3">
-      <label className="mb-0">
-        <span>Procedure or function</span>
-        <select value={routine?.name ?? query.routine} onChange={(e) => pick(e.target.value)}>
-          <option value="" disabled>
-            Choose one…
-          </option>
-          {query.routine && !routine && <option value={query.routine}>{query.routine} (no longer approved)</option>}
-          {(Object.keys(KIND) as RoutineKind[]).map((kind) => {
-            const of = approved.filter((r) => r.kind === kind);
-            return of.length ? (
-              <optgroup key={kind} label={KIND[kind].label}>
-                {of.map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {r.name}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null;
-          })}
-        </select>
-      </label>
-      {query.routine && !routine && (
-        <p className="alert alert-warning m-0">
-          <span className="mono">{query.routine}</span> isn't approved on <span className="mono">{target.name}</span> any more, so this query fails
-          until it's approved again or you choose another.
-        </p>
-      )}
-
-      {routine && routine.parameters.length > 0 && (
-        <div className="overflow-hidden rounded-[10px] border border-border-soft">
-          {routine.parameters.map((p) => {
-            const arg = query.args[p.name] ?? { from: "value" as const, filter: "", value: "" };
-            return (
-              <div key={p.name} className="grid grid-cols-1 items-center gap-2 border-b border-border-soft px-3 py-2 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.3fr)]">
-                <div className="min-w-0">
-                  <span className="mono text-[0.84rem]">{p.name}</span>
-                  {p.type && <span className="mono ml-2 text-[0.74rem] text-text-faint">{p.type}</span>}
-                </div>
-                <select
-                  className="h-[38px] py-1.5"
-                  aria-label={`Where ${p.name} comes from`}
-                  value={arg.from === "filter" ? `filter:${arg.filter}` : "value"}
-                  onChange={(e) =>
-                    e.target.value === "value" ? setArg(p.name, { from: "value" }) : setArg(p.name, { from: "filter", filter: e.target.value.slice(7) })
-                  }
-                >
-                  {filters.map((f) => (
-                    <option key={f.name} value={`filter:${f.name}`}>
-                      Filter: {f.name}
-                    </option>
-                  ))}
-                  <option value="value">A fixed value</option>
-                </select>
-                {arg.from === "value" ? (
-                  <input
-                    type="text"
-                    className="h-[38px] py-1.5"
-                    aria-label={`Fixed value for ${p.name}`}
-                    placeholder="value"
-                    maxLength={4000}
-                    value={arg.value}
-                    onChange={(e) => setArg(p.name, { value: e.target.value })}
-                  />
-                ) : (
-                  <span className="text-[0.78rem] text-text-faint">What the person running it picks — checked against their access first.</span>
-                )}
-              </div>
-            );
-          })}
+    <div className="mt-3 grid gap-2">
+      <span className="text-[0.82rem] font-medium text-text-dim">
+        Its results — the 1st is <span className="mono">{query.name.trim() || "rows"}</span>
+      </span>
+      {query.moreResults.map((m, i) => (
+        <div key={m.key} className="flex flex-wrap items-center gap-2">
+          <span className="mono w-10 text-[0.78rem] text-text-faint">#{i + 2}</span>
+          <input
+            type="text"
+            className="mono-input h-[38px] max-w-[14rem] flex-1 py-1.5"
+            aria-label={`Name of result ${i + 2}`}
+            placeholder={i === 0 ? "lines" : `result${i + 2}`}
+            maxLength={64}
+            pattern="[A-Za-z_][A-Za-z0-9_]*"
+            value={m.name}
+            onChange={(e) => onChange({ moreResults: query.moreResults.map((x) => (x.key === m.key ? { ...x, name: e.target.value } : x)) })}
+          />
+          <select
+            className="h-[38px] w-auto py-1.5"
+            aria-label={`Shape of result ${i + 2}`}
+            value={m.shape}
+            onChange={(e) =>
+              onChange({ moreResults: query.moreResults.map((x) => (x.key === m.key ? { ...x, shape: e.target.value as EditableQuery["shape"] } : x)) })
+            }
+          >
+            {SHAPES.map((sh) => (
+              <option key={sh.value} value={sh.value}>
+                {sh.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm icon-only"
+            aria-label={`Remove result ${i + 2}`}
+            onClick={() => onChange({ moreResults: query.moreResults.filter((x) => x.key !== m.key) })}
+          >
+            <X size={14} />
+          </button>
         </div>
+      ))}
+      {query.moreResults.length < 9 && (
+        <button type="button" className="btn btn-sm justify-self-start" onClick={() => onChange({ moreResults: [...query.moreResults, newMoreResult()] })}>
+          <Plus size={14} aria-hidden="true" /> Name another result set
+        </button>
       )}
-
-      {routine?.kind === "procedure" && (
-        <div className="grid gap-2">
-          <span className="text-[0.82rem] font-medium text-text-dim">
-            Its results — the 1st is <span className="mono">{query.name.trim() || "rows"}</span> (above)
-          </span>
-          {query.moreResults.map((m, i) => (
-            <div key={m.key} className="flex flex-wrap items-center gap-2">
-              <span className="mono w-10 text-[0.78rem] text-text-faint">#{i + 2}</span>
-              <input
-                type="text"
-                className="mono-input h-[38px] max-w-[14rem] flex-1 py-1.5"
-                aria-label={`Name of result ${i + 2}`}
-                placeholder={i === 0 ? "lines" : `result${i + 2}`}
-                maxLength={64}
-                pattern="[A-Za-z_][A-Za-z0-9_]*"
-                value={m.name}
-                onChange={(e) => onChange({ moreResults: query.moreResults.map((x) => (x.key === m.key ? { ...x, name: e.target.value } : x)) })}
-              />
-              <select
-                className="h-[38px] w-auto py-1.5"
-                aria-label={`Shape of result ${i + 2}`}
-                value={m.shape}
-                onChange={(e) =>
-                  onChange({ moreResults: query.moreResults.map((x) => (x.key === m.key ? { ...x, shape: e.target.value as EditableQuery["shape"] } : x)) })
-                }
-              >
-                {SHAPES.map((sh) => (
-                  <option key={sh.value} value={sh.value}>
-                    {sh.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm icon-only"
-                aria-label={`Remove result ${i + 2}`}
-                onClick={() => onChange({ moreResults: query.moreResults.filter((x) => x.key !== m.key) })}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ))}
-          {query.moreResults.length < 9 && (
-            <button type="button" className="btn btn-sm justify-self-start" onClick={() => onChange({ moreResults: [...query.moreResults, newMoreResult()] })}>
-              <Plus size={14} aria-hidden="true" /> Name another result set
-            </button>
-          )}
-          <p className="field-hint m-0">
-            A procedure that returns a header and then its lines: name the second one too. Each comes to the template under its name, like a
-            query of its own.
-          </p>
-        </div>
-      )}
+      <p className="field-hint m-0">A procedure that returns a header and then its lines: name the second one too. Each reaches the template under its name.</p>
     </div>
   );
 }
@@ -230,7 +111,6 @@ function QueryCard({
   connections,
   defaultConnection,
   target,
-  canManageConnections,
 }: {
   query: EditableQuery;
   index: number;
@@ -249,7 +129,6 @@ function QueryCard({
   defaultConnection: string;
   /** The connection this card runs on (its own or the default) -- for the procedures and functions it may call. */
   target: ConnectionSummary | null;
-  canManageConnections: boolean;
 }) {
   const editor = useRef<SqlEditorHandle>(null);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: query.key });
@@ -259,10 +138,20 @@ function QueryCard({
   const usage =
     query.shape === "list" ? `{% for r in ${name} %} … {{ r.column_name }}` : query.shape === "object" ? `{{ ${name}.column_name }}` : `{{ ${name} }}`;
 
-  // A SQL Server connection can also run an approved stored procedure or function instead of SQL.
-  const routineCapable = target?.engine === "sqlserver";
-  const routineMode = query.mode === "routine";
-  const header = several || routineMode;
+  // The SQL may be one procedure call -- EXEC (SQL Server) or CALL (any database), api/app/routines.py.
+  const exec = isCall(query.query);
+  // Only a driver run by the JDBC service (SQL Server, Oracle, Db2) reads a procedure's 2nd, 3rd... result sets.
+  const manyResults = engine === "sqlserver" || engine === "oracle" || engine === "db2";
+  const header = several || (exec && query.moreResults.length > 0);
+
+  // A card from the earlier picker that called a *function* (its connection's old approved list says so): show it as
+  // the SELECT it really is.
+  const calls = exec ? execTarget(query.query) : null;
+  const called = calls ? (target?.routines ?? []).find((r) => r.name.toLowerCase() === calls.toLowerCase()) : undefined;
+  useEffect(() => {
+    if (called && called.kind !== "procedure") onChange({ query: functionCallFromExec(query.query, called), moreResults: [] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when what it calls is known (connections loaded)
+  }, [called?.name, called?.kind]);
 
   const body = (
     <>
@@ -341,20 +230,6 @@ function QueryCard({
           </div>
         </div>
       )}
-      {(routineCapable || routineMode) && (
-        <div className="segmented mb-3" role="radiogroup" aria-label="What this query runs">
-          <button type="button" role="radio" aria-checked={!routineMode} className={!routineMode ? "segmented-btn active gap-1.5" : "segmented-btn gap-1.5"} onClick={() => onChange({ mode: "sql" })}>
-            <Code2 size={14} aria-hidden="true" /> SQL query
-          </button>
-          <button type="button" role="radio" aria-checked={routineMode} className={routineMode ? "segmented-btn active gap-1.5" : "segmented-btn gap-1.5"} onClick={() => onChange({ mode: "routine", name: query.name || "rows" })}>
-            <Sigma size={14} aria-hidden="true" /> Procedure / function
-          </button>
-        </div>
-      )}
-      {routineMode ? (
-        <RoutineFields query={query} onChange={onChange} target={target} filters={filters} canManageConnections={canManageConnections} />
-      ) : (
-        <>
       <div className="sql-field">
         <span className="sql-field-label">SQL query</span>
         <SqlEditor
@@ -377,21 +252,29 @@ function QueryCard({
       {filters.length > 0 && (
         <div className="req-chips">
           <span className="req-chips-label">Bind filter</span>
-          {filters.map((filter) => (
-            <button
-              key={filter.name}
-              type="button"
-              className="chip-btn chip-bind"
-              onClick={() => editor.current?.insertAtCursor(bindSnippet(filter, engine, typedBinding))}
-              title={`Insert ${bindSnippet(filter, engine, typedBinding)} at the cursor`}
-            >
-              {filter.name}
-            </button>
-          ))}
+          {filters.map((filter) => {
+            // An EXEC's arguments are plain :names -- no CAST around them.
+            const snippet = exec ? `:${filter.name}` : bindSnippet(filter, engine, typedBinding);
+            return (
+              <button
+                key={filter.name}
+                type="button"
+                className="chip-btn chip-bind"
+                onClick={() => editor.current?.insertAtCursor(snippet)}
+                title={`Insert ${snippet} at the cursor`}
+              >
+                {filter.name}
+              </button>
+            );
+          })}
         </div>
       )}
-        </>
+      {exec && /^\s*(?:(?:--[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*exec/i.test(query.query) && engine && engine !== "sqlserver" && (
+        <p className="alert alert-warning m-0 mt-2">
+          <span className="mono">EXEC</span> is SQL Server's — on this database write <span className="mono">CALL schema.procedure(:filter, …)</span>.
+        </p>
       )}
+      {exec && manyResults && <MoreResults query={query} onChange={onChange} />}
       {several && (
         <p className="field-hint mb-0 mt-1">
           In the template: <code className="mono">{usage}</code>
@@ -459,8 +342,8 @@ export default function JdbcSourceFields({
   const queries = value.queries;
   const several = queries.length > 1;
   const [first] = queries;
-  // The SQL editor's hints (dialect, :name binding, typed binding) only matter when some card is SQL.
-  const anySql = queries.some((q) => q.mode === "sql");
+  // Every card is SQL now (an EXEC included), so the editor's hints always apply.
+  const anySql = queries.length > 0;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -554,7 +437,6 @@ export default function JdbcSourceFields({
               connections={connections}
               defaultConnection={value.connection}
               target={connections?.find((c) => c.name === ((several && q.connection) || value.connection)) ?? null}
-              canManageConnections={canManageConnections}
             />
           ))}
         </SortableContext>
@@ -584,9 +466,14 @@ export default function JdbcSourceFields({
       {anySql && (
         <>
       <p className="field-hint">
-        One <span className="mono">SELECT</span> (or <span className="mono">WITH … SELECT</span>). Write a filter as{" "}
-        <span className="mono">:name</span> — its value is bound as a parameter, never pasted into the SQL. A filter left empty arrives as an
-        empty string.
+        One <span className="mono">SELECT</span> (or <span className="mono">WITH … SELECT</span>), or one procedure call:{" "}
+        {selected?.engine === "sqlserver" ? (
+          <span className="mono">EXEC dbo.procedure @param = :filter</span>
+        ) : (
+          <span className="mono">CALL schema.procedure(:filter, …)</span>
+        )}{" "}
+        — its arguments filters, numbers, <span className="mono">'text'</span> or <span className="mono">NULL</span>. Write a filter as <span className="mono">:name</span> — its value is bound as a parameter, never pasted into the SQL. A filter left
+        empty arrives as an empty string.
       </p>
       <label className="checkbox-label">
         <input type="checkbox" checked={value.typedBinding} onChange={(e) => onChange({ typedBinding: e.target.checked })} />
@@ -609,7 +496,8 @@ export default function JdbcSourceFields({
         </>
       )}
 
-      {!several && first.mode === "sql" && (
+      {/* A lone card's result name, unless the card shows it itself (a procedure naming more result sets). */}
+      {!several && !(isCall(first.query) && first.moreResults.length > 0) && (
         <>
       <label className="jdbc-root-key">
         <span>Name the rows in the template</span>
@@ -634,8 +522,9 @@ export default function JdbcSourceFields({
       <aside className="jdbc-safety">
         <ShieldCheck size={16} aria-hidden="true" />
         <p>
-          Read-only by design: anything but a single SELECT is refused, the session is opened read-only with a time limit, and a result over
-          the row limit is an error rather than a silent cut-off. The connection's database account should be read-only too.
+          One statement per query — a SELECT or a procedure call — and every filter's value is bound, never pasted into the SQL. The session
+          is opened read-only with a time limit, and a result over the row limit is an error rather than a silent cut-off. A procedure runs
+          with the rights its database gives it, so the connection's account should only read and run what reports need.
         </p>
       </aside>
     </div>

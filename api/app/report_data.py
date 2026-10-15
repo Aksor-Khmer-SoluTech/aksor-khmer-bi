@@ -336,8 +336,13 @@ def source_parameter_names(data_source: dict | None) -> list[str]:
 
         names: list[str] = []
         for query in jdbc_queries(data_source):
-            if isinstance(query, dict) and query.get("routine"):
-                # A procedure or function: the filters its arguments take.
+            from . import routines
+
+            if isinstance(query, dict) and routines.is_call(query.get("query")):
+                # A procedure call typed in the SQL box: the filters among its arguments.
+                used = [a["value"] for a in routines.parse_call(query["query"])["args"] if a["kind"] == "filter"]
+            elif isinstance(query, dict) and query.get("routine"):
+                # A procedure or function picked on an earlier card: the filters its arguments take.
                 used = [a["filter"] for a in (query.get("arguments") or {}).values() if isinstance(a, dict) and a.get("filter")]
             else:
                 used = jdbc.validate_query(query.get("query") if isinstance(query, dict) else None)
@@ -528,6 +533,11 @@ def _validate_jdbc_source(
         # Off unless asked for: switching it on changes what an existing CAST / TO_DATE receives.
         "typed_binding": raw.get("typed_binding") is True,
     }
+    from . import routines
+
+    if raw.get("queries") is None and routines.is_call(raw.get("query")):
+        # A procedure call is always a card of `queries` (it may name more result sets).
+        raw = {**raw, "queries": [{"name": (raw.get("root_key") or "").strip() or "rows", "shape": "list", "query": raw.get("query")}]}
     if raw.get("queries") is None:
         # One query, saved the way it always was: its rows under `root_key` (default rows).
         query = _validate_one_query(raw.get("query"), parameter_names, "The query")
@@ -564,11 +574,14 @@ def _validate_jdbc_source(
         own = _validate_connection_ref(item.get("connection"), connection_names, f"query {name!r}")
         if own is not None and connection_kinds is not None and connection_kinds.get(own) not in (None, "jdbc"):
             raise DataConfigError(f"Query {name!r}: the connection {own!r} isn't a database connection")
-        if item.get("routine"):
-            # A stored procedure or function its connection approved, instead of SQL (app/routines.py).
-            from . import routines
-
-            target = (connection_routines or {}).get(own or connection) if connection_routines is not None else None
+        target = (connection_routines or {}).get(own or connection) if connection_routines is not None else None
+        if routines.is_call(item.get("query")):
+            # A procedure call typed in the SQL box -- EXEC or CALL, any procedure the login may run (app/routines.py).
+            entry = {"name": name, "shape": shape, **routines.validate_call_query(
+                item, target["engine"] if target else None, parameter_names, name,
+            )}
+        elif item.get("routine"):
+            # A stored procedure or function picked on an earlier card (before EXEC could be typed).
             entry = {"name": name, "shape": shape, **routines.validate_query_routine(
                 item, target["routines"] if target else ([] if connection_routines is not None else None),
                 target["engine"] if target else None, parameter_names, name,
@@ -1044,7 +1057,13 @@ def _run_queries(data_source: dict, params: dict[str, str], types: dict[str, str
 
     def run(query: dict) -> dict[str, Any]:
         started = monotonic()
-        rows = jdbc.run_query(conn_of(query), query["query"], params, query["name"], types=types)[query["name"]]
+        sql, values = query["query"], params
+        if query.get("call"):
+            # A procedure call on a built-in driver: CALL name(...), rebuilt with every value bound.
+            from . import routines
+
+            sql, values, _, _ = routines.build_typed_call(query, params, conn_of(query)["engine"], via_worker=False)
+        rows = jdbc.run_query(conn_of(query), sql, values, query["name"], types=types)[query["name"]]
         _log.info("Query %r on %r: %d row(s) in %d ms", query["name"], label(query), len(rows), (monotonic() - started) * 1000)
         return {query["name"]: _shaped(query["name"], query["shape"], rows)}
 
@@ -1056,8 +1075,12 @@ def _run_queries(data_source: dict, params: dict[str, str], types: dict[str, str
         conn = conn_of(group[0])
         items: list[tuple] = []
         for q in group:
-            if q.get("routine"):
-                # Built from its connection's approved list -- checked again now, on this run.
+            if q.get("call"):
+                # A procedure call typed in the SQL box, rebuilt with every value bound.
+                sql, values, is_call, _ = routines.build_typed_call(q, params, conn["engine"], via_worker=True)
+                items.append((q["name"], sql, {"call": is_call, "names": names_of(q), "params": values}))
+            elif q.get("routine"):
+                # A card from the earlier picker: built from its connection's approved list, checked again now.
                 sql, values, is_call, _ = routines.build_call(q, conn.get("routines"), params)
                 items.append((q["name"], sql, {"call": is_call, "names": names_of(q), "params": values}))
             else:
@@ -1075,11 +1098,12 @@ def _run_queries(data_source: dict, params: dict[str, str], types: dict[str, str
 
     every_name = [name for q in queries for name in names_of(q)]
     for query in queries:
-        if query.get("routine") and not conn_of(query).get("driver"):
+        if query.get("routine") and not query.get("call") and not conn_of(query).get("driver"):
             raise DataSourceError(f"The query {query['name']!r} calls {query['routine']}, which needs a SQL Server connection")
 
-    if len(queries) == 1 and not queries[0].get("routine"):
-        return run(queries[0])
+    lone = queries[0] if len(queries) == 1 else None
+    if lone is not None and not lone.get("routine") and not (lone.get("call") and conn_of(lone).get("driver")):
+        return run(lone)
 
     # One task per query on a built-in driver; one per database on an uploaded driver (a batch).
     batches: dict[str, list[dict]] = {}

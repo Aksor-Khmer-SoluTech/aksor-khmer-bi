@@ -124,10 +124,11 @@ database, so match records across them in the template, not in SQL. See
 
 ### Can a report call a stored procedure or a function?
 
-Yes, on SQL Server. A connection manager approves the procedures and functions reports may call (Manage →
-Connections → **Procedures**, where **Discover** lists what the login may run). Then switch a query card to
-**Procedure / function**, choose one and give each parameter a filter or a fixed value; a procedure's extra result
-sets can each get a name. See [Filters, a data source, and connections](building-a-report.md#filters-a-data-source-and-connections).
+Yes, on any database, written in the query's SQL box like any query: `EXEC dbo.GetSales @branch = :branch` on SQL
+Server, `CALL hr.get_sales(:branch)` elsewhere, `SELECT * FROM dbo.fn_sales(:branch)` for a function. Nothing to set
+up on the connection: the procedure runs as the connection's login, so give reports a login that may only read and run
+what they need. Arguments are filters, numbers, `'text'` or `NULL`, always bound. See
+[Filters, a data source, and connections](building-a-report.md#filters-a-data-source-and-connections).
 
 ### Can I explore the data without making a report?
 

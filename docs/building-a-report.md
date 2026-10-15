@@ -558,34 +558,34 @@ names the query and its connection. Through the API, add `"connection"` to the q
 A dataset's Source tab is the same editor, so a dataset can span services too — every report built on it gets that.
 A connection that any query uses, in a report or a dataset, can't be deleted.
 
-**Stored procedures and functions (SQL Server).** A query is a `SELECT` by rule — `EXEC` is refused, because what a
-procedure does can't be seen from its name, and it may write. Instead, a connection manager **approves** what reports
-may call, and authors pick from that list:
+**Stored procedures and functions.** Write the call in the query's SQL box, like any other query, on any database:
 
-1. **Approve** — Manage → Connections → a SQL Server connection's **Procedures** button. **Discover** lists every
-   stored procedure, table-valued function and scalar function the connection's login may run, with its parameters
-   (read from the catalog with that login); tick the ones reports may call and **Save**. You can also type one in
-   (`dbo.GetSalesByBranch`, its kind, `@branch nvarchar(10), @from date`). Routines with `OUTPUT` parameters aren't
-   offered. If the login could also change data, Discover says so: give reports a login that may only `EXECUTE`
-   these routines (and `SELECT` the table-valued ones) — the login is the real limit on what a procedure can do.
-2. **Call** — on a query card, switch **SQL query** to **Procedure / function**, choose one, and give each parameter a
-   filter (what the person running it picks, checked against their access first) or a fixed value. A procedure's
-   first result set goes under the card's result name; **Name another result set** maps its second, third… to names
-   of their own — a header and its lines from one call. A table-valued function gives rows; a scalar function one
-   value.
+```sql
+EXEC dbo.usp_employee_list @bureau_code = :bureau, @search = :search, @page_size = 500   -- SQL Server
+CALL hr.employee_list(:bureau, :search, 500)                                              -- Oracle, MySQL, MariaDB, Db2, PostgreSQL
 
-The server builds the call from the approved name (`{call [dbo].[GetBranchSales](?, ?)}`,
-`SELECT * FROM [dbo].[fn_SalesFrom](?)`) and binds every value — nothing is typed into SQL, so nothing can be
-injected. Approval is checked again on every run: take a routine off the list and the reports calling it stop at once,
-with a message saying so. It runs on every run, preview and scheduled job. Row counts a procedure sends before its
-results are skipped (no `SET NOCOUNT ON` needed). Procedures run in the JDBC driver service, so it must be the
-version from this release; an older one is a clear "too old to call stored procedures" error. Through the API:
-
-```json
-{"name": "info", "shape": "object", "routine": "dbo.GetBranchSales",
- "arguments": {"@branch": {"filter": "branch"}, "@title": {"value": "Daily sales"}},
- "more_results": [{"name": "lines", "shape": "list"}]}
+SELECT * FROM dbo.fn_employees(:bureau, NULL, :gender)   -- a table-valued function: an ordinary SELECT
+SELECT dbo.fn_branch_total(:branch) AS value              -- a scalar function (shape "Single value")
 ```
+
+Nothing has to be set up first: a connection only says how to reach the database, and the procedure runs as its
+database login — so what that login may `EXECUTE` is what reports can call. A procedure runs with the rights its
+database gives it (on SQL Server, its owner's), so it can change data even when the login can't: give reports a login
+that may only read and run the procedures they need.
+
+What is checked — when the report is saved and on every run — is the form, so a filter's value can never become SQL:
+one call and nothing after it (each query card runs one statement; add another card for the next), a plain
+`schema.name`, and as arguments only filters (`:name`), numbers, `'text'` (`N'ខ្មែរ'` for Khmer), `NULL` — and
+`DEFAULT` in an `EXEC`. `EXEC` takes named (`@p = …`) or positional arguments and a parameter left out takes its
+default; `CALL` takes them in order, in brackets. The server rebuilds the call — `EXEC [dbo].[usp_employee_list]
+@bureau_code = ?, …`, or JDBC's `{call hr.employee_list(?, ?, 500)}` — with every filter and text value **bound**.
+A procedure's first result set goes under the card's result name; on a driver run by the JDBC driver service (SQL
+Server, Oracle, Db2) **Name another result set** maps its second, third… to names of their own — a header and its
+lines from one call. Row counts sent before the results are skipped (no `SET NOCOUNT ON` needed). On PostgreSQL a
+procedure returns no rows: write a function and `SELECT` from it. Procedures run through an uploaded driver need the
+JDBC driver service from this release; an older one is a clear "too old to call stored procedures" error. Through the
+API the call is simply the query's `query` text. (Cards made by the earlier procedure picker — `routine` +
+`arguments` — still run, and open in the editor as the same `EXEC`.)
 
 **Connections** (Manage → Connections; permission `connection:manage`, held by system
 administrators and each organization's `ROLE_ORG_ADMIN`) are named, reusable

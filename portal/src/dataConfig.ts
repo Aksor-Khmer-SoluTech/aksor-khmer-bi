@@ -141,19 +141,23 @@ export interface EditableQuery {
   query: string;
   /** Its own database connection, when the data is spread over several; "" = the source's (default) connection. */
   connection: string;
-  /** SQL, or a call to a stored procedure or function its connection approved (SQL Server). */
-  mode: "sql" | "routine";
-  routine: string;
-  /** Each of the routine's parameters: a filter's value or a fixed one. */
-  args: Record<string, RoutineArg>;
-  /** A procedure's 2nd, 3rd... result sets, each under its own name. */
+  /** A stored procedure's 2nd, 3rd... result sets, each under its own name (when `query` is a call). */
   moreResults: { key: string; name: string; shape: DataSourceQuery["shape"] }[];
 }
 
-export interface RoutineArg {
-  from: "filter" | "value";
-  filter: string;
-  value: string;
+/** The SQL is a stored-procedure call -- EXEC / EXECUTE (SQL Server) or CALL (any database) -- comments before it
+ * allowed; api/app/routines.py `is_call`. Arguments in one are plain :filters, numbers, 'text' or NULL. */
+export function isCall(sql: string): boolean {
+  return /^\s*(?:(?:--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)\s*)*(?:exec(?:ute)?|call)\b/i.test(sql);
+}
+
+/** A card saved by the earlier procedure picker (a routine + an argument map, no SQL) as the EXEC it ran -- so it
+ * opens, and saves, as ordinary SQL. */
+function execText(routine: string, args: Record<string, { filter?: string | null; value?: string | null }>): string {
+  const parts = Object.entries(args).map(([param, a]) =>
+    `${param} = ${a.filter ? `:${a.filter}` : `N'${(a.value ?? "").replace(/'/g, "''")}'`}`,
+  );
+  return `EXEC ${routine}${parts.length ? ` ${parts.join(", ")}` : ""}`;
 }
 
 /** A database source: which connection (Admin > Connections), and the SELECTs to run on it -- usually one; several
@@ -178,9 +182,6 @@ export const newQuery = (patch: Partial<EditableQuery> = {}): EditableQuery => (
   shape: "list",
   query: "",
   connection: "",
-  mode: "sql",
-  routine: "",
-  args: {},
   moreResults: [],
   ...patch,
 });
@@ -194,16 +195,9 @@ function toEditableJdbc(s: DataSource): EditableJdbc {
         newQuery({
           name: q.name,
           shape: q.shape,
-          query: q.query ?? "",
+          // A function picked on the earlier card (not an EXEC) becomes the SELECT it ran.
+          query: q.query ?? (q.routine ? execText(q.routine, q.arguments ?? {}) : ""),
           connection: q.connection ?? "",
-          mode: q.routine ? "routine" : "sql",
-          routine: q.routine ?? "",
-          args: Object.fromEntries(
-            Object.entries(q.arguments ?? {}).map(([k, a]) => [
-              k,
-              a.filter ? { from: "filter" as const, filter: a.filter, value: "" } : { from: "value" as const, filter: "", value: a.value ?? "" },
-            ]),
-          ),
           moreResults: (q.more_results ?? []).map((m) => ({ key: `m${++queryKeys}`, name: m.name, shape: m.shape })),
         }),
       )
@@ -257,9 +251,9 @@ export function toDataSource(e: EditableSource): DataSource {
     const base = { type: "jdbc" as const, connection: e.jdbc.connection || null, ...NO_REQUEST, typed_binding: e.jdbc.typedBinding };
     const [first] = e.jdbc.queries;
     // One list query is saved the way it always was, so a report that never uses several looks the same. (A lone
-    // query has no connection of its own: the source's connection is the one it runs on.) A call to a procedure or
-    // function is always a card of `queries`.
-    if (e.jdbc.queries.length === 1 && first.shape === "list" && first.mode === "sql") {
+    // query has no connection of its own: the source's connection is the one it runs on.) A procedure call is always
+    // a card of `queries`: it may name more result sets.
+    if (e.jdbc.queries.length === 1 && first.shape === "list" && !isCall(first.query)) {
       return { ...base, query: first.query.trim(), root_key: first.name.trim() || null };
     }
     const several = e.jdbc.queries.length > 1;
@@ -268,18 +262,8 @@ export function toDataSource(e: EditableSource): DataSource {
       queries: e.jdbc.queries.map((q) => {
         const own = several && q.connection && q.connection !== e.jdbc.connection ? q.connection : null;
         const where = own ? { connection: own } : {};
-        if (q.mode === "routine") {
-          const more = q.moreResults.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), shape: m.shape }));
-          return {
-            name: q.name.trim() || "rows",
-            shape: q.shape,
-            routine: q.routine,
-            arguments: Object.fromEntries(Object.entries(q.args).map(([k, a]) => [k, a.from === "filter" ? { filter: a.filter } : { value: a.value }])),
-            ...(more.length ? { more_results: more } : {}),
-            ...where,
-          };
-        }
-        return { name: q.name.trim(), shape: q.shape, query: q.query.trim(), ...where };
+        const more = isCall(q.query) ? q.moreResults.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), shape: m.shape })) : [];
+        return { name: q.name.trim() || "rows", shape: q.shape, query: q.query.trim(), ...(more.length ? { more_results: more } : {}), ...where };
       }),
     };
   }
@@ -294,7 +278,7 @@ export function toDataSource(e: EditableSource): DataSource {
 
 /** Whether the chosen type holds anything worth warning about before it's thrown away. */
 export function sourceConfigured(e: EditableSource): boolean {
-  if (e.type === "jdbc") return Boolean(e.jdbc.connection || e.jdbc.queries.some((q) => q.query.trim() || q.routine));
+  if (e.type === "jdbc") return Boolean(e.jdbc.connection || e.jdbc.queries.some((q) => q.query.trim()));
   if (e.type === "static") return e.staticText.trim() !== "";
   if (e.type === "dataset") return e.dataset !== "";
   const r = e.request;

@@ -170,8 +170,13 @@ class DataSourceQuery(BaseModel):
         description="list: every row, as a list (none is []); object: the one row it returns, as an object; value: that "
         "row's first column. For the last two, no row is null and more than one fails the run.",
     )
-    query: str | None = Field(None, description="One SELECT (or WITH ... SELECT); `:name` binds a filter parameter's value")
-    routine: str | None = Field(None, description="Instead of `query`: an approved stored procedure or function, schema.name")
+    query: str | None = Field(
+        None,
+        description="One SELECT (or WITH ... SELECT), or one procedure call -- `EXEC schema.proc @param = :filter, ...` (SQL "
+        "Server) or `CALL schema.proc(:filter, ...)` (any database); a call's arguments are filters, numbers, 'text' or NULL. "
+        "`:name` binds a filter's value",
+    )
+    routine: str | None = Field(None, description="Older cards only: a procedure or function picked from the connection's approved list")
     arguments: dict[str, RoutineArgument] | None = Field(None, description="Each of the routine's parameters: a filter or a fixed value")
     more_results: list[MoreResult] | None = Field(
         None, description="A procedure's second, third... result sets, each under its own name (the first is `name`)"

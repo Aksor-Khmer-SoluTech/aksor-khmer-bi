@@ -6,8 +6,11 @@ can't be seen from its name, and it may write. This is the controlled way past t
 * a connection manager **approves** routines on a SQL Server connection (`config.routines`): a procedure, a
   table-valued function or a scalar function, by schema-qualified name, with its parameters -- typed in, or picked
   from **Discover** (`discover()`: what the connection's login may execute, read from the catalog);
-* a report author **picks** one on a query card -- never types SQL -- and maps each of its parameters to a filter or
-  a fixed value (`validate_query_routine()`);
+* a report author **writes the call** in the query's SQL box, as in any report tool -- `EXEC dbo.GetSales
+  @branch = :branch` or `CALL hr.get_sales(:branch)` (`validate_call_query()`), on any database and with no list of
+  allowed ones: the connection's login decides what may run. (Cards saved by the earlier picker -- a routine plus an
+  argument map, `validate_query_routine()` -- keep working against their approved list; the portal opens them as
+  the same EXEC text.) Functions need none of this: `SELECT * FROM dbo.fn(:x)` is an ordinary query;
 * the call is **built here** (`build_call()`): the name only ever comes from the approved list and is bracket-quoted,
   every value is a bound parameter. A procedure may return several result sets, each mapped to its own name.
 
@@ -187,6 +190,252 @@ def build_call(query: dict, routines: list[dict] | None, params: dict[str, str])
     if routine["kind"] == "table_function":
         return f"SELECT * FROM {target}({joined})", values, False, 1
     return f"SELECT {target}({joined}) AS [value]", values, False, 1
+
+
+# --- a procedure call typed into the SQL box ---------------------------------------------------------------------
+#
+# The way people expect from Jasper or BI Publisher: the call is written in the same SQL box as any query, on any
+# database the connection reaches --
+#     EXEC dbo.usp_employee_list @bureau_code = :bureau, @page_size = 500        (SQL Server)
+#     CALL hr.employee_list(:bureau, 500)                                         (Oracle, MySQL, MariaDB, Db2, PostgreSQL)
+# No list of allowed procedures: like any query, it runs as the connection's database login, and what that login may
+# execute is the limit -- give reports a login that can only read and EXECUTE what they need. What is checked here is
+# the *form*, so a filter's value can never become SQL: one call and nothing else, a plain schema.name, and as
+# arguments only filters (:name), numbers, 'text', NULL (and DEFAULT, in an EXEC). The statement that runs is rebuilt
+# from these parts -- name re-quoted, every filter and text bound -- never the text as typed.
+
+_CALL_HEAD = re.compile(r"^\s*(exec(?:ute)?|call)\b", re.I)
+_CALL_TOKEN = re.compile(
+    r"""\s*(?:
+        (?P<str>N?'(?:[^']|'')*')
+      | (?P<filter>:[A-Za-z_][A-Za-z0-9_]*)
+      | (?P<param>@[A-Za-z_][A-Za-z0-9_#@$]*)
+      | (?P<num>-?\d+(?:\.\d+)?)
+      | (?P<word>[A-Za-z_][A-Za-z0-9_]*)
+      | (?P<punct>[=,;()])
+    )""",
+    re.X,
+)
+_NAME_PART = r"(\[[^\]]+\]|\"[^\"]+\"|`[^`]+`|[A-Za-z_#@][A-Za-z0-9_#@$]*)"
+_CALL_NAME = re.compile(rf"^\s*{_NAME_PART}(?:\s*\.\s*{_NAME_PART})?(?:\s*\.\s*{_NAME_PART})?")
+_PLAIN_PART = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#@]{0,127}$")
+
+
+def _code(sql: str) -> str:
+    from . import jdbc
+
+    return "".join(text if is_code else " " for text, is_code in jdbc._scan(sql))
+
+
+def is_call(sql: Any) -> bool:
+    """The text is a procedure call -- EXEC / EXECUTE / CALL ... -- not a SELECT; comments before it don't count."""
+    if not isinstance(sql, str):
+        return False
+    try:
+        return bool(_CALL_HEAD.match(_code(sql)))
+    except DataConfigError:
+        return bool(_CALL_HEAD.match(sql))
+
+
+
+def parse_call(sql: str) -> dict:
+    """`EXEC name arg, @p = arg` or `CALL name(arg, ...)` as {verb, routine, args: [{param|None, kind, value}]}; kind
+    is filter, text, number, null or default. DataConfigError says what's wrong, in the words of someone writing SQL."""
+    from . import jdbc
+
+    if len(sql) > jdbc.MAX_QUERY_LENGTH:
+        raise DataConfigError(f"The query is too long (max {jdbc.MAX_QUERY_LENGTH} characters)")
+    if "\0" in sql:
+        raise DataConfigError("The query contains an invalid character")
+    # Comments become spaces; string literals stay exactly as written (they're arguments).
+    text = "".join(piece if is_code or piece[:1] == "'" else (piece if piece[:1] in '"`' else " ") for piece, is_code in jdbc._scan(sql))
+    head = _CALL_HEAD.match(text)
+    if head is None:
+        raise DataConfigError("A procedure call starts with EXEC or CALL")
+    verb = "call" if head.group(1).lower() == "call" else "exec"
+    rest = text[head.end():]
+    found = _CALL_NAME.match(rest)
+    if found is None:
+        raise DataConfigError(f"Write the procedure's name after {verb.upper()}, e.g. {verb.upper()} dbo.usp_employee_list")
+    parts = [p[1:-1] if p[:1] in '["`' else p for p in found.groups() if p]
+    for part in parts:
+        if not _PLAIN_PART.match(part):
+            raise DataConfigError(f"{'.'.join(parts)!r} isn't a procedure name this can call -- letters, digits and _ only, e.g. hr.employee_list")
+    if verb == "exec" and len(parts) == 1:
+        parts = ["dbo", parts[0]]
+    name = ".".join(parts)
+    rest = rest[found.end():]
+
+    pos = 0
+    if verb == "call":
+        opener = _CALL_TOKEN.match(rest, pos)
+        if opener is not None and opener.group("punct") == "(":
+            pos = opener.end()
+            closing = True
+        else:
+            closing = False  # CALL name -- no arguments
+    else:
+        closing = False
+
+    args: list[dict] = []
+    expecting = True
+    closed = not closing
+    n = len(rest)
+    while pos < n:
+        if not rest[pos:].strip():
+            break
+        m = _CALL_TOKEN.match(rest, pos)
+        if m is None:
+            snippet = rest[pos:].strip()[:30]
+            raise DataConfigError(f"Can't read the arguments near {snippet!r} -- pass filters (:name), numbers, 'text' or NULL")
+        pos = m.end()
+        punct = m.group("punct")
+        if punct == ")" and closing and not closed:
+            if expecting and args:
+                raise DataConfigError("The call ends with a comma")
+            closed, expecting = True, False
+            continue
+        if punct == ";":
+            if rest[pos:].strip():
+                raise DataConfigError("Only one statement is allowed -- each query card runs one; add another query for the next")
+            break
+        if closed and closing:
+            raise DataConfigError("Only one statement is allowed -- each query card runs one; add another query for the next")
+        if punct == ",":
+            if expecting:
+                raise DataConfigError("An argument is missing between two commas")
+            expecting = True
+            continue
+        if punct in ("(", ")", "="):
+            raise DataConfigError(f"Can't read {punct!r} there -- pass filters (:name), numbers, 'text' or NULL")
+        if not expecting:
+            raise DataConfigError(
+                "Only one statement is allowed -- each query card runs one; add another query for the next"
+                if m.group("word") and m.group("word").lower() in ("select", "with", "exec", "execute", "call")
+                else "Separate the arguments with commas"
+            )
+        param = None
+        if m.group("param"):
+            if verb == "call":
+                raise DataConfigError("CALL takes its arguments in order, in brackets: CALL hr.employee_list(:bureau, 500)")
+            param = m.group("param")
+            eq = _CALL_TOKEN.match(rest, pos)
+            if eq is None or eq.group("punct") != "=":
+                raise DataConfigError(f"Give {param} a value: {param} = :filter, a number, 'text', NULL or DEFAULT")
+            pos = eq.end()
+            m = _CALL_TOKEN.match(rest, pos)
+            if m is None:
+                near = rest[pos:].strip()[:30]
+                raise DataConfigError(
+                    f"{param} = {near!r} can't be passed -- use a filter (:name), a number, 'text', NULL or DEFAULT" if near else f"{param} has no value"
+                )
+            pos = m.end()
+        word = (m.group("word") or "").lower()
+        if m.group("str") is not None:
+            raw = m.group("str")
+            arg = {"kind": "text", "value": raw[raw.index("'") + 1 : -1].replace("''", "'")}
+        elif m.group("filter"):
+            arg = {"kind": "filter", "value": m.group("filter")[1:]}
+        elif m.group("num"):
+            arg = {"kind": "number", "value": m.group("num")}
+        elif word == "null" or (word == "default" and verb == "exec"):
+            arg = {"kind": word, "value": None}
+        elif word in ("output", "out"):
+            raise DataConfigError("OUTPUT parameters aren't supported -- return the values as a result set instead")
+        else:
+            got = m.group(0).strip()
+            raise DataConfigError(f"{got!r} can't be passed -- use a filter (:name), a number, 'text' or NULL")
+        if param is None and any(a["param"] for a in args):
+            raise DataConfigError("After a named argument (@name = ...), name the rest too")
+        args.append({"param": param, **arg})
+        expecting = False
+        follow = _CALL_TOKEN.match(rest, pos)
+        if follow is not None and (follow.group("word") or "").lower() in ("output", "out"):
+            raise DataConfigError("OUTPUT parameters aren't supported -- return the values as a result set instead")
+    if not closed:
+        raise DataConfigError("The call's brackets aren't closed")
+    if expecting and args:
+        raise DataConfigError("The call ends with a comma")
+    if len(args) > MAX_PARAMETERS:
+        raise DataConfigError(f"At most {MAX_PARAMETERS} arguments")
+    named = [a["param"].lower() for a in args if a["param"]]
+    if len(named) != len(set(named)):
+        raise DataConfigError("The same parameter is given twice")
+    return {"verb": verb, "routine": name, "args": args}
+
+
+
+def validate_call_query(item: dict, engine: str | None, parameter_names: set[str], query_name: str) -> dict:
+    """A query card whose SQL is a procedure call, cleaned: {query, call: {verb, routine, args}, more_results?}.
+    `engine` is its connection's (None: not known here)."""
+    where = f"Query {query_name!r}"
+    try:
+        parsed = parse_call(item.get("query") or "")
+    except DataConfigError as exc:
+        raise DataConfigError(f"{where}: {exc}") from exc
+    if parsed["verb"] == "exec" and engine is not None and engine != "sqlserver":
+        raise DataConfigError(f"{where}: EXEC is SQL Server's -- on this database write CALL {parsed['routine']}(...)")
+    unknown = sorted({a["value"] for a in parsed["args"] if a["kind"] == "filter"} - parameter_names)
+    if unknown:
+        raise DataConfigError(f"{where} uses {', '.join(':' + f for f in unknown)} but no filter with that name is defined")
+    for a in parsed["args"]:
+        if a["kind"] == "text" and (len(a["value"]) > 4000 or "\0" in a["value"]):
+            raise DataConfigError(f"{where}: a text argument is too long")
+    out: dict[str, Any] = {"query": item["query"].strip(), "call": parsed}
+    more = validate_query_routine(
+        {"routine": parsed["routine"], "arguments": {}, "more_results": item.get("more_results") or []},
+        None, None, parameter_names, query_name,
+    ).get("more_results")
+    if more:
+        out["more_results"] = more
+    return out
+
+
+def _bind_args(query: dict, params: dict[str, str]) -> tuple[list[dict], dict[str, str]]:
+    """The call's arguments as SQL fragments: filters and text bound (:placeholders), the rest exactly as checked."""
+    values = dict(params)
+    out = []
+    for index, arg in enumerate(query["call"]["args"]):
+        kind, value = arg.get("kind"), arg.get("value")
+        if kind == "filter" and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(value)):
+            expr = f":{value}"
+        elif kind == "text" and isinstance(value, str):
+            key = f"__call_{query['name']}_{index}"
+            values[key] = value
+            expr = f":{key}"
+        elif kind == "number" and re.match(r"^-?\d+(?:\.\d+)?$", str(value)):
+            expr = str(value)
+        elif kind in ("null", "default"):
+            expr = kind.upper()
+        else:
+            raise DataSourceError(f"The query {query['name']!r} has an argument that isn't valid -- open it and save it again")
+        param = arg.get("param")
+        if param and not PARAM_RE.match(param):
+            raise DataSourceError(f"The query {query['name']!r} names a parameter that isn't valid")
+        out.append({"param": param, "expr": expr})
+    return out, values
+
+
+def build_typed_call(query: dict, params: dict[str, str], engine: str, via_worker: bool) -> tuple[str, dict[str, str], bool, int]:
+    """The statement for a typed procedure call: (sql with :name placeholders, values to bind, whether to run it as a
+    call -- JDBC prepareCall, through the worker -- and how many result sets to read)."""
+    call = query["call"]
+    parts = call["routine"].split(".")
+    if not all(_PLAIN_PART.match(p) for p in parts):
+        raise DataSourceError(f"The query {query['name']!r} calls a name that isn't valid -- open it and save it again")
+    args, values = _bind_args(query, params)
+    sets = 1 + len(query.get("more_results") or [])
+    if call["verb"] == "exec":
+        target = ".".join(f"[{p}]" for p in parts)
+        listed = ", ".join(f"{a['param']} = {a['expr']}" if a["param"] else a["expr"] for a in args)
+        return f"EXEC {target}" + (f" {listed}" if listed else ""), values, True, sets
+    listed = ", ".join(a["expr"] for a in args)
+    if via_worker:
+        # JDBC's own call escape: every driver turns it into its database's syntax.
+        return f"{{call {call['routine']}({listed})}}", values, True, sets
+    if sets > 1:
+        raise DataSourceError(f"The query {query['name']!r} names more result sets, which this database's built-in driver can't read -- remove them")
+    return f"CALL {call['routine']}({listed})", values, False, 1
 
 
 # --- Discover: what the login may run ----------------------------------------------------------------------------

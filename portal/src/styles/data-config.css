@@ -1441,3 +1441,15 @@ textarea.jdbc-description {
     padding-top: 0;
   }
 }
+
+/* A procedure / function shortcut under the SQL editor (JdbcSourceFields.tsx): inserts a whole call, so no {{ }}. */
+.chip-btn.chip-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chip-btn.chip-call::before,
+.chip-btn.chip-call::after {
+  content: none;
+}
