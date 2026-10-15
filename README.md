@@ -66,6 +66,14 @@ footprint. Full writeup: [`docs/architecture.md`](docs/architecture.md).
 
 ## Quickstart
 
+On a server, no clone needed -- the release's install kit and Docker are all it takes:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/main/install.sh | bash
+```
+
+From a clone of this repository:
+
 ```bash
 ./deployment.sh init   # once: network + .env with generated secrets
 ./deployment.sh up     # postgres + redis, then the app (pulls the images; nothing is built)

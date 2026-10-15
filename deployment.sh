@@ -13,9 +13,19 @@
 #   ./deployment.sh up                start redis, then postgres (each waits until healthy), then the app. The app
 #                                     runs the released images named in docker-compose.yml, PULLED from Docker Hub;
 #                                     nothing is built here
-#   ./deployment.sh update [--no-backup]
-#                                     after `git pull`: back up, pull the images docker-compose.yml now names, recreate
-#                                     the app (migrations run at api start); redis and postgres are left alone
+#   ./deployment.sh update [<version>] [--from <kit.tar.gz>] [--no-backup]
+#                                     back up, bring this folder to <version> (default: the newest release) -- the
+#                                     install kit is downloaded and its checksum verified, or read from a file you
+#                                     copied here (--from, for a server without internet) -- pull the images it names
+#                                     and recreate the app (migrations run at api start); redis and postgres are left
+#                                     alone. In a git checkout: `git pull` first, then `update` with no version
+#   ./deployment.sh rollback [--restore] [--yes]
+#                                     go back to the files from before the last update (kept in .kit-previous/);
+#                                     --restore also puts back the backup that update took, which an older version
+#                                     needs when the update migrated the database
+#   ./deployment.sh switch-to-kit [<version>] [--from <kit.tar.gz>]
+#                                     turn a git checkout into an install-kit folder (your portal config and
+#                                     protected-term edits move into ./config/); updates then need no git
 #   ./deployment.sh doctor            check this machine (docker, compose, CPU, ports, disk); `up` runs it for you
 #   ./deployment.sh set-db-password   give the existing database the POSTGRES_PASSWORD now in .env
 #   ./deployment.sh cleanup [--dry-run] [--yes]
@@ -32,7 +42,8 @@
 #   ./deployment.sh redis|db|app <up|down|status|logs ...>   operate one stack alone
 #
 # Settings come from ./.env (never committed): POSTGRES_PASSWORD, PORTAL_USERNAME,
-# PORTAL_PASSWORD, CORS_ALLOWED_ORIGINS, ... -- see docs/deployment.md.
+# PORTAL_PASSWORD, CORS_ALLOWED_ORIGINS, PORTAL_API_BASE_URL ... -- see docs/deployment.md. Files of your own go in
+# ./config/: portal/config.js (replaces the PORTAL_* settings), protected-terms/ and protected-terms-exclude/.
 
 # `. deployment.sh up` runs this inside your own shell: its `set -e` and every `exit` would then close that shell on
 # the first error. Refuse, loudly, before touching anything (tests source it on purpose with DEPLOYMENT_SH_NO_MAIN).
@@ -71,6 +82,18 @@ DATA_DIRS=(data/report_templates data/secrets data/image_resources data/styleshe
 PG_DIR="data/postgres"
 # Where the database lived before it moved to PG_DIR; moved across once by move_old_pg_volume.
 OLD_PG_VOLUME="aksor-khmer-bi_pgdata"
+# Your own files the app reads (docker-compose.yml mounts them): a whole portal config.js, and protected-term lists.
+CONFIG_DIRS=(config/portal config/protected-terms config/protected-terms-exclude)
+
+# The install kit: the files a server needs, published with each release (scripts/build-deploy-kit.sh). A folder
+# installed from it has a VERSION file; a git checkout has none.
+KIT_NAME="aksor-khmer-bi-deploy"
+KIT_FILES=(deployment.sh docker-compose.yml docker-compose.db.yml docker-compose.redis.yml .env.example VERSION)
+KIT_PREVIOUS=".kit-previous"
+# Release downloads: <base>/v<version>/aksor-khmer-bi-deploy-<version>.tar.gz (+ .sha256). A mirror set with
+# AKSOR_RELEASES_URL uses the same layout plus a LATEST file holding the newest version.
+RELEASES_URL="${AKSOR_RELEASES_URL:-https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases/download}"
+RELEASES_API="https://api.github.com/repos/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases?per_page=1"
 
 c_red=$'\033[31m'; c_grn=$'\033[32m'; c_ylw=$'\033[33m'; c_off=$'\033[0m'
 [ -t 1 ] || { c_red=; c_grn=; c_ylw=; c_off=; }
@@ -86,7 +109,7 @@ app()   { docker compose -p "$APP_PROJECT"   -f "$APP_FILE"   "$@"; }
 
 # Building the images from source is not a supported way to install (the maintainers publish released images), so
 # say so plainly instead of a bare usage line when an old instruction still passes --build / --pull.
-no_build() { die "building from source isn't supported -- run a released version: git pull (it brings the image versions in docker-compose.yml), then ./deployment.sh ${1:-up}"; }
+no_build() { die "building from source isn't supported -- run a released version: ./deployment.sh update (in a git checkout: git pull first)"; }
 
 # Redis first, then Postgres, each waiting until healthy (the app needs both).
 start_infra() {
@@ -205,14 +228,22 @@ preflight() {
   if is_guessable "$(env_value POSTGRES_PASSWORD)"; then
     warn "POSTGRES_PASSWORD is empty or guessable (the compose default is 'aksor') -- fine for a throwaway machine, not for a server anyone else can reach"
   fi
-  # The portal's config file is bind-mounted; if the path is wrong Docker invents a *directory* there and the portal
-  # then serves nothing useful. And a config still pointing at localhost only works in a browser on this machine.
-  local cfg; cfg="$(env_value PORTAL_CONFIG_FILE)"; cfg="${cfg:-./portal/public/config.js}"
-  [ -f "$cfg" ] || die "PORTAL_CONFIG_FILE ($cfg) is not a file -- fix the path in .env (Docker would create a directory there)"
+  migrate_config
+  # Where the portal sends people's browsers for the API: a config/portal/config.js of your own, else
+  # PORTAL_API_BASE_URL in .env, else the image's localhost default -- which only works in a browser on this machine.
+  local cfg="config/portal/config.js" cfg_url where
+  if [ -f "$cfg" ]; then
+    cfg_url="$(sed -n 's/^ *window\.PORTAL_API_BASE_URL *= *"\(.*\)".*/\1/p' "$cfg" | tail -n1)"
+    where="$cfg"
+  else
+    cfg_url="$(env_value PORTAL_API_BASE_URL)"; cfg_url="${cfg_url:-http://localhost:8000}"
+    where="PORTAL_API_BASE_URL in .env"
+  fi
   case "$(env_value CORS_ALLOWED_ORIGINS)" in
     ""|*localhost*|*127.0.0.1*) ;;
-    *) grep -q 'PORTAL_API_BASE_URL *= *"https\?://\(localhost\|127\.0\.0\.1\)' "$cfg" \
-         && warn "CORS_ALLOWED_ORIGINS is a public address but $cfg still points the portal at http://localhost: -- other people's browsers would talk to themselves. Set PORTAL_API_BASE_URL there (see docs/deployment.md, \"A server with a domain name\")" ;;
+    *) case "$cfg_url" in http://localhost*|https://localhost*|http://127.0.0.1*|https://127.0.0.1*)
+         warn "CORS_ALLOWED_ORIGINS is a public address but the portal still sends browsers to $cfg_url ($where) -- other people's browsers would talk to themselves. Set PORTAL_API_BASE_URL in .env to the API's public address (see docs/deployment.md, \"A server with a domain name\")" ;;
+       esac ;;
   esac
   if [ -z "$(env_value CORS_ALLOWED_ORIGINS)" ]; then
     warn "CORS_ALLOWED_ORIGINS is unset (defaults to http://localhost:8080) -- set it to the portal's public URL"
@@ -222,15 +253,19 @@ preflight() {
   # sign in. When config.js names the API as plain http://HOST:PORT (localhost, an IP, a name on the local network),
   # the right values are certain: the API on API_PORT, and the portal at http://HOST:PORTAL_PORT. Addresses without a
   # port (a domain behind a reverse proxy) are left to the warning above.
-  local api_port portal_port cfg_url cfg_host cfg_port origin cors
+  local api_port portal_port cfg_host cfg_port origin cors
   api_port="$(env_value API_PORT | grep . || echo 8000)"
   portal_port="$(env_value PORTAL_PORT | grep . || echo 8080)"
-  cfg_url="$(sed -n 's/^ *window\.PORTAL_API_BASE_URL *= *"\(.*\)".*/\1/p' "$cfg" | tail -n1)"
   case "$cfg_url" in
     http://*:[0-9]*)
       cfg_host="${cfg_url#http://}"; cfg_host="${cfg_host%%/*}"; cfg_port="${cfg_host##*:}"; cfg_host="${cfg_host%:*}"
-      [ "$cfg_port" = "$api_port" ] || die "the portal will look for the API at $cfg_url, but API_PORT is $api_port.
+      if [ "$cfg_port" != "$api_port" ]; then
+        if [ -f "$cfg" ]; then die "the portal will look for the API at $cfg_url, but API_PORT is $api_port.
        In $cfg set:  window.PORTAL_API_BASE_URL = \"http://$cfg_host:$api_port\";"
+        else die "the portal will look for the API at $cfg_url, but API_PORT is $api_port.
+       In .env set:  PORTAL_API_BASE_URL=http://$cfg_host:$api_port"
+        fi
+      fi
       origin="http://$cfg_host:$portal_port"
       cors="$(env_value CORS_ALLOWED_ORIGINS)"
       case ",${cors:-http://localhost:8080}," in
@@ -348,7 +383,7 @@ EOF
 cmd_init() {
   require_docker
   ensure_network
-  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs "$BACKUP_DIR"
+  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs "$BACKUP_DIR" "${CONFIG_DIRS[@]}"
   if [ -f .env ]; then
     info ".env already exists -- leaving it untouched"
     return
@@ -388,7 +423,7 @@ cmd_up() {
     cmd_doctor || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"
   fi
   ensure_network
-  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs
+  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs "${CONFIG_DIRS[@]}"
   start_infra
   info "starting app (api, scheduler, worker, portal) -- migrations run as the api starts"
   pull_app_images
@@ -432,6 +467,7 @@ cmd_restart() {
 
 cmd_status() {
   require_docker
+  if is_kit; then info "version $(kit_version) (install kit)"; fi
   info "redis";    redis ps
   info "postgres"; db ps
   info "app";      app ps
@@ -472,6 +508,7 @@ cmd_backup() {
   fi
   [ -s "$sql.part" ] && gzip -t "$sql.part" 2>/dev/null || { rm -f "$sql.part"; die "pg_dump produced nothing usable -- no backup was made"; }
   mv "$sql.part" "$sql"
+  LAST_BACKUP="$sql"   # update records it, for rollback --restore
 
   info "archiving templates, resources, avatars, JDBC drivers and the secrets key -> $files"
   # The key is useless without the database and vice versa: back both up together. The archive is made inside a
@@ -553,26 +590,226 @@ cmd_restore() {
   info "restored. Start it again with ./deployment.sh up (with the version the backup was made with, or newer -- migrations only go forward)"
 }
 
-cmd_update() {
-  local backup=1
-  for a in "$@"; do
-    case "$a" in
-      --no-backup) backup=0 ;;
-      --build|--pull) no_build update ;;
-      --from-registry) ;;   # the only way now; accepted so older instructions still work
-      *) die "usage: update [--no-backup]" ;;
+is_kit() { [ -f VERSION ]; }
+kit_version() { tr -d ' \r\n' < VERSION 2>/dev/null || true; }
+
+# Files of your own that older setups kept elsewhere, copied into ./config/ once (never over one already there), so
+# the compose file -- which no longer mounts anything from the source tree -- keeps using them:
+# * the portal config PORTAL_CONFIG_FILE names (unless it is the repository's unchanged default),
+# * in a git checkout, protected-term lists edited or added under api/.
+migrate_config() {
+  mkdir -p "${CONFIG_DIRS[@]}"
+  local cfg; cfg="$(env_value PORTAL_CONFIG_FILE)"
+  if [ -n "$cfg" ] && [ -f "$cfg" ] && [ ! -e config/portal/config.js ]; then
+    if [ -d .git ] && command -v git >/dev/null && git show HEAD:portal/public/config.js 2>/dev/null | cmp -s - "$cfg"; then
+      : # the unchanged default -- the image has the same one
+    else
+      cp "$cfg" config/portal/config.js
+      info "your portal config ($cfg) is now config/portal/config.js -- PORTAL_CONFIG_FILE in .env is no longer used"
+    fi
+  fi
+  { [ -d .git ] && [ -d api ] && command -v git >/dev/null; } || return 0
+  local f to
+  for f in api/khmer_protected_terms.txt api/khmer_protected_terms.exclude.txt; do
+    to=config/protected-terms; case "$f" in *exclude*) to=config/protected-terms-exclude ;; esac
+    to="$to/from-$(basename "$f")"
+    if [ -f "$f" ] && [ ! -e "$to" ] && ! git diff --quiet HEAD -- "$f" 2>/dev/null; then
+      cp "$f" "$to"; info "your edited $f is now $to (merged with the lists in the image)"
+    fi
+  done
+  while IFS= read -r f; do
+    case "$f" in
+      */khmer_protected_terms.exclude.d/*.txt) to=config/protected-terms-exclude ;;
+      */khmer_protected_terms.d/*.txt) to=config/protected-terms ;;
+      *) continue ;;
     esac
+    to="$to/$(basename "$f")"
+    [ -e "$to" ] || { cp "$f" "$to"; info "your $f is now $to"; }
+  done <<LIST
+$(git ls-files --others --modified --exclude-standard -- api/khmer_protected_terms.d api/khmer_protected_terms.exclude.d 2>/dev/null)
+LIST
+}
+
+download() { # download URL FILE
+  if command -v curl >/dev/null; then curl -fsSL --retry 2 -o "$2" "$1"
+  elif command -v wget >/dev/null; then wget -q -O "$2" "$1"
+  else die "neither curl nor wget is installed -- install one, or copy the kit here and use --from"; fi
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1" | awk '{print $1}'
+  else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
+
+latest_version() {
+  local out="$KIT_TMP/latest"
+  if [ -n "${AKSOR_RELEASES_URL:-}" ]; then
+    download "$RELEASES_URL/LATEST" "$out" || die "couldn't read $RELEASES_URL/LATEST -- name the version: ./deployment.sh update 1.2.0"
+    tr -d ' \r\n' < "$out"
+  else
+    # The newest release, pre-releases included (GitHub's "latest" skips those).
+    download "$RELEASES_API" "$out" || die "couldn't ask GitHub for the newest release -- name the version (./deployment.sh update 1.2.0), or use --from with a kit copied here"
+    sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' "$out" | head -n1
+  fi
+}
+
+# fetch_kit VERSION FILE -> KIT_DIR: the kit unpacked in a temporary folder, its checksum verified. VERSION empty =
+# the newest release. FILE set = that tarball instead of a download (checked against FILE.sha256 when it is there).
+fetch_kit() {
+  local version="$1" from="$2" tarball sum expected=""
+  KIT_TMP="$(mktemp -d)"; trap 'rm -rf "$KIT_TMP"' EXIT
+  if [ -n "$from" ]; then
+    [ -f "$from" ] || die "$from not found"
+    tarball="$from"
+    if [ -f "$from.sha256" ]; then expected="$(awk '{print $1; exit}' "$from.sha256")"
+    else warn "no $from.sha256 next to it -- its checksum isn't checked"; fi
+  else
+    [ -n "$version" ] || version="$(latest_version)"
+    [ -n "$version" ] || die "couldn't find the newest release -- name the version: ./deployment.sh update 1.2.0"
+    local name="$KIT_NAME-$version.tar.gz"
+    local url="$RELEASES_URL/v$version/$name"
+    info "downloading the $version install kit"
+    tarball="$KIT_TMP/$name"
+    download "$url" "$tarball" || die "couldn't download $url -- is $version a released version (see the CHANGELOG)? Without internet: copy the kit here and use --from"
+    download "$url.sha256" "$tarball.sha256" || die "couldn't download $url.sha256"
+    expected="$(awk '{print $1; exit}' "$tarball.sha256")"
+  fi
+  if [ -n "$expected" ]; then
+    sum="$(sha256_of "$tarball")"
+    [ "$sum" = "$expected" ] || die "the kit's checksum doesn't match (got $sum, expected $expected) -- nothing was changed; download it again"
+  fi
+  mkdir "$KIT_TMP/x"
+  tar -xzf "$tarball" -C "$KIT_TMP/x" || die "$tarball isn't a valid kit archive"
+  KIT_DIR="$(find "$KIT_TMP/x" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+  local f
+  for f in "${KIT_FILES[@]}"; do [ -f "$KIT_DIR/$f" ] || die "the kit has no $f -- is it an Aksor Khmer BI install kit?"; done
+  bash -n "$KIT_DIR/deployment.sh" || die "the kit's deployment.sh doesn't parse -- nothing was changed"
+}
+
+# Put KIT_DIR's files in place, keeping the current ones in $KIT_PREVIOUS/ for `rollback` (with the name of the
+# backup taken just before). Each file is written next to its place and renamed over it, so this running script
+# goes on reading its own, old, copy.
+install_kit() {
+  local backup="$1" f
+  rm -rf "$KIT_PREVIOUS.new"; mkdir "$KIT_PREVIOUS.new"
+  for f in "${KIT_FILES[@]}"; do [ ! -f "$f" ] || cp -p "$f" "$KIT_PREVIOUS.new/$f"; done
+  [ -z "$backup" ] || printf '%s\n' "$backup" > "$KIT_PREVIOUS.new/BACKUP"
+  rm -rf "$KIT_PREVIOUS"; mv "$KIT_PREVIOUS.new" "$KIT_PREVIOUS"
+  for f in "${KIT_FILES[@]}"; do cp "$KIT_DIR/$f" "$f.new" && mv -f "$f.new" "$f"; done
+  chmod +x deployment.sh
+  # The kit's examples and READMEs under config/ -- it ships no file of yours (no config.js).
+  if [ -d "$KIT_DIR/config" ]; then
+    (cd "$KIT_DIR" && find config -type f) | while IFS= read -r f; do mkdir -p "$(dirname "$f")"; cp "$KIT_DIR/$f" "$f"; done
+  fi
+  if [ -f "$KIT_PREVIOUS/.env.example" ] && ! cmp -s "$KIT_PREVIOUS/.env.example" .env.example; then
+    warn ".env.example has changed -- see what's new: diff $KIT_PREVIOUS/.env.example .env.example (your .env is never edited)"
+  fi
+}
+
+cmd_update() {
+  local backup=1 version="" from="" switch=0
+  if [ "${1:-}" = --switch ]; then switch=1; shift; fi
+  local use="usage: update [<version>] [--from <kit.tar.gz>] [--no-backup]"
+  [ "$switch" = 0 ] || use="usage: switch-to-kit [<version>] [--from <kit.tar.gz>] [--no-backup]"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --no-backup) backup=0 ;;
+      --from) [ $# -ge 2 ] || die "$use"; from="$2"; shift ;;
+      --from=*) from="${1#--from=}" ;;
+      --build|--pull) no_build ;;
+      --from-registry) ;;   # the only way now; accepted so older instructions still work
+      -*) die "$use" ;;
+      *) [ -z "$version" ] || die "$use"; version="${1#v}" ;;
+    esac
+    shift
   done
   require_docker
+  local swap=0 new=""
+  if [ "$switch" = 1 ]; then
+    ! is_kit || die "this folder already runs from the install kit (version $(kit_version)) -- use ./deployment.sh update"
+    swap=1
+  elif is_kit; then
+    swap=1
+  elif [ -n "$version$from" ]; then
+    die "this folder is a git checkout: update it with git pull, then ./deployment.sh update -- or move it to the install kit (updates then need no git): ./deployment.sh switch-to-kit"
+  fi
+  if [ "$swap" = 1 ]; then
+    fetch_kit "$version" "$from"
+    new="$(tr -d ' \r\n' < "$KIT_DIR/VERSION")"
+    if is_kit && [ "$new" = "$(kit_version)" ]; then
+      info "already on $new -- pulling its images again"; swap=0
+    elif is_kit; then
+      info "updating $(kit_version) -> $new"
+    else
+      info "moving this checkout to the $new install kit"
+    fi
+  fi
   preflight
   ensure_network
   # Redis and Postgres untouched: brought up only if they aren't (a fresh host), never recreated.
   start_infra
+  LAST_BACKUP=""
   if [ "$backup" = 1 ]; then cmd_backup; else warn "skipping backup (--no-backup)"; fi
+  if [ "$swap" = 1 ]; then
+    install_kit "$LAST_BACKUP"
+    rm -rf "$KIT_TMP"
+    info "this folder is now version $new (the files it replaced are in $KIT_PREVIOUS/: ./deployment.sh rollback)"
+    if [ "$switch" = 1 ]; then
+      info "the source code here is no longer used. What this folder needs from now on: .env, config/, data/, backups/, ${KIT_FILES[*]}"
+    fi
+    # The new deployment.sh pulls and starts what the new compose files name (migrations run at api start).
+    SKIP_DOCTOR=1 exec ./deployment.sh up
+  fi
   pull_app_images
   info "recreating the app (alembic upgrade head runs as the api starts)"
   app up -d --wait || die "the app didn't come up healthy -- see why with: ./deployment.sh logs api"
   cmd_status
+}
+
+# Back to the files from before the last update (or switch-to-kit). Database migrations only go forward: when that
+# update migrated the database, the older version can't start on it, and --restore also puts back the backup the
+# update took first (everything changed since is lost; restore takes a safety backup of it).
+cmd_rollback() {
+  local restore=0 yes=0 a
+  for a in "$@"; do
+    case "$a" in
+      --restore) restore=1 ;;
+      --yes|-y) yes=1 ;;
+      *) die "usage: rollback [--restore] [--yes]" ;;
+    esac
+  done
+  require_docker
+  [ -f "$KIT_PREVIOUS/deployment.sh" ] || die "nothing to roll back to: $KIT_PREVIOUS/ keeps the files from before the last update, and there is none (in a git checkout: git checkout <the earlier commit>, then ./deployment.sh update)"
+  local prev cur bk
+  prev="$(tr -d ' \r\n' < "$KIT_PREVIOUS/VERSION" 2>/dev/null || true)"; prev="${prev:-the git checkout}"
+  cur="$(kit_version)"; cur="${cur:-this version}"
+  bk="$(cat "$KIT_PREVIOUS/BACKUP" 2>/dev/null || true)"
+  if [ "$restore" = 1 ] && { [ -z "$bk" ] || [ ! -f "$bk" ]; }; then
+    die "no backup is recorded for the last update (it ran with --no-backup, or the file is gone) -- roll back without --restore, or restore one yourself (ls $BACKUP_DIR)"
+  fi
+  printf '\nRoll back from %s to %s.\n' "$cur" "$prev"
+  if [ "$restore" = 1 ]; then
+    printf 'The database and data/ go back to the backup taken before the update:\n    %s\nEverything changed since is lost (a safety backup of it is taken first).\n' "$bk"
+  elif [ -n "$bk" ]; then
+    printf 'If the update migrated the database, the older version will not start on it -- then use --restore\n(it puts back %s).\n' "$bk"
+  fi
+  if [ "$yes" != 1 ]; then
+    [ -t 0 ] || die "not a terminal: add --yes to roll back without being asked"
+    local answer; read -r -p "Go on? [y/N] " answer
+    case "$answer" in y|Y|yes|YES) ;; *) die "cancelled -- nothing was changed" ;; esac
+  fi
+  # Swap the two sets, so rolling back again goes forward again.
+  local f
+  rm -rf "$KIT_PREVIOUS.swap"; mkdir "$KIT_PREVIOUS.swap"
+  for f in "${KIT_FILES[@]}"; do [ ! -f "$f" ] || cp -p "$f" "$KIT_PREVIOUS.swap/$f"; done
+  for f in "${KIT_FILES[@]}"; do
+    if [ -f "$KIT_PREVIOUS/$f" ]; then cp -p "$KIT_PREVIOUS/$f" "$f.new" && mv -f "$f.new" "$f"
+    elif [ "$f" = VERSION ]; then rm -f VERSION; fi   # back to a git checkout, which has none
+  done
+  rm -rf "$KIT_PREVIOUS"; mv "$KIT_PREVIOUS.swap" "$KIT_PREVIOUS"
+  info "files rolled back to $prev"
+  if [ "$restore" = 1 ]; then ./deployment.sh restore "$bk" --yes || die "the restore failed -- see above"; fi
+  SKIP_DOCTOR=1 exec ./deployment.sh up
 }
 
 pull_app_images() {
@@ -596,6 +833,8 @@ main() {
     backup)  cmd_backup "$@" ;;
     restore) cmd_restore "$@" ;;
     update)  cmd_update "$@" ;;
+    rollback) cmd_rollback "$@" ;;
+    switch-to-kit) cmd_update --switch "$@" ;;
     doctor)  cmd_doctor ;;
     set-db-password) cmd_set_db_password "$@" ;;
     cleanup) cmd_cleanup "$@" ;;

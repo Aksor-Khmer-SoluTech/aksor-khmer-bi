@@ -126,6 +126,12 @@ single-file mechanism above if you need `.json`. See
 and `khmer-line-breaking.md`'s "Injecting (and excluding) extra terms from
 a file" section for full details.
 
+**On a Docker deployment** (`./deployment.sh`) this is already wired up:
+drop `*.txt` files into the install folder's `config/protected-terms/`
+(or `config/protected-terms-exclude/` to stop protecting a term) and run
+`./deployment.sh up`. They merge with the lists shipped in the image; no
+copy of the repository and no image rebuild is needed.
+
 ### 7. Built-in term wrong for your data? Exclude it — don't delete it
 
 If a built-in entry turns out to be wrong or unwanted for a specific

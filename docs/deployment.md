@@ -54,8 +54,7 @@ sudo usermod -aG docker "$USER"      # then log out and back in
 On these systems two things are different, and both are already handled or flagged for you:
 
 - **SELinux** (enforcing by default) blocks a container from reading a mounted folder unless it is labelled. Every
-  bind mount in `docker-compose.yml` carries the `z` label for exactly this, so `data/` just works. If you replace
-  `PORTAL_CONFIG_FILE` with a file elsewhere, it is relabelled too.
+  bind mount in `docker-compose.yml` carries the `z` label for exactly this, so `data/` and `config/` just work.
 - **firewalld** can stop containers reaching the internet and can block the published ports. Allow forwarding with
   `sudo firewall-cmd --permanent --zone=public --add-masquerade && sudo firewall-cmd --reload && sudo systemctl restart docker`,
   and open the ports people use: `sudo firewall-cmd --permanent --add-port=8080/tcp --add-port=8000/tcp && sudo firewall-cmd --reload`.
@@ -77,26 +76,57 @@ docker run --rm alpine wget -q -T 5 -O /dev/null http://example.com && echo "con
 | ok | **fails** | Docker's network can't get out. Check, in this order: `sysctl net.ipv4.ip_forward` must print `1` (`sudo sysctl -w net.ipv4.ip_forward=1`); **UFW** drops forwarded traffic by default — set `DEFAULT_FORWARD_POLICY="ACCEPT"` in `/etc/default/ufw` and `sudo ufw reload`; Docker installed as a **snap** (`snap list docker`) — remove it and use the steps above; a DNS that containers can't use — put `{"dns": ["1.1.1.1", "8.8.8.8"]}` in `/etc/docker/daemon.json` and `sudo systemctl restart docker`. |
 | **fails** | — | The server can't reach Docker Hub: a proxy (configure it for the Docker daemon), or a firewall that must allow `registry-1.docker.io`, `auth.docker.io` and `production.cloudflare.docker.com`. On a fully offline server, pull the images on a machine that can, `docker save` them there and `docker load` them here. |
 
-#### B. Get the code (once)
+#### B. Get the install kit (once)
 
 You need Docker with the Compose v2 plugin, and ports **8000** (API) and **8080** (portal) free — or choose others with `API_PORT` / `PORTAL_PORT` in `.env` (see below).
+**The server doesn't need the source code.** Each release publishes a small *install kit* (a few dozen KB):
+`deployment.sh`, the three compose files, `.env.example` and a `config/` folder. The application itself comes as
+released images from Docker Hub.
+
+**One line** (downloads the newest release, checks its checksum, unpacks it into `./aksor-khmer-bi`, then runs
+`init` and `up`):
 
 ```bash
-git clone --depth 1 https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi.git
-cd aksor-khmer-bi
+curl -fsSL https://raw.githubusercontent.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/main/install.sh | bash -s -- --no-start
+```
+
+`--no-start` stops after `init`, so you can check `.env` first (see [Option 1](#option-1--quick-deployment-deploymentsh));
+leave it out to start straight away. Add a version to install that one (`bash -s -- 1.0.0-beta.5 --no-start`), or
+`--dir /opt/aksor` for another folder.
+
+**By hand**, from the [Releases page](https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases) — also the way
+for a server **without internet**, after copying the two files across:
+
+```bash
+VERSION=1.0.0-beta.5
+curl -fLO https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases/download/v$VERSION/aksor-khmer-bi-deploy-$VERSION.tar.gz
+curl -fLO https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases/download/v$VERSION/aksor-khmer-bi-deploy-$VERSION.tar.gz.sha256
+sha256sum -c aksor-khmer-bi-deploy-$VERSION.tar.gz.sha256      # macOS: shasum -a 256 -c …
+tar xzf aksor-khmer-bi-deploy-$VERSION.tar.gz
+mv aksor-khmer-bi-deploy-$VERSION aksor-khmer-bi && cd aksor-khmer-bi
 docker --version && docker compose version     # both must answer
 ```
 
-`--depth 1` downloads only the latest version (a few MB, no history); `git pull` still updates it later. The
-repository is public, so **no username or password is needed**. If git asks for one anyway:
+What the folder holds, and what is yours:
 
-- Add `GIT_TERMINAL_PROMPT=0` in front (`GIT_TERMINAL_PROMPT=0 git clone --depth 1 …`) so it fails with the real
-  error instead of a login prompt.
-- Check the URL is spelled exactly as above (GitHub asks for a login when a repository name is wrong).
-- Run `git config --global --list | grep -i -E "insteadof|credential"` -- a URL-rewrite rule or a stale saved
-  credential on that machine is the usual cause. A proxy that intercepts GitHub can do the same.
-- Or skip git: `curl -L https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/archive/refs/heads/main.tar.gz | tar xz`
-  then `cd aksor-khmer-bi-main`. (No history, so no `git pull` -- download again to update.)
+| | |
+|---|---|
+| `deployment.sh`, `docker-compose*.yml`, `.env.example`, `VERSION` | the kit — replaced by `./deployment.sh update`, never edit them |
+| `.env` | your settings (`init` writes it; never replaced) |
+| `config/portal/` | optional: a whole `config.js` of your own (otherwise the `PORTAL_*` settings in `.env` are used) |
+| `config/protected-terms/`, `config/protected-terms-exclude/` | optional: your own protected-term lists (`*.txt`) |
+| `data/`, `backups/` | everything the app stores, and `./deployment.sh backup`'s output |
+| `.kit-previous/` | the kit files from before the last update, for `./deployment.sh rollback` |
+
+A mirror of the release downloads (`AKSOR_RELEASES_URL=https://mirror.example.com/aksor`, laid out as
+`<url>/v<version>/<kit>` plus a `LATEST` file holding the newest version) works for both `install.sh` and `update`.
+
+**Or a git checkout** — for contributors, or to follow `main`:
+`git clone --depth 1 https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi.git && cd aksor-khmer-bi`. The repository
+is public, so no login is needed; if git asks for one anyway, check the URL, try `GIT_TERMINAL_PROMPT=0 git clone …`
+for the real error, and look for a URL-rewrite rule or stale credential in `git config --global --list`. A checkout
+updates with `git pull`, then `./deployment.sh update`; `./deployment.sh switch-to-kit` turns it into a kit folder
+(your portal config and protected-term edits move into `config/`).
 
 Run every command below **from this folder** (the one containing `docker-compose.yml`).
 
@@ -135,7 +165,7 @@ Intel/AMD and ARM (`linux/amd64`, `linux/arm64`) machines — each pulls its own
 | `jdbc-worker` *(optional)* | `aksorkhmerbi/aksor-khmer-bi-jdbc-worker` |
 
 The versions are written in `docker-compose.yml` itself — there is nothing to set. A release updates them, so
-upgrading is `git pull` followed by `./deployment.sh update`.
+upgrading is `./deployment.sh update` (it brings the new version's files).
 
 They share one Docker network, `aksor-network`, which is how the app finds `postgres` and `redis` by name.
 Each file has its **own project name** (`-p …`) — keep them, or stopping one stack could remove another's
@@ -159,24 +189,26 @@ to end — if one of them fails on your server, the Troubleshooting table at the
 > - **Read the [CHANGELOG](../CHANGELOG.md) before you update** — every entry between the version you run now and the one
 >   you are upgrading to. Look for changes to `.env` settings, database migrations and anything marked breaking or
 >   "upgrade note", and do what they say first.
-> - **`up` and `update` pull the released images.** `git pull` brings the new image versions (they are written in
-> `docker-compose.yml`), then `./deployment.sh update`: nothing is built, so the server needs no Node/npm and no
-> access to npm or Debian.
-> - **Back up `.env` yourself before updating** (`cp -p .env ../aksor.env.bak` — keep it outside the repository folder): it holds the database password and the portal
+> - **`up` and `update` pull the released images.** `./deployment.sh update` downloads the new version's install kit
+> (which names the new images) and pulls them — in a git checkout, `git pull` first. Nothing is built, so the server
+> needs no Node/npm and no access to npm or Debian.
+> - **Back up `.env` and `config/` yourself before updating** (`cp -p .env ../aksor.env.bak` — keep it outside the folder): it holds the database password and the portal
 >   login. If `.env` is lost, `init` generates a *new* one, and the existing database keeps its old password.
 > - A new version may add settings to `.env.example` that your `.env` doesn't have. They are never merged in
->   automatically; compare with `diff .env.example .env` after `git pull` and copy over what you want.
+>   automatically; `update` says when `.env.example` changed — compare with `diff .kit-previous/.env.example .env.example`
+>   and copy over what you want.
 
-`deployment.sh` (in the repository folder) does the setup and steps 1–3 below for you, and is also how you update, back up and stop
+`deployment.sh` (in the install folder) does the setup and steps 1–3 below for you, and is also how you update, back up and stop
 the stack later. Docker and the code come first — see [Before you start](#before-you-start-required-for-both-options).
 
 ```bash
-cd aksor-khmer-bi          # the folder from "Get the code"
+cd aksor-khmer-bi          # the folder from "Get the install kit"
 ./deployment.sh init       # once: creates the network, the data folders and .env with generated passwords
 ```
 
 `init` prints the generated sign-in (`admin` and a random password — **shown only once, it is also saved in `.env`**).
-Before you start, open `.env` and check `CORS_ALLOWED_ORIGINS` is the address people will type in the browser, and
+Before you start, open `.env` and check `CORS_ALLOWED_ORIGINS` is the address people will type in the browser and
+`PORTAL_API_BASE_URL` the API's address as their browsers reach it, and
 change `API_PORT` / `PORTAL_PORT` if 8000 / 8080 are taken (every setting is explained in `.env.example`; see also
 [Customizing](#customizing)). Then:
 
@@ -198,7 +230,9 @@ Everything you do afterwards:
 | see what is running | `./deployment.sh status` |
 | read the logs | `./deployment.sh logs` follows the API (add names for others: `logs api worker scheduler portal jdbc-worker`; Ctrl+C stops). Last lines only: `./deployment.sh app logs --tail 100 api`; a time window: `./deployment.sh app logs -f --since 10m api`; Postgres / Redis: `./deployment.sh db logs --tail 50`, `./deployment.sh redis logs --tail 50`. Older history: the dated files in `data/logs/` |
 | start or apply changes to the app only (Postgres and Redis untouched) | `./deployment.sh app up -d --wait`, or some services: `./deployment.sh app up -d --wait api portal`; the JDBC worker needs its profile: `./deployment.sh app --profile jdbc up -d --wait api jdbc-worker portal`. Skips the checks `up` runs first — plain `./deployment.sh up` is usually just as quick, since it only recreates what changed |
-| update to the new version | read the [CHANGELOG](../CHANGELOG.md) for every version up to the one you want **first**; `git pull` (it brings the new image versions), then `./deployment.sh update` — takes a **backup first**, pulls that version's images, restarts the app (database migrations run as the API starts); Postgres and Redis are not touched. Flag: `--no-backup` |
+| update to the new version | read the [CHANGELOG](../CHANGELOG.md) for every version up to the one you want **first**; then `./deployment.sh update` (the newest release) or `./deployment.sh update 1.0.0-beta.5` (that one) — takes a **backup first**, downloads that version's install kit and checks its checksum, keeps the current files in `.kit-previous/`, pulls the images, restarts the app (database migrations run as the API starts); Postgres and Redis are not touched. No internet: copy the kit and its `.sha256` over and `./deployment.sh update --from aksor-khmer-bi-deploy-1.0.0-beta.5.tar.gz`. In a git checkout: `git pull`, then `./deployment.sh update`. Flag: `--no-backup` |
+| go back to the version before | `./deployment.sh rollback` — puts back the files from before the last update and restarts the app. If that update migrated the database the older version won't start on it: `./deployment.sh rollback --restore` also restores the backup the update took (everything changed since is lost; a safety backup is taken) |
+| move a git checkout to the install kit | `./deployment.sh switch-to-kit` — your portal config and protected-term edits are copied into `config/`; from then on `update` needs no git |
 | back up now | `./deployment.sh backup` — the database plus templates, images, avatars and the encryption key, into `./backups/` (the newest 14 are kept; `BACKUP_KEEP=30` changes that) |
 | apply a change in `.env` | `./deployment.sh up` (recreates only what changed) |
 | restart | `./deployment.sh restart` (everything), `restart app` / `restart db` / `restart redis`, or single services: `restart api portal` (any of `api`, `portal`, `scheduler`, `worker`, `jdbc-worker`). A restart doesn't re-read `.env` — after editing it, run `./deployment.sh up` |
@@ -246,8 +280,8 @@ browser** to open the portal — `http://localhost:8080` on your own machine, or
 
 **Ports.** The API is published on 8000 and the portal on 8080. If those are taken, add `API_PORT=…` and/or
 `PORTAL_PORT=…` to `.env`. Then keep three things in step: `CORS_ALLOWED_ORIGINS` uses the portal's new port, and —
-if you moved the API — `PORTAL_API_BASE_URL` in the portal config file (`portal/public/config.js`, or the file
-`PORTAL_CONFIG_FILE` points to) uses the API's new port.
+if you moved the API — `PORTAL_API_BASE_URL` in `.env` (or in `config/portal/config.js`, if you wrote one) uses the
+API's new port.
 
 People sign in with a short-lived access token and a refresh cookie (see
 [authentication.md](authentication.md)). Nothing to configure for that: the signing key is created for you in
@@ -357,7 +391,7 @@ Then upload a driver under **Manage → JDBC Drivers**.
 |---|---|
 | see what's running | `docker compose -p aksor-app -f docker-compose.yml ps` (and `-p aksor-db`, `-p aksor-redis` with their files) |
 | read the API log | `docker compose -p aksor-app -f docker-compose.yml logs -f api` |
-| deploy a new version | read the [CHANGELOG](../CHANGELOG.md), `git pull` (it brings the new image versions), then `docker compose -p aksor-app -f docker-compose.yml pull` and `… up -d --wait` — only the app restarts; migrations run as `api` starts; the database and Redis are untouched |
+| deploy a new version | read the [CHANGELOG](../CHANGELOG.md), unpack the new version's install kit over this folder (or `git pull` in a checkout) — it brings the new image versions — then `docker compose -p aksor-app -f docker-compose.yml pull` and `… up -d --wait` — only the app restarts; migrations run as `api` starts; the database and Redis are untouched |
 | restart one service | `docker compose -p aksor-app -f docker-compose.yml restart api` |
 | apply a `.env` change | `docker compose -p aksor-app -f docker-compose.yml up -d` (recreates what changed) |
 
@@ -408,9 +442,8 @@ You still need the network (0.1) because the app joins it.
 **A server with a domain name.** Two settings must name your public address:
 
 1. `CORS_ALLOWED_ORIGINS=https://reports.example.com` in `.env`.
-2. The portal's `window.PORTAL_API_BASE_URL` (on the **same site** as the portal — e.g. `reports.example.com` and `api.example.com`, or one domain behind a proxy — because sign-in uses a cookie) — copy `portal/public/config.js` somewhere, change that line to your API's
-   public URL, and set `PORTAL_CONFIG_FILE=/path/to/that/config.js` in `.env`. Recreate the portal with
-   `docker compose -p aksor-app -f docker-compose.yml up -d portal`.
+2. The portal's `window.PORTAL_API_BASE_URL` (on the **same site** as the portal — e.g. `reports.example.com` and `api.example.com`, or one domain behind a proxy — because sign-in uses a cookie) — set `PORTAL_API_BASE_URL=https://api.reports.example.com`
+   in `.env`. Recreate the portal with `docker compose -p aksor-app -f docker-compose.yml up -d portal`.
 
 TLS is not included — put a reverse proxy (Caddy, nginx, Traefik) in front of ports 8080 and 8000.
 
@@ -426,9 +459,10 @@ top to bottom once. Edit `.env`, then apply it:
 
 | I want to… | Setting in `.env` | Then run |
 |---|---|---|
-| use other ports | `API_PORT`, `PORTAL_PORT` (also `CORS_ALLOWED_ORIGINS`; and `PORTAL_API_BASE_URL` in the portal config file if the API moved) | `docker compose -p aksor-app -f docker-compose.yml up -d` |
-| serve it on a domain name | `CORS_ALLOWED_ORIGINS`, and the portal config file — see "A server with a domain name" | `… up -d` |
-| change the portal's name, logo or API address | the file `PORTAL_CONFIG_FILE` points to (default `portal/public/config.js`) | `… up -d portal` |
+| use other ports | `API_PORT`, `PORTAL_PORT` (also `CORS_ALLOWED_ORIGINS`; and `PORTAL_API_BASE_URL` if the API moved) | `docker compose -p aksor-app -f docker-compose.yml up -d` |
+| serve it on a domain name | `CORS_ALLOWED_ORIGINS` and `PORTAL_API_BASE_URL` — see "A server with a domain name" | `… up -d` |
+| change the portal's name, logo, date formats or API address | `PORTAL_BRAND_NAME`, `PORTAL_LOGO_URL`, `PORTAL_DATE_FORMAT`, `PORTAL_API_BASE_URL`… (all in `.env.example`) — or a whole `config/portal/config.js` of your own, which replaces them all | `… up -d portal` |
+| protect (or stop protecting) Khmer terms in OCR | not a setting: `*.txt` files in `config/protected-terms/` (or `config/protected-terms-exclude/`) — see [protected-terms-guide.md](protected-terms-guide.md) | `… up -d api` |
 | keep people signed in longer / shorter | `REFRESH_TOKEN_SESSION_HOURS`, `REFRESH_TOKEN_TTL_DAYS`, `ACCESS_TOKEN_TTL_SECONDS` | `… up -d` |
 | allow more or fewer sign-in attempts | `LOGIN_ATTEMPTS_PER_MINUTE` | `… up -d` |
 | read dates, and run scheduled jobs, in my time zone | `REPORT_TIMEZONE` (e.g. `Asia/Phnom_Penh`) | `… up -d` |
@@ -443,7 +477,7 @@ whose settings changed, and leaves the database and Redis alone. After changing 
 `.env.example` first — the database keeps the password it was created with.
 
 Changing something that isn't a setting — a service's resources, extra volumes, another port mapping — don't edit
-`docker-compose.yml` (your edit would clash with the next `git pull`). Put it in your own file and add it to the
+`docker-compose.yml` (the next `update` replaces it). Put it in your own file and add it to the
 command: `docker compose -p aksor-app -f docker-compose.yml -f docker-compose.custom.yml up -d`.
 
 ---
@@ -519,7 +553,9 @@ names across projects. A step-by-step walkthrough, one file at a time, is under 
 |---|---|
 | `init` | Creates `aksor-network`, the `data/` folders, and a mode-600 `.env` with a random `POSTGRES_PASSWORD` and `PORTAL_PASSWORD` (shown once). Never overwrites an existing `.env`; if a Postgres volume already exists it does **not** invent a new database password. |
 | `up` | Starts redis and postgres, waits for health, pulls the released images `docker-compose.yml` names and starts the app. Warns about a default DB password, a missing `PORTAL_PASSWORD`, or unset `CORS_ALLOWED_ORIGINS`. |
-| `update [--no-backup]` | After `git pull`: backs up, pulls the images `docker-compose.yml` now names, recreates the app (migrations run as the API starts). Redis and Postgres are not recreated. |
+| `update [<version>] [--from <kit>] [--no-backup]` | Backs up, downloads that version's install kit (default: the newest release; `--from` a copied file) and checks its checksum, keeps the current files in `.kit-previous/`, pulls the images the new compose file names, recreates the app (migrations run as the API starts). Redis and Postgres are not recreated. In a git checkout: no version — `git pull` first. |
+| `rollback [--restore] [--yes]` | Puts back the files from before the last update and restarts the app; `--restore` also restores the backup that update took (needed when it migrated the database). |
+| `switch-to-kit [<version>] [--from <kit>]` | Turns a git checkout into an install-kit folder; copies an edited portal config and protected-term lists into `config/`. |
 | `down` | Stops the app, then postgres, then redis. Named volumes and `./data` are kept. |
 | `restart [redis\|db\|app]`, `status`, `logs [service…]` | Operate and inspect. |
 | `restore <dump> [<files>] [--yes] [--no-backup]` | Puts a backup back (see "Restore a backup"): safety backup, stop the app, replace the database and `data/` (the old `data/` is moved aside, not deleted). |
@@ -598,21 +634,23 @@ used with the `jdbc` profile). Each is built for **Intel/AMD and ARM** (`linux/a
 release updates those tags, and each image can move on its own (a release that changes only the portal bumps only
 the portal's tag); `CHANGELOG.md` says what each release contains. To upgrade, read `CHANGELOG.md` first, then:
 ```bash
-git pull                  # brings the new image versions in docker-compose.yml
-./deployment.sh update    # backup, pull, recreate, migrate
+./deployment.sh update            # backup, the newest release's files, pull, recreate, migrate
+./deployment.sh update 1.0.2      # a specific release instead
 ```
-`update` lists the exact images it pulls before pulling them. To run a specific release rather than the newest,
-check out its tag first (`git checkout v1.0.2`).
+`update` lists the exact images it pulls before pulling them. (A git checkout: `git pull`, or `git checkout v1.0.2`,
+then `./deployment.sh update`.)
 
 Notes:
 - **Versions are pinned, never `latest`**, so a restart can never silently pick up a new release. A rollback is
-  checking out the older release (`git checkout v1.0.1`) and running `./deployment.sh update`. Database migrations
-  only move forward, so take the backup `update` makes before upgrading, and restore it to roll back across a
-  schema change.
-- **The portal's API URL is not in the image's control:** `portal/public/config.js` ships pointing at
-  `http://localhost:8000`, so compose bind-mounts your own copy over it (`PORTAL_CONFIG_FILE`, default
-  `./portal/public/config.js`). On a server with no checkout, copy that file there, edit
-  `PORTAL_API_BASE_URL`, and point `PORTAL_CONFIG_FILE` at it.
+  `./deployment.sh rollback` (or `./deployment.sh update 1.0.1`). Database migrations only move forward, so to roll
+  back across a schema change restore the backup `update` made: `./deployment.sh rollback --restore`.
+- **The portal's API URL is set at run time:** the image's `config.js` points at `http://localhost:8000`, and at
+  each start the portal container rewrites it from the `PORTAL_*` settings in `.env` — or replaces it with
+  `config/portal/config.js` when that exists (`portal/docker-entrypoint.d/40-aksor-config.sh`). An older compose file
+  that bind-mounts a `config.js` straight over the served one still works: that file is left as it is.
+- **Each release also publishes an install kit** (`scripts/build-deploy-kit.sh <version> --upload`, after the
+  release commit is pushed): the compose files naming these image versions, `deployment.sh` and `.env.example`.
+  Servers move between releases with `./deployment.sh update [<version>]` and back with `./deployment.sh rollback`.
 - Never bake secrets into an image: passwords and keys come from `.env` at run time, and `.dockerignore` keeps
   `.env` out of the build context. Public images can be pulled by anyone.
 - Images are not signed or scanned by this script; `docker scout cves <image>` or Trivy can do the
@@ -627,12 +665,12 @@ agree on where each other are:
   origins the browser is allowed to call this API from. `docker-compose.yml`
   defaults it to `http://localhost:8080` (the `portal` service's
   published port); override it for any other deployment.
-- **`portal/public/config.js`**'s `window.PORTAL_API_BASE_URL` — where the
-  portal's JS sends its requests. Defaults to `http://localhost:8000`.
-  Edit this file directly (or bind-mount a replacement over it) for a
-  non-default `api` URL — it's deliberately loaded as a plain `<script>`
-  before the app bundle and left out of the Vite build, so changing it
-  doesn't require rebuilding the image.
+- **`PORTAL_API_BASE_URL`** in `.env` — where the portal's JS sends its
+  requests. Defaults to `http://localhost:8000`. It lands in the portal's
+  `config.js` at container start — a plain `<script>` loaded before the
+  app bundle and left out of the Vite build, so changing it needs only
+  `up -d portal`, never a rebuild. A `config/portal/config.js` of your
+  own replaces it.
 
 Get either wrong and the symptom is the portal's login silently failing
 — check the browser console for a CORS error before assuming the
@@ -806,19 +844,17 @@ path substitutes a fallback font. (Fonts installed in a derived image still work
 
 | Host path | Container path | Purpose |
 |---|---|---|
-| `./api/khmer_protected_terms.txt` | same, `:ro` | This deployment's Khmer protected-terms additions — see [`protected-terms-guide.md`](protected-terms-guide.md) |
-| `./api/khmer_protected_terms.exclude.txt` | same, `:ro` | The inverse — suppress a shared built-in term |
-| `./api/khmer_protected_terms.d` | same, `:ro` | Directory form of the first row — drop any number of `*.txt` exception files in here instead of editing one file |
-| `./api/khmer_protected_terms.exclude.d` | same, `:ro` | Directory form of the second row |
+| `./config/protected-terms` | `/app/config/protected-terms`, `:ro` | This deployment's Khmer protected-terms additions: every `*.txt` file here, merged with the lists shipped in the image — see [`protected-terms-guide.md`](protected-terms-guide.md) |
+| `./config/protected-terms-exclude` | `/app/config/protected-terms-exclude`, `:ro` | The inverse — suppress a shipped or built-in term |
+| `./config/portal` | `/aksor-config` on `portal`, `:ro` | Optional: a whole `config.js` of your own, used instead of the `PORTAL_*` settings |
 | `./data/report_templates` | `/app/data/report_templates`, read-write | Templates registered via `/api/v1/reports` — deliberately outside `api/`'s own directory (runtime data, not code), same reasoning as `api`/`portal` being separate services. Without this mount, uploads are lost on `docker compose down` / container recreate, since they'd otherwise only live in the container's writable layer |
 | `./data/image_resources`, `./data/stylesheet_resources`, `./data/avatars` | `/app/data/…`, read-write (`api`; the first two also `worker`) | The Resources library (images and stylesheets that html templates and docx image fields render from) and user avatars. These were **not mounted before** and were lost whenever the container was recreated — mounted now; back them up with the templates (`./deployment.sh backup` does) |
 | `./data/font_resources` | `/app/data/font_resources`, read-write (`api`) and read-only (`worker`) | Fonts added under **Resources → Fonts** — server-wide, used from the next render with no restart. Back it up with the templates (`./deployment.sh backup` does). |
 | `./data/postgres` | `/var/lib/postgresql/data` on the `postgres` service | The database. Postgres makes it private to itself (owner `postgres`, mode 700), so read it through Postgres, not the files; back it up with `./deployment.sh backup` (a `pg_dump`), never by copying the folder while Postgres runs |
 
-The first two are read-only bind mounts specifically so editing either
-file on the host takes effect on container **restart**, without an
-image rebuild — they're baked into the image too (so a fresh deploy has
-sane defaults), the mount just lets you override them live.
+The `config/` folders are read-only bind mounts, so a list or `config.js` edited on the host takes effect at the next
+`./deployment.sh up` without an image rebuild. The lists that ship with a release are inside the image itself
+(`/app/api/khmer_protected_terms*`), so a server needs no copy of the repository for them.
 
 #### Environment variables reference
 

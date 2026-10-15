@@ -47,3 +47,9 @@ specs/
 # deployment.sh backup output
 backups/
 data.before-restore-*/
+
+# A deployment's own files (deployment.sh; config/ is mounted by docker-compose.yml) and the install kit
+# scripts/build-deploy-kit.sh builds
+config/
+.kit-previous/
+dist-kit/

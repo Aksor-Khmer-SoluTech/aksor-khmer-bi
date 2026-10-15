@@ -14,7 +14,7 @@ services:
   api:
     # One image for api, scheduler and worker (same code, different command). Every app service runs a released
     # image from Docker Hub, pinned to the version written here -- nothing is built on the server. A release updates
-    # these tags (each image can move on its own); get them with `git pull`, then `./deployment.sh update`.
+    # these tags (each image can move on its own); `./deployment.sh update` brings them.
     image: aksorkhmerbi/aksor-khmer-bi-engine:1.0.0-beta.4
     restart: unless-stopped
     logging: *default-logging
@@ -56,17 +56,15 @@ services:
       REDIS_URL: ${REDIS_URL:-}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      # Each _FILE variable takes os.pathsep-separated paths, so point
-      # either one at several mounted files if you need more than one
-      # inject/exclude source. The _DIR variables below are the scalable
-      # alternative: every *.txt file inside the directory is merged in,
-      # so a new exception file can be dropped in without editing this
-      # config (see docs/protected-terms-guide.md). Both mechanisms are
-      # active at once; their terms simply merge.
+      # The protected-term lists that ship with the release are inside the image (the _FILE variables). Your own
+      # go in ./config/protected-terms/ and ./config/protected-terms-exclude/ (mounted below): every *.txt file
+      # there is merged in, on top of the shipped lists, at the next `./deployment.sh up` -- no image rebuild and
+      # no copy of the repository needed (see docs/protected-terms-guide.md). Each variable takes several paths,
+      # separated by `:`.
       AKSOR_KHMER_OCR_PROTECTED_TERMS_FILE: /app/api/khmer_protected_terms.txt
       AKSOR_KHMER_OCR_EXCLUDED_TERMS_FILE: /app/api/khmer_protected_terms.exclude.txt
-      AKSOR_KHMER_OCR_PROTECTED_TERMS_DIR: /app/api/khmer_protected_terms.d
-      AKSOR_KHMER_OCR_EXCLUDED_TERMS_DIR: /app/api/khmer_protected_terms.exclude.d
+      AKSOR_KHMER_OCR_PROTECTED_TERMS_DIR: /app/api/khmer_protected_terms.d:/app/config/protected-terms
+      AKSOR_KHMER_OCR_EXCLUDED_TERMS_DIR: /app/api/khmer_protected_terms.exclude.d:/app/config/protected-terms-exclude
       # Gates the template management portal (/portal) and the mutating
       # /api/v1/reports routes (see app/auth.py) — set via a .env file or
       # the shell environment, never hardcoded here. If left unset, the
@@ -101,13 +99,9 @@ services:
     volumes:
       # Every bind mount here ends in `z`: on SELinux hosts (CentOS / RHEL / Rocky / Alma / Fedora) a mounted
       # folder is unreadable to the container without it; elsewhere it does nothing.
-      # One bind mount per protected-terms mechanism, each mapped onto the
-      # path its env var above already points at, so editing either file on
-      # the host takes effect on container restart without an image rebuild.
-      - ./api/khmer_protected_terms.txt:/app/api/khmer_protected_terms.txt:ro,z
-      - ./api/khmer_protected_terms.exclude.txt:/app/api/khmer_protected_terms.exclude.txt:ro,z
-      - ./api/khmer_protected_terms.d:/app/api/khmer_protected_terms.d:ro,z
-      - ./api/khmer_protected_terms.exclude.d:/app/api/khmer_protected_terms.exclude.d:ro,z
+      # Your own protected terms, on top of the lists in the image (see the variables above).
+      - ./config/protected-terms:/app/config/protected-terms:ro,z
+      - ./config/protected-terms-exclude:/app/config/protected-terms-exclude:ro,z
       # Reports registered via POST /api/v1/reports (see app/report_store.py)
       # live here — deliberately outside api/ (runtime data, not code) —
       # bind-mounted so they survive a container recreate/rebuild instead
@@ -256,7 +250,7 @@ services:
     logging: *default-logging
     ports:
       # Host port: PORTAL_PORT in .env (default 8080). If you change API_PORT, point the portal at it too:
-      # PORTAL_API_BASE_URL in the config file below, and CORS_ALLOWED_ORIGINS must use this port.
+      # PORTAL_API_BASE_URL in .env, and CORS_ALLOWED_ORIGINS must use this port.
       - "${PORTAL_PORT:-8080}:80"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
@@ -264,10 +258,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    # Runtime settings (the API's address people's browsers use, branding, date formats), written into config.js
+    # at each start (portal/docker-entrypoint.d/40-aksor-config.sh): the image's default plus any of these set in
+    # .env. Or put a whole config.js of your own in ./config/portal/ -- it then replaces all of them.
+    environment:
+      PORTAL_API_BASE_URL: ${PORTAL_API_BASE_URL:-}
+      PORTAL_BRAND_NAME: ${PORTAL_BRAND_NAME:-}
+      PORTAL_BRAND_MARK: ${PORTAL_BRAND_MARK:-}
+      PORTAL_PRODUCT_NAME: ${PORTAL_PRODUCT_NAME:-}
+      PORTAL_TAGLINE: ${PORTAL_TAGLINE:-}
+      PORTAL_DESCRIPTION: ${PORTAL_DESCRIPTION:-}
+      PORTAL_LOGO_URL: ${PORTAL_LOGO_URL:-}
+      PORTAL_DATE_FORMAT: ${PORTAL_DATE_FORMAT:-}
+      PORTAL_TIME_FORMAT: ${PORTAL_TIME_FORMAT:-}
+      PORTAL_DATETIME_FORMAT: ${PORTAL_DATETIME_FORMAT:-}
     volumes:
-      # Runtime config (the API's URL, branding). The image ships a localhost default, so any
-      # real deployment -- especially one pulled from a registry -- supplies its own copy.
-      - ${PORTAL_CONFIG_FILE:-./portal/public/config.js}:/usr/share/nginx/html/config.js:ro,z
+      - ./config/portal:/aksor-config:ro,z
 
 # Postgres and Redis live in docker-compose.db.yml and docker-compose.redis.yml; all three files share this
 # external network so `postgres` and `redis` resolve from here. Create it once

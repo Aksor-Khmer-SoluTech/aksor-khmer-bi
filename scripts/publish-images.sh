@@ -14,8 +14,9 @@
 # `latest`), --dry-run (print what would be built, build nothing).
 #
 # After pushing, it writes each published image's new tag into docker-compose.yml (only those images: a portal-only
-# release changes only the portal's line). Commit that with the release's CHANGELOG.md heading and push -- servers
-# then get it with `git pull` and `./deployment.sh update`.
+# release changes only the portal's line). Commit that with the release's CHANGELOG.md heading and push, then
+# publish the install kit: scripts/build-deploy-kit.sh <version> --upload -- servers then get it with
+# `./deployment.sh update` (a git checkout: `git pull` first).
 #
 # Before: `docker login` as an account that can push to aksorkhmerbi, publish only a commit CI passed on, and give
 # the version its heading in CHANGELOG.md -- saying which image versions it uses when they differ. Keep the Docker
@@ -124,4 +125,5 @@ done
 
 info "published. $compose_file now names:"
 grep -E "image: $prefix-" "$compose_file" | sed 's/^ *image: /      /' | sort -u
-echo "    commit it with the release's CHANGELOG.md heading and push; servers: git pull && ./deployment.sh update"
+echo "    commit it with the release's CHANGELOG.md heading and push, then publish the install kit servers update from:"
+echo "      scripts/build-deploy-kit.sh <release version> --upload"

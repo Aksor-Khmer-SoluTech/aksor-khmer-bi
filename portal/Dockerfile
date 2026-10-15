@@ -16,4 +16,8 @@ RUN cd portal && npm run build
 
 FROM nginx:alpine
 COPY --from=build /app/portal/dist /usr/share/nginx/html
+# config.js is written at each start from this default plus the PORTAL_* settings, or replaced by a mounted
+# config/portal/config.js (docker-entrypoint.d/40-aksor-config.sh) -- a server needs no copy of the repository.
+RUN cp /usr/share/nginx/html/config.js /usr/share/nginx/html/config.default.js
+COPY --chmod=755 portal/docker-entrypoint.d/40-aksor-config.sh /docker-entrypoint.d/40-aksor-config.sh
 EXPOSE 80
