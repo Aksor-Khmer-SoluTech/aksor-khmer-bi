@@ -35,6 +35,7 @@ import type {
   DataSource,
   DeploymentTerms,
   EffectivePermissions,
+  UserOverview,
   Folder,
   ImportChoice,
   ImportPlan,
@@ -1007,6 +1008,10 @@ export const api = {
     },
     permissions(id: string): Promise<EffectivePermissions> {
       return getJSON(`/users/${id}/permissions`);
+    },
+    /** Templates they uploaded, what they can reach, and where each permission comes from. */
+    overview(id: string): Promise<UserOverview> {
+      return getJSON(`/users/${id}/overview`);
     },
   },
 

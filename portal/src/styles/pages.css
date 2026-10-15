@@ -5804,3 +5804,114 @@ textarea[readonly] {
     animation: none;
   }
 }
+
+/* ---- components/DetailModal.tsx: one item's details over a list page ---- */
+.detail-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
+  animation: detail-modal-fade 0.18s ease-out;
+}
+
+.detail-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1120px, 100%);
+  height: min(860px, calc(100dvh - 48px));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  outline: none;
+  animation: detail-modal-in 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.detail-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 16px 14px 22px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--bg));
+}
+
+.detail-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.detail-modal-body > .admin-detail {
+  padding: 20px 24px 28px;
+}
+
+@keyframes detail-modal-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes detail-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+}
+
+@media (max-width: 720px) {
+  .detail-modal-backdrop {
+    padding: 0;
+  }
+
+  .detail-modal {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-modal-backdrop,
+  .detail-modal {
+    animation: none;
+  }
+}
+
+/* A section the user detail's summary strip just jumped to (UserDetailPanel.tsx) -- a brief glow so the eye lands. */
+.section-flash {
+  animation: section-flash 1.2s ease-out;
+}
+
+@keyframes section-flash {
+  0%,
+  35% {
+    box-shadow: 0 0 0 6px var(--accent-soft);
+    background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section-flash {
+    animation: none;
+  }
+}
+
+/* admin/users/UserGrants.tsx -- wide enough for the role cards, three to a row. */
+dialog.modal.grant-dialog {
+  max-width: 780px;
+  width: 94vw;
+  max-height: min(88dvh, 820px);
+  overflow-y: auto;
+}

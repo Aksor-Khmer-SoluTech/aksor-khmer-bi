@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
+import DetailModal from "../../components/DetailModal";
 import { TableSkeleton } from "../../components/Skeletons";
 import type { AuthInfo, Organization, User } from "../../types";
 import { has } from "../sections";
-import UserDetailPanel from "./UserDetailPanel";
+import UserDetailPanel, { type UserTab } from "./UserDetailPanel";
 import UserFormDialog from "./UserFormDialog";
 
 function StatusBadges({ user }: { user: User }) {
@@ -18,6 +19,22 @@ function StatusBadges({ user }: { user: User }) {
   );
 }
 
+/** The open user lives in the address (#/admin/users?user=<id>), so it survives a reload and can be linked. Written
+ * with replaceState: opening users one after another shouldn't fill the Back button's history. */
+function userInHash(): string | null {
+  return new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("user");
+}
+
+function setUserInHash(id: string | null) {
+  const base = window.location.hash.split("?")[0] || "#/admin/users";
+  window.history.replaceState(null, "", id ? `${base}?user=${encodeURIComponent(id)}` : base);
+}
+
+function initials(user: User): string {
+  const words = (user.display_name || user.username).trim().split(/\s+/);
+  return ((words[0]?.[0] ?? "") + (words.length > 1 ? words[words.length - 1][0] : (words[0]?.[1] ?? ""))).toUpperCase();
+}
+
 export default function UsersPage({ auth }: { auth: AuthInfo }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [users, setUsers] = useState<User[] | null>(null);
@@ -25,7 +42,20 @@ export default function UsersPage({ auth }: { auth: AuthInfo }) {
   const [query, setQuery] = useState("");
   const [orgFilter, setOrgFilter] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(userInHash);
+  // Kept between users, so opening the next one shows the same tab.
+  const [detailTab, setDetailTab] = useState<UserTab>("profile");
+
+  useEffect(() => {
+    const onHash = () => setSelectedId(userInHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const select = useCallback((id: string | null) => {
+    setSelectedId(id);
+    setUserInHash(id);
+  }, []);
 
   useEffect(() => {
     api.organizations.list().then(setOrganizations).catch(() => {});
@@ -53,6 +83,9 @@ export default function UsersPage({ auth }: { auth: AuthInfo }) {
   }, [users, query]);
 
   const orgName = (id: string) => organizations.find((o) => o.id === id)?.name ?? id;
+
+  const selected = users?.find((u) => u.id === selectedId) ?? null;
+  const close = useCallback(() => select(null), [select]);
 
   return (
     <div>
@@ -114,40 +147,70 @@ export default function UsersPage({ auth }: { auth: AuthInfo }) {
           </thead>
           <tbody>
             {filtered.map((u) => (
-              <Fragment key={u.id}>
-                <tr
-                  className={expandedId === u.id ? "active-row" : ""}
-                  onClick={() => setExpandedId(expandedId === u.id ? null : u.id)}
-                >
-                  <td className="mono">{u.username}</td>
-                  <td>
-                    {u.display_name && <div>{u.display_name}</div>}
-                    <span className="muted">{u.email ?? "—"}</span>
-                  </td>
-                  {auth.isSuperuser && <td>{orgName(u.org_id)}</td>}
-                  <td>
-                    <span className={`badge badge-${u.auth_source}`}>{u.auth_source}</span>
-                  </td>
-                  <td>
-                    <StatusBadges user={u} />
-                  </td>
-                  <td className="muted">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "never"}</td>
-                </tr>
-                {expandedId === u.id && (
-                  <tr className="detail-row">
-                    <td colSpan={auth.isSuperuser ? 6 : 5}>
-                      <UserDetailPanel
-                        user={u}
-                        canViewAudit={has(auth, "audit:view")}
-                        onUpdated={(updated) => setUsers((prev) => prev?.map((x) => (x.id === updated.id ? updated : x)) ?? null)}
-                      />
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
+              <tr
+                key={u.id}
+                className={selectedId === u.id ? "active-row" : ""}
+                onClick={() => select(u.id)}
+              >
+                <td className="mono">{u.username}</td>
+                <td>
+                  {u.display_name && <div>{u.display_name}</div>}
+                  <span className="muted">{u.email ?? "—"}</span>
+                </td>
+                {auth.isSuperuser && <td>{orgName(u.org_id)}</td>}
+                <td>
+                  <span className={`badge badge-${u.auth_source}`}>{u.auth_source}</span>
+                </td>
+                <td>
+                  <StatusBadges user={u} />
+                </td>
+                <td className="muted">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "never"}</td>
+              </tr>
             ))}
           </tbody>
         </table>
+      )}
+
+      {selected && (
+        <DetailModal
+          label={`User ${selected.username}`}
+          title={selected.display_name || selected.username}
+          subtitle={
+            <>
+              <span className="font-mono">{selected.username}</span>
+              {selected.email && <> · {selected.email}</>}
+              {auth.isSuperuser && <> · {orgName(selected.org_id)}</>}
+              {" · "}
+              {selected.last_login_at ? `last signed in ${new Date(selected.last_login_at).toLocaleString()}` : "never signed in"}
+            </>
+          }
+          leading={
+            <span
+              className="grid size-11 shrink-0 place-items-center rounded-full bg-accent-soft font-display text-[0.95rem] font-semibold text-accent-strong ring-1 ring-accent-border"
+              aria-hidden="true"
+            >
+              {initials(selected)}
+            </span>
+          }
+          badges={
+            <>
+              <span className={`badge badge-${selected.auth_source}`}>{selected.auth_source}</span>
+              <StatusBadges user={selected} />
+            </>
+          }
+          onClose={close}
+        >
+          <UserDetailPanel
+            key={selected.id}
+            user={selected}
+            tab={detailTab}
+            onTabChange={setDetailTab}
+            canViewAudit={has(auth, "audit:view")}
+            isSuperuser={auth.isSuperuser}
+            canGrantTemplates={has(auth, "report:manage")}
+            onUpdated={(updated) => setUsers((prev) => prev?.map((x) => (x.id === updated.id ? updated : x)) ?? null)}
+          />
+        </DetailModal>
       )}
 
       <UserFormDialog

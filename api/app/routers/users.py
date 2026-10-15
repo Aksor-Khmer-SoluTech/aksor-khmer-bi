@@ -28,10 +28,12 @@ from ..models import (
     UserSelfUpdate,
     UserSettingOut,
     UserSettingUpdate,
+    UserOverview,
     UserUpdate,
     check_setting_value,
 )
 from ..rbac import AuthContext, get_effective_permissions
+from ..user_overview import user_overview
 from ..security import generate_password, hash_password, verify_password
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
@@ -803,3 +805,17 @@ def get_user_permissions(
         ensure_org_scope(context, row.org_id)
         permissions = get_effective_permissions(session, row)
         return EffectivePermissions(user_id=user_id, permissions=sorted(permissions))
+
+
+@router.get(
+    "/{user_id}/overview",
+    summary="A user at a glance: templates they uploaded, what they can reach, and where each permission comes from",
+    response_model=UserOverview,
+)
+def get_user_overview(user_id: str, context: AuthContext = Depends(require_permission("user:manage"))) -> dict:
+    with db.SessionLocal() as session:
+        row = session.get(db.User, user_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        ensure_org_scope(context, row.org_id)
+        return user_overview(session, row)

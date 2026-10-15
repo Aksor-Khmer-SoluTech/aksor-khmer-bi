@@ -1,10 +1,23 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import DetailModal from "../../components/DetailModal";
 import { TableSkeleton } from "../../components/Skeletons";
 import type { AuthInfo, Organization, Role } from "../../types";
+import { roleHint } from "../users/UserGrants";
+import { roleLabel } from "../users/UserOverview";
 import PermissionMatrix from "./PermissionMatrix";
 import RoleFormDialog from "./RoleFormDialog";
+
+/** The open role lives in the address (#/admin/roles?role=<id>) -- linkable, and kept on reload. */
+function roleInHash(): string | null {
+  return new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("role");
+}
+
+function setRoleInHash(id: string | null) {
+  const base = window.location.hash.split("?")[0] || "#/admin/roles";
+  window.history.replaceState(null, "", id ? `${base}?role=${encodeURIComponent(id)}` : base);
+}
 
 export default function RolesPage({ auth }: { auth: AuthInfo }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -13,7 +26,27 @@ export default function RolesPage({ auth }: { auth: AuthInfo }) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(roleInHash);
+  // The open role has edits not saved yet: closing asks first.
+  const [dirty, setDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  useEffect(() => {
+    const onHash = () => setOpenId(roleInHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  function open(id: string | null) {
+    setOpenId(id);
+    setRoleInHash(id);
+    setDirty(false);
+  }
+
+  const requestClose = useCallback(() => {
+    if (dirty) setConfirmDiscard(true);
+    else open(null);
+  }, [dirty]);
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -41,6 +74,8 @@ export default function RolesPage({ auth }: { auth: AuthInfo }) {
   // SYSTEM_ADMIN_ROLE_NAME) -- every other role belongs to exactly one organization.
   const orgLabel = (orgId: string | null) =>
     orgId === null ? "Every organization" : organizations.find((o) => o.id === orgId)?.name ?? orgId;
+
+const openRole = roles?.find((r) => r.id === openId) ?? null;
 
   async function confirmDelete() {
     if (!deleteTarget) return;
@@ -108,16 +143,18 @@ export default function RolesPage({ auth }: { auth: AuthInfo }) {
           </thead>
           <tbody>
             {filtered.map((r) => (
-              <Fragment key={r.id}>
-                <tr className={expandedId === r.id ? "active-row" : ""} onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}>
-                  <td className="mono">{r.name}</td>
+                <tr key={r.id} className={openId === r.id ? "active-row" : ""} onClick={() => open(r.id)}>
+                  <td>
+                    <div className="font-medium">{roleLabel(r.name)}</div>
+                    {roleLabel(r.name) !== r.name && <span className="mono muted text-[0.72rem]">{r.name}</span>}
+                  </td>
                   <td>
                     <span className={`badge badge-${r.is_system ? "system" : "custom"}`}>
                       {r.is_system ? "system" : "custom"}
                     </span>
                   </td>
                   {auth.isSuperuser && <td className="muted">{orgLabel(r.org_id)}</td>}
-                  <td className="muted">{r.description ?? "—"}</td>
+                  <td className="muted">{roleHint(r)}</td>
                   <td className="mono">{r.permissions.length}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {!r.is_system && (
@@ -127,26 +164,67 @@ export default function RolesPage({ auth }: { auth: AuthInfo }) {
                     )}
                   </td>
                 </tr>
-                {expandedId === r.id && (
-                  <tr className="detail-row">
-                    {/* +1 when the superuser-only Organization column above is present. */}
-                    <td colSpan={auth.isSuperuser ? 6 : 5} onClick={(e) => e.stopPropagation()}>
-                      {/* Same padded wrapper the Users/Jobs/LDAP panels use --
-                          without it the grid sat flush against the panel's edge. */}
-                      <div className="admin-detail">
-                        <PermissionMatrix
-                          role={r}
-                          onSaved={(updated) => setRoles((prev) => prev?.map((x) => (x.id === updated.id ? updated : x)) ?? null)}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
             ))}
           </tbody>
         </table>
       )}
+
+      {openRole && (
+        <DetailModal
+          label={`Role ${openRole.name}`}
+          title={roleLabel(openRole.name)}
+          subtitle={
+            <>
+              <span className="font-mono">{openRole.name}</span> · {orgLabel(openRole.org_id)} · {roleHint(openRole)}
+            </>
+          }
+          leading={
+            <span
+              className={`grid size-11 shrink-0 place-items-center rounded-xl font-display text-[0.95rem] font-semibold ring-1 ${
+                openRole.org_id === null
+                  ? "bg-danger-soft text-danger-strong ring-danger/40"
+                  : "bg-accent-soft text-accent-strong ring-accent-border"
+              }`}
+              aria-hidden="true"
+            >
+              {roleLabel(openRole.name)
+                .split(/\s+/)
+                .map((w) => w[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase()}
+            </span>
+          }
+          badges={
+            <>
+              <span className={`badge badge-${openRole.is_system ? "system" : "custom"}`}>{openRole.is_system ? "system" : "custom"}</span>
+              <span className="badge">{openRole.permissions.length} permissions</span>
+            </>
+          }
+          onClose={requestClose}
+        >
+          <div className="admin-detail">
+            <PermissionMatrix
+              key={openRole.id}
+              role={openRole}
+              onDirtyChange={setDirty}
+              onSaved={(updated) => setRoles((prev) => prev?.map((x) => (x.id === updated.id ? updated : x)) ?? null)}
+            />
+          </div>
+        </DetailModal>
+      )}
+
+      <ConfirmDialog
+        open={confirmDiscard}
+        title="Discard your changes?"
+        body="The permissions you ticked or unticked in this role haven't been saved."
+        confirmLabel="Discard"
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          open(null);
+        }}
+        onCancel={() => setConfirmDiscard(false)}
+      />
 
       <RoleFormDialog
         open={createOpen}

@@ -6,6 +6,7 @@ reorganizes where each class *lives*, not how callers reach it.
 """
 from .analytics import JobsSummary, MyDashboard, MyDay, MyRun, MyTopReport, ReportRenderStats, SecurityActivityItem
 from .reports import VersionUpdate
+from .user_overview import UserOverview
 from .audit import AuditEventOut, AuditPage, ChangelogEntry, ReportChangelog, ReportVersionOut
 from .auth import AuthEventOut, AuthVerifyOut, LoginRequest, SessionOut, SetupAdminRequest, TokenOut
 from .analyze import (
@@ -144,6 +145,7 @@ from .system import DiskUsage, SystemMetrics
 from .totp import TotpCodeRequest, TotpEnrollOut
 
 __all__ = [
+    "UserOverview",
     "AnalysisConfig",
     "AnalysisOut",
     "AnalysisWrite",

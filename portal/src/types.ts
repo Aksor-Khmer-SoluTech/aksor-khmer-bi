@@ -656,6 +656,56 @@ export interface AuthEvent {
   session_active?: boolean;
 }
 
+/** GET /users/{id}/overview -- api/app/user_overview.py. */
+export interface UserOverview {
+  user_id: string;
+  is_system_admin: boolean;
+  roles: { name: string; expires_at: string | null }[];
+  templates: {
+    contributed: number;
+    started: number;
+    versions: number;
+    by_type: Record<string, number>;
+    items: {
+      report_id: string;
+      name: string;
+      template_ext: string;
+      folder_path: string[];
+      is_draft: boolean;
+      versions: number;
+      last_upload_at: string | null;
+      started: boolean;
+      access_level: ReportAccessLevel | null;
+    }[];
+  };
+  reach: { total: number; org_wide: string | null; manage: number; render: number; view: number };
+  permissions: {
+    code: string;
+    description: string;
+    sources: { kind: "role" | "direct"; name: string | null; expires_at: string | null }[];
+  }[];
+  folder_grants: {
+    grant_id: string;
+    folder_id: string;
+    path: string[];
+    is_project: boolean;
+    level: "view" | "manage";
+    via_role: string | null;
+    expires_at: string | null;
+    templates: number;
+  }[];
+  report_grants: {
+    grant_id: string;
+    report_id: string;
+    name: string;
+    template_ext: string;
+    level: ReportAccessLevel;
+    via_role: string | null;
+    expires_at: string | null;
+    parameter_limits: Record<string, string[]> | null;
+  }[];
+}
+
 export interface EffectivePermissions {
   user_id: string;
   permissions: string[];
