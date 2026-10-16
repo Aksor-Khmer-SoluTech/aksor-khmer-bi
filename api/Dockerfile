@@ -44,17 +44,20 @@ WORKDIR /app
 # api/ lives at the repo root, alongside packages/ and templates/, not
 # under packages/ — it's the deployable service, not an installable
 # library, so it's kept structurally separate.
-# templates/ is copied further down, after the pip installs: editing the
-# document templates is common and shouldn't bust the (much more expensive)
-# dependency-install layer cache.
+# The api code and templates/ are copied after the pip installs, and only api/requirements.txt before them: the code
+# changes in nearly every release, and copying it first rebuilt the dependency layer each time (about 3 minutes per
+# platform) and made it a new layer of several hundred MB to push for both platforms. Now a release whose
+# requirements haven't changed reuses that layer, and Docker Hub already has it, so only the small code layers are
+# pushed.
 COPY packages/aksor_khmer_ocr_segmenter packages/aksor_khmer_ocr_segmenter
 COPY packages/doc_engine packages/doc_engine
-COPY api api
+COPY api/requirements.txt api/requirements.txt
 
 RUN pip install --no-cache-dir -e packages/aksor_khmer_ocr_segmenter \
     && pip install --no-cache-dir -e packages/doc_engine \
     && pip install --no-cache-dir -r api/requirements.txt
 
+COPY api api
 COPY templates templates
 
 # These exact font files are bundled on purpose (templates/fonts, Siemreap "Version 6.00 January 14, 2010"). Debian's
