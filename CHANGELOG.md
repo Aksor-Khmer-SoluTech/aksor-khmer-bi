@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-10-16
+
 ### Added
 - **Right-click a folder in Resources** for its actions at the pointer -- New subfolder, Rename, Manage access, the
   project options and Delete (the same list as its "…" menu); right-click Root for New folder. The menu doesn't open
@@ -21,17 +23,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   or painted until they come near (`content-visibility`), the lists are grouped by folder once instead of filtered on
   every render, and cards redraw only when their own data changes -- opening a folder of 360 cards went from about
   310 ms of work to 25-45 ms.
-
-### Fixed
-- **Resources:** a folder's "…" menu was cut off by the folder tree's own box (only its first item showed), and a
-  file card's "…" menu was cut off by its card and hidden under the next row; both now open on top of the page, like
-  the right-click menu. The cards no longer scroll sideways under the folder tree. The page now fills the window
-  exactly, above the footer: the folder tree runs to the bottom even beside an empty folder, each column scrolls on
-  its own, and the page itself no longer scrolls (on a phone the two stack and scroll as one page).
-
-## [1.0.0-beta.5] - 2026-10-15
-
-### Added
 - **Stored procedures are called from the SQL box, on any database, with nothing to set up first** -- as in Jasper or
   BI Publisher: `EXEC dbo.GetSales @branch = :branch, @title = N'ខ្មែរ'` on SQL Server, `CALL hr.get_sales(:branch,
   50)` on Oracle, MySQL, MariaDB, Db2 or PostgreSQL. The connection's database login decides what may run; the
@@ -216,6 +207,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   space, then the arrow keys), or with each card's up and down arrows when there are many.
 
 ### Fixed
+- **Resources:** a folder's "…" menu was cut off by the folder tree's own box (only its first item showed), and a
+  file card's "…" menu was cut off by its card and hidden under the next row; both now open on top of the page, like
+  the right-click menu. The cards no longer scroll sideways under the folder tree. The page now fills the window
+  exactly, above the footer: the folder tree runs to the bottom even beside an empty folder, each column scrolls on
+  its own, and the page itself no longer scrolls (on a phone the two stack and scroll as one page).
 - **New template, sample data**: pressing *Use this data* with the editor empty no longer says the data "isn't valid
   JSON" — it asks you to paste some (or press *Insert example*); invalid JSON is reported once, under the editor,
   instead of twice; and the editor's placeholder now reads as an example, not as data already entered.
