@@ -7,7 +7,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
 import { has } from "../admin/sections";
 import { FolderIcon, ImageIcon, TemplatesIcon } from "../admin/icons";
@@ -30,6 +30,9 @@ type DraggedItem = { kind: DragKind; id: string; label: string };
  * and drop target (receiving a folder/report/image); the content pane on
  * the right is drag source only (its cards move *into* a tree folder,
  * never receive drops themselves). */
+/** One shared empty list, so an empty folder's props don't change identity on every render. */
+const NONE: never[] = [];
+
 export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
   const [folders, setFolders] = useState<Folder[] | null>(null);
   const [reports, setReports] = useState<ReportMeta[] | null>(null);
@@ -90,18 +93,41 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
   const selectedFolder = folders?.find((f) => f.id === selectedFolderId) ?? null;
   const canManageSelected = selectedFolder === null ? canManageRoot : true; // server re-checks regardless; see handlers below
 
-  const reportsInFolder = (reports ?? []).filter((r) => r.folder_id === selectedFolderId);
-  const imagesInFolder = (images ?? []).filter((i) => i.folder_id === selectedFolderId);
-  const stylesheetsInFolder = stylesheets.filter((s) => s.folder_id === selectedFolderId);
-  // A shortcut is a link to a report filed somewhere else, so it shows the original's details.
-  const shortcutsInFolder = shortcuts
-    .filter((s) => s.folder_id === selectedFolderId)
-    .flatMap((s) => {
-      const report = (reports ?? []).find((r) => r.report_id === s.report_id);
-      return report ? [{ shortcut: s, report }] : [];
-    });
+  // Everything grouped by folder once, when the lists change -- not re-filtered on every render (a drag, a hover, a
+  // menu) -- and each folder's list keeps its identity between renders, so the cards beside it don't redraw.
+  const byFolder = useMemo(() => {
+    const group = <T,>(items: T[], folderOf: (item: T) => string | null) => {
+      const map = new Map<string | null, T[]>();
+      for (const item of items) {
+        const key = folderOf(item);
+        const list = map.get(key);
+        if (list) list.push(item);
+        else map.set(key, [item]);
+      }
+      return map;
+    };
+    const reportById = new Map((reports ?? []).map((r) => [r.report_id, r]));
+    return {
+      reports: group(reports ?? [], (r) => r.folder_id),
+      images: group(images ?? [], (i) => i.folder_id),
+      stylesheets: group(stylesheets, (s) => s.folder_id),
+      // A shortcut is a link to a report filed somewhere else, so it shows the original's details.
+      shortcuts: group(
+        shortcuts.flatMap((s) => {
+          const report = reportById.get(s.report_id);
+          return report ? [{ shortcut: s, report }] : [];
+        }),
+        (x) => x.shortcut.folder_id,
+      ),
+    };
+  }, [reports, images, stylesheets, shortcuts]);
+  const reportsInFolder = byFolder.reports.get(selectedFolderId) ?? NONE;
+  const imagesInFolder = byFolder.images.get(selectedFolderId) ?? NONE;
+  const stylesheetsInFolder = byFolder.stylesheets.get(selectedFolderId) ?? NONE;
+  const shortcutsInFolder = byFolder.shortcuts.get(selectedFolderId) ?? NONE;
 
-  async function removeShortcut(id: string) {
+  // Stable (only setters inside), so the memoized shortcut cards keep it across renders.
+  const removeShortcut = useCallback(async (id: string) => {
     setMoveError(null);
     try {
       await api.deleteShortcut(id);
@@ -109,7 +135,7 @@ export default function ResourcesPage({ auth }: { auth: AuthInfo }) {
     } catch (err) {
       setMoveError(err instanceof ApiError ? err.message : "Couldn't remove the shortcut");
     }
-  }
+  }, []);
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {

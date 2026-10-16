@@ -3704,17 +3704,43 @@ textarea[readonly] {
 
 /* No padding of its own: it renders inside .admin-content, which already pads every Manage page. (It used to be a
    page of its own, and kept that padding when it moved -- doubling the gap around it.) */
+/* Resources fills the window and scrolls inside its own columns -- nothing of the page itself scrolls. On a wide
+   screen the chain from the scrolling .app-main down to the shell is a flex column, so the page takes exactly the room
+   left above the footer (no fixed sum of header heights to keep in step). Narrow screens stack the tree over the
+   folder and scroll as one page (responsive.css). */
+@media (min-width: 901px) {
+  .app-content:has(.resources-page) {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The Manage pages' 64px bottom padding is room to finish scrolling a long page; here the same gap as the sides. */
+  .admin-content:has(> .resources-page) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 24px;
+  }
+}
+
 .resources-page {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
 .resources-shell {
+  /* All the height the page has left below its header, whatever the folder holds: the folder tree reaches the bottom
+     even beside an empty folder, and each column scrolls on its own. */
   flex: 1;
-  min-height: 0;
+  min-height: 320px;
   display: grid;
   grid-template-columns: 300px 1fr;
+  /* One row exactly the shell's height: each column scrolls inside it instead of growing past it. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -3788,6 +3814,19 @@ textarea[readonly] {
   width: 3px;
   border-radius: 2px;
   background: var(--accent);
+}
+
+/* The folder a right-click or "…" menu is open for -- outlined, not selected: its content isn't shown until it's
+   clicked. */
+.resource-row.menu-target {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.resource-row.active.menu-target {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-strong);
 }
 
 .resource-row.drop-target {
@@ -3917,8 +3956,16 @@ textarea[readonly] {
 
 .resource-content {
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
-  padding-right: 2px;
+  /* It scrolls on its own: room on the right for the scrollbar (macOS draws it over the content, so without this it
+     covers the Upload button and the cards' right edge), a little on the left and top so the cards' shadows aren't
+     cut off, and a bottom margin under the last row. A permanent scrollbar (Windows) gets its own lane, so the
+     layout doesn't shift when one appears. */
+  padding: 4px 16px 20px 6px;
+  scrollbar-gutter: stable;
+  /* Up and down only: never a sideways scroll that slides the cards out under the folder tree. */
+  overflow-x: hidden;
 }
 
 .resource-content-header {
@@ -3940,14 +3987,67 @@ textarea[readonly] {
   touch-action: none;
 }
 
+/* Smaller cards than the other pages' galleries: a folder is browsed for what's in it, so more fit on a row. */
+.resource-grid {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.resource-grid .card {
+  padding: 12px;
+  gap: 8px;
+  border-radius: 14px;
+}
+
+.resource-grid .card-name {
+  font-size: 0.9rem;
+}
+
+.resource-grid .card-desc {
+  font-size: 0.78rem;
+}
+
+.resource-grid .card-meta {
+  font-size: 0.7rem;
+  padding-top: 8px;
+}
+
+/* A folder can hold hundreds of cards; the browser skips laying out and painting the ones outside the scrolling
+   column, and draws them as they come near. Until a card has been drawn once it counts as 170px tall (about a card),
+   after that as its real height (auto), so the scrollbar stays true. */
+.resource-grid-cell {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 170px;
+  /* Skipping clips each cell at its edge, which would cut the card's shadow (and the bigger one on hover): room for
+     it inside the cell, taken back with negative margins so the grid's layout doesn't change. The cell itself lets
+     the pointer through -- its padding overlaps the neighbours -- and only the card catches it. The shadows fall
+     mostly downwards, so the sides need less room -- no more than the column's own right padding, or the last card's
+     room would reach past the column's edge and scroll it sideways. */
+  padding: 16px 16px 56px;
+  margin: -16px -16px -56px;
+  pointer-events: none;
+}
+
+.resource-grid-cell > * {
+  pointer-events: auto;
+}
+
+/* "Copied" on a card's corner, inside the cell's shadow room. */
+.resource-copied-badge {
+  position: absolute;
+  top: calc(16px + 0.5rem);
+  right: calc(16px + 0.5rem);
+}
+
 .resource-card:active {
   cursor: grabbing;
 }
 
 .resource-thumb {
+  position: relative;
   display: grid;
   place-items: center;
-  height: 120px;
+  height: 92px;
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
   overflow: hidden;
@@ -3957,6 +4057,81 @@ textarea[readonly] {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  opacity: 0;
+  transform: scale(0.985);
+  transition:
+    opacity 0.38s ease-out,
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Revealed once decoded: a fade with a slight settle. A preview already in memory renders with this class from the
+   start, so it simply appears. */
+.resource-thumb img.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+/* Loading: the card's panel with one light band sweeping across it. The band is moved with transform (drawn by the
+   compositor, no repaint per frame), and --sweep-delay puts every card on the same clock (ResourceContentPane.tsx),
+   so the band crosses the whole grid in step. */
+.resource-thumb-skel,
+.resource-line-skel {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
+.resource-thumb-skel {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transition: opacity 0.38s ease-out;
+}
+
+.resource-line-skel {
+  height: 8px;
+  border-radius: 4px;
+}
+
+.resource-thumb-skel::after,
+.resource-line-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    color-mix(in srgb, var(--bg-panel-hover) 85%, var(--bg)) 50%,
+    transparent 75%
+  );
+  transform: translateX(-100%);
+  animation: resource-sweep 1.6s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  animation-delay: var(--sweep-delay, 0ms);
+  will-change: transform;
+}
+
+/* Crossfading out under the arriving picture. */
+.resource-thumb-skel.is-done {
+  opacity: 0;
+}
+
+@keyframes resource-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-thumb img {
+    transform: none;
+    transition: opacity 0.2s linear;
+  }
+
+  .resource-thumb-skel::after,
+  .resource-line-skel::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 .folder-grants-modal {
@@ -5914,4 +6089,10 @@ dialog.modal.grant-dialog {
   width: 94vw;
   max-height: min(88dvh, 820px);
   overflow-y: auto;
+}
+
+/* components/FloatingMenu.tsx: a menu drawn on top of the page (right-click, or a "…" button) -- the account panel's
+   look, placed at a point. Its width is set where it's opened. */
+.floating-menu {
+  z-index: 70;
 }

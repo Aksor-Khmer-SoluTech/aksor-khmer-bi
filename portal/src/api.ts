@@ -1630,6 +1630,15 @@ export const api = {
       }
       return resp.blob();
     },
+    /** A small preview (fits size x size) for a file card -- not the original, which may be megabytes. */
+    async thumbnailBlob(id: string, size: 240 | 480 = 480): Promise<Blob> {
+      const resp = await apiFetch(`/images/${id}/thumbnail?size=${size}`);
+      if (!resp.ok) {
+        const body: ApiErrorBody = await resp.json().catch(() => ({}));
+        throw new ApiError(resp.status, body.detail || `Couldn't load the preview (${resp.status})`);
+      }
+      return resp.blob();
+    },
   },
 
   // The CSS counterpart to `images` above — see api/app/routers/stylesheets.py.

@@ -82,7 +82,9 @@
   }
   .resources-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto;
+    flex: none;
+    height: auto; /* stacked: the tree then the folder, each its own height; the page scrolls as one */
   }
   .resource-tree {
     max-height: 260px;
@@ -184,6 +186,10 @@
   }
   .card-grid {
     grid-template-columns: 1fr;
+  }
+  /* Two small cards a row on a phone, not one wide one. */
+  .resource-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
   .list-row {
     grid-template-columns: 1fr;

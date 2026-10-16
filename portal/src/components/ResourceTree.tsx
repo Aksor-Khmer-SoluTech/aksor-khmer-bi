@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Package } from "lucide-react";
 import { ChevronIcon, FolderIcon, FolderOpenIcon, GripIcon, MoreIcon } from "../admin/icons";
 import type { Folder } from "../types";
+import FloatingMenu from "./FloatingMenu";
 
 type Props = {
   childrenByParent: Map<string | null, Folder[]>;
@@ -33,7 +34,22 @@ type Props = {
 export default function ResourceTree(props: Props) {
   const { childrenByParent, canManageRoot, onSelect, onCreateFolder } = props;
   const [creatingRoot, setCreatingRoot] = useState(false);
+  const [rootMenu, setRootMenu] = useState<{ x: number; y: number } | null>(null);
+  // F2 renames the selected folder, as in a file manager (a nonce, so pressing it again re-opens the field).
+  const [renameRequest, setRenameRequest] = useState<{ id: string; at: number } | null>(null);
   const rootDroppable = useDroppable({ id: "drop:root", data: { folderId: null } });
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "F2" || !props.selectedFolderId) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true'], dialog[open]")) return;
+      e.preventDefault();
+      setRenameRequest({ id: props.selectedFolderId, at: Date.now() });
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [props.selectedFolderId]);
 
   return (
     <div className="resource-tree">
@@ -60,8 +76,14 @@ export default function ResourceTree(props: Props) {
 
       <div
         ref={rootDroppable.setNodeRef}
-        className={`resource-row ${props.selectedFolderId === null ? "active" : ""} ${rootDroppable.isOver ? "drop-target" : ""}`}
+        className={`resource-row ${props.selectedFolderId === null ? "active" : ""} ${rootMenu ? "menu-target" : ""} ${rootDroppable.isOver ? "drop-target" : ""}`}
         onClick={() => onSelect(null)}
+        onContextMenu={(e) => {
+          if (!canManageRoot) return; // nothing to offer: leave the browser's own menu
+          e.preventDefault();
+          // Only the menu: the open folder stays as it is (a click opens Root).
+          setRootMenu({ x: e.clientX, y: e.clientY });
+        }}
       >
         <span className="resource-row-grip" aria-hidden="true" />
         <span className="tree-chevron" aria-hidden="true" />
@@ -71,7 +93,7 @@ export default function ResourceTree(props: Props) {
 
       <div className="resource-tree-children">
         {(childrenByParent.get(null) ?? []).map((folder) => (
-          <FolderRow key={folder.id} folder={folder} depth={0} {...props} />
+          <FolderRow key={folder.id} folder={folder} depth={0} renameRequest={renameRequest} {...props} />
         ))}
         {creatingRoot && (
           <NewFolderInput
@@ -84,6 +106,16 @@ export default function ResourceTree(props: Props) {
           />
         )}
       </div>
+
+      {rootMenu && (
+        <FloatingMenu x={rootMenu.x} y={rootMenu.y} label="Root" onClose={() => setRootMenu(null)}>
+          {(close) => (
+            <button type="button" role="menuitem" className="account-item" onClick={() => { close(); setCreatingRoot(true); }}>
+              New folder
+            </button>
+          )}
+        </FloatingMenu>
+      )}
     </div>
   );
 }
@@ -103,8 +135,10 @@ function FolderRow({
   canTransfer,
   onSetProject,
   onExportProject,
-}: Props & { folder: Folder; depth: number }) {
+  renameRequest,
+}: Props & { folder: Folder; depth: number; renameRequest: { id: string; at: number } | null }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [contextAt, setContextAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(folder.name);
   const [creatingChild, setCreatingChild] = useState(false);
@@ -115,6 +149,27 @@ function FolderRow({
 
   const draggable = useDraggable({ id: `drag-folder:${folder.id}`, data: { kind: "folder", id: folder.id } });
   const droppable = useDroppable({ id: `drop-folder:${folder.id}`, data: { folderId: folder.id } });
+
+  useEffect(() => {
+    if (renameRequest?.id !== folder.id) return;
+    setRenameValue(folder.name);
+    setRenaming(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when a new request arrives
+  }, [renameRequest]);
+
+  const actions: FolderActions = {
+    onRename: () => {
+      setRenameValue(folder.name);
+      setRenaming(true);
+    },
+    onNewSubfolder: () => {
+      setCreatingChild(true);
+      if (!isOpen) onToggleExpanded(folder.id);
+    },
+    onManageAccess: () => onManageAccess(folder.id),
+    onDelete: () => onDeleteFolder(folder.id),
+    project: depth === 0 ? { is: !!folder.is_project, canTransfer, onSet: (v) => onSetProject(folder.id, v), onExport: () => onExportProject(folder.id) } : null,
+  };
 
   function submitRename() {
     const trimmed = renameValue.trim();
@@ -129,9 +184,18 @@ function FolderRow({
           draggable.setNodeRef(el);
           droppable.setNodeRef(el);
         }}
-        className={`resource-row ${selectedFolderId === folder.id ? "active" : ""} ${droppable.isOver ? "drop-target" : ""}`}
+        className={`resource-row ${selectedFolderId === folder.id ? "active" : ""} ${contextAt || menuOpen ? "menu-target" : ""} ${droppable.isOver ? "drop-target" : ""}`}
         style={{ paddingLeft: 12 + depth * 18, opacity: draggable.isDragging ? 0.4 : 1 }}
         onClick={() => onSelect(folder.id)}
+        onContextMenu={(e) => {
+          if (renaming) return; // the rename field keeps the browser's own menu (paste…)
+          e.preventDefault();
+          e.stopPropagation();
+          // Only the menu, as in a file manager: the open folder and its content stay as they are; the row is outlined
+          // so it's clear which folder the menu is for. A click opens it.
+          setMenuOpen(false);
+          setContextAt({ x: e.clientX, y: e.clientY });
+        }}
       >
         <button
           type="button"
@@ -163,6 +227,8 @@ function FolderRow({
             autoFocus
             className="resource-row-rename"
             value={renameValue}
+            // The whole name selected, as in a file manager: typing replaces it, an arrow key keeps it.
+            onFocus={(e) => e.target.select()}
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => setRenameValue(e.target.value)}
             onBlur={submitRename}
@@ -185,22 +251,13 @@ function FolderRow({
           </span>
         )}
 
-        <RowMenu
-          open={menuOpen}
-          onOpenChange={setMenuOpen}
-          onRename={() => {
-            setRenameValue(folder.name);
-            setRenaming(true);
-          }}
-          onNewSubfolder={() => {
-            setCreatingChild(true);
-            if (!isOpen) onToggleExpanded(folder.id);
-          }}
-          onManageAccess={() => onManageAccess(folder.id)}
-          onDelete={() => onDeleteFolder(folder.id)}
-          project={depth === 0 ? { is: !!folder.is_project, canTransfer, onSet: (v) => onSetProject(folder.id, v), onExport: () => onExportProject(folder.id) } : null}
-        />
+        <RowMenu open={menuOpen} onOpenChange={setMenuOpen} actions={actions} label={folder.name} />
       </div>
+      {contextAt && (
+        <FloatingMenu x={contextAt.x} y={contextAt.y} label={folder.name} onClose={() => setContextAt(null)}>
+          {(close) => <FolderMenuItems actions={actions} close={close} />}
+        </FloatingMenu>
+      )}
 
       {isOpen && (
         <div className="resource-tree-children">
@@ -222,6 +279,7 @@ function FolderRow({
               canTransfer={canTransfer}
               onSetProject={onSetProject}
               onExportProject={onExportProject}
+              renameRequest={renameRequest}
             />
           ))}
           {creatingChild && (
@@ -263,119 +321,76 @@ function NewFolderInput({ depth, onSubmit, onCancel }: { depth: number; onSubmit
   );
 }
 
-function RowMenu({
-  open,
-  onOpenChange,
-  onRename,
-  onNewSubfolder,
-  onManageAccess,
-  onDelete,
-  project,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+type FolderActions = {
   onRename: () => void;
   onNewSubfolder: () => void;
   onManageAccess: () => void;
   onDelete: () => void;
   /** Only for a top-level folder -- a project is always one. */
   project: { is: boolean; canTransfer: boolean; onSet: (isProject: boolean) => void; onExport: () => void } | null;
-}) {
-  const rootRef = useRef<HTMLDivElement>(null);
+};
 
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: PointerEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onOpenChange(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open, onOpenChange]);
-
+/** A folder's actions -- the same list in its "…" menu and its right-click menu. */
+function FolderMenuItems({ actions, close }: { actions: FolderActions; close: () => void }) {
+  const item = (label: string, run: () => void, danger = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      className={danger ? "account-item account-item-danger" : "account-item"}
+      onClick={() => {
+        close();
+        run();
+      }}
+    >
+      {label}
+    </button>
+  );
+  const { project } = actions;
   return (
-    <div className="resource-row-menu" ref={rootRef}>
+    <>
+      {item("New subfolder", actions.onNewSubfolder)}
+      {item("Rename", actions.onRename)}
+      {item("Manage access", actions.onManageAccess)}
+      {project && (
+        <>
+          <div className="account-divider" />
+          {project.is && project.canTransfer && item("Export project…", project.onExport)}
+          {item(project.is ? "Stop being a project" : "Make it a project", () => project.onSet(!project.is))}
+        </>
+      )}
+      <div className="account-divider" />
+      {item("Delete", actions.onDelete, true)}
+    </>
+  );
+}
+
+/** The row's "…" button: the same menu as a right-click, opened under the button. On top of the page (not inside the
+ * tree), so the tree's scrolling box can't cut it off. */
+function RowMenu({ open, onOpenChange, actions, label }: { open: boolean; onOpenChange: (open: boolean) => void; actions: FolderActions; label: string }) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  return (
+    <div className="resource-row-menu">
       <button
+        ref={trigger}
         type="button"
         className="resource-row-menu-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={(e) => {
           e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          setAt({ x: r.right - 200, y: r.bottom + 4 });
           onOpenChange(!open);
         }}
-        title="More"
+        title="More (or right-click the folder)"
       >
         <MoreIcon />
       </button>
-      {open && (
-        <div className="account-panel resource-row-panel" role="menu" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="account-item"
-            onClick={() => {
-              onOpenChange(false);
-              onNewSubfolder();
-            }}
-          >
-            New subfolder
-          </button>
-          <button
-            type="button"
-            className="account-item"
-            onClick={() => {
-              onOpenChange(false);
-              onRename();
-            }}
-          >
-            Rename
-          </button>
-          <button
-            type="button"
-            className="account-item"
-            onClick={() => {
-              onOpenChange(false);
-              onManageAccess();
-            }}
-          >
-            Manage access
-          </button>
-          {project && (
-            <>
-              <div className="account-divider" />
-              {project.is && project.canTransfer && (
-                <button
-                  type="button"
-                  className="account-item"
-                  onClick={() => {
-                    onOpenChange(false);
-                    project.onExport();
-                  }}
-                >
-                  Export project…
-                </button>
-              )}
-              <button
-                type="button"
-                className="account-item"
-                onClick={() => {
-                  onOpenChange(false);
-                  project.onSet(!project.is);
-                }}
-              >
-                {project.is ? "Stop being a project" : "Make it a project"}
-              </button>
-            </>
-          )}
-          <div className="account-divider" />
-          <button
-            type="button"
-            className="account-item account-item-danger"
-            onClick={() => {
-              onOpenChange(false);
-              onDelete();
-            }}
-          >
-            Delete
-          </button>
-        </div>
+      {open && at && (
+        <FloatingMenu x={at.x} y={at.y} label={label} onClose={() => onOpenChange(false)} ignore={trigger.current}>
+          {(close) => <FolderMenuItems actions={actions} close={close} />}
+        </FloatingMenu>
       )}
     </div>
   );

@@ -123,6 +123,34 @@ def get_image_file(image_id: str, context: AuthContext = Depends(get_current_use
     return Response(content=content, media_type=meta["content_type"])
 
 
+@router.get("/{image_id}/thumbnail", summary="A small preview of an image (for the portal's file cards)")
+def get_image_thumbnail(
+    image_id: str,
+    request: Request,
+    size: int = Query(480, description="The box it fits in, in pixels: 240 or 480"),
+    context: AuthContext = Depends(get_current_user),
+) -> Response:
+    if size not in image_store.THUMBNAIL_SIZES:
+        raise HTTPException(status_code=400, detail=f"size must be one of {', '.join(map(str, image_store.THUMBNAIL_SIZES))}")
+    try:
+        meta = image_store.get_image(image_id)
+    except image_store.ImageNotFoundError:
+        raise HTTPException(status_code=404, detail="Image not found")
+    with db.SessionLocal() as session:
+        if not can_view_folder_contents(session, context, meta["folder_id"]):
+            raise HTTPException(status_code=404, detail="Image not found")
+    try:
+        content, media_type, etag = image_store.get_thumbnail(image_id, size)
+    except image_store.ImageNotFoundError:
+        raise HTTPException(status_code=404, detail="Image not found")
+    # The browser may keep it (private: it's per user), and ask again with the etag -- an unchanged picture is then a
+    # 304 with no body. The etag is the content's hash, so a replaced picture is fetched fresh.
+    headers = {"Cache-Control": "private, max-age=3600", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=content, media_type=media_type, headers=headers)
+
+
 @router.delete("/{image_id}", status_code=204, summary="Delete an image")
 def delete_image(image_id: str, request: Request, context: AuthContext = Depends(get_current_user)) -> None:
     try:

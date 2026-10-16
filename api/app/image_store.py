@@ -16,7 +16,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 
 from . import db
@@ -196,6 +196,47 @@ def get_image_bytes(image_id: str) -> bytes:
     if not path.exists():
         raise ImageNotFoundError(image_id)
     return path.read_bytes()
+
+
+# Card previews in the portal (GET /images/{id}/thumbnail): a picture scaled to fit one of these boxes, so a folder
+# of large logos and scans doesn't download every original to show 120px tiles.
+THUMBNAIL_SIZES = (240, 480)
+# An image already this small (both sides and bytes) is its own thumbnail.
+_THUMB_PASSTHROUGH_BYTES = 48 * 1024
+
+
+def get_thumbnail(image_id: str, size: int) -> tuple[bytes, str, str]:
+    """(bytes, media type, etag) of the image scaled to fit `size` x `size`, keeping its proportions. Made once and
+    kept beside the image, named after its content's hash -- replacing the picture gives it a new name, so a stale
+    thumbnail is never served (and the old one is cleared). An image already small enough is returned as it is; an
+    SVG (drawn at any size) always is. Raises ImageNotFoundError."""
+    if size not in THUMBNAIL_SIZES:
+        raise ValueError(f"size must be one of {THUMBNAIL_SIZES}")
+    meta = get_image(image_id)
+    etag = f'"{(meta.get("sha256") or meta["updated_at"])[:16]}-{size}"'
+    original = _image_path(image_id, meta["file_ext"])
+    if not original.exists():
+        raise ImageNotFoundError(image_id)
+    small = max(meta["width_px"], meta["height_px"]) <= size and meta["size_bytes"] <= _THUMB_PASSTHROUGH_BYTES
+    if meta["file_ext"] == "svg" or "svg" in meta["content_type"] or small:
+        return original.read_bytes(), meta["content_type"], etag
+    cached = _image_dir(image_id) / f"thumb-{(meta.get('sha256') or 'x')[:16]}-{size}.webp"
+    if cached.exists():
+        return cached.read_bytes(), "image/webp", etag
+    with Image.open(original) as img:
+        img = ImageOps.exif_transpose(img)  # a phone photo's rotation, applied
+        img.thumbnail((size, size), Image.Resampling.LANCZOS)
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA" if "A" in img.getbands() or img.mode == "P" else "RGB")
+        buf = io.BytesIO()
+        img.save(buf, "WEBP", quality=82, method=4)
+    data = buf.getvalue()
+    for old in _image_dir(image_id).glob(f"thumb-*-{size}.webp"):
+        old.unlink(missing_ok=True)  # one made from an earlier picture
+    tmp = cached.with_suffix(".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(cached)
+    return data, "image/webp", etag
 
 
 def list_images(org_id: str | None = None, folder_id: str | None = None) -> list[dict]:

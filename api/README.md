@@ -292,7 +292,8 @@ tables and `app/rbac.py` for the authorization logic.
   `above` / `below` a threshold, or `outlier` across a `group_by` field.
 - **Images and stylesheets, details** — `PATCH /images/{id}` and `/stylesheets/{id}` (rename, move; audited),
   `PUT /images/{id}/file` (a new picture, same id), `GET …/{id}/usage` (the templates using it --
-  `app/resource_usage.py`).
+  `app/resource_usage.py`). `GET /images/{id}/thumbnail?size=240|480` is a card preview: WebP, kept beside the picture
+  under its content hash, sent with a private cache header and an ETag (`If-None-Match` gives a 304).
 - **Stylesheets** — `/api/v1/stylesheets`: upload `.css`, `.scss`, `.sass` or `.less` (compiled on upload by
   `app/style_compile.py`; `@import`/`@use`/`@forward` refused), `GET /{id}/file` (the compiled CSS a template
   gets), `GET /{id}/source` (what was uploaded), `PUT /{id}/file` (replace, any format; audited).

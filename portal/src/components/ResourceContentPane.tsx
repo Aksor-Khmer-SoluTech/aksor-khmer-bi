@@ -1,12 +1,16 @@
 import { useDraggable } from "@dnd-kit/core";
-import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type RefObject } from "react";
 import { CircleCheck, Link2, MoreHorizontal } from "lucide-react";
 import { UploadIcon } from "../admin/icons";
 import { api, ApiError } from "../api";
 import type { Folder, ImageResource, ReportMeta, StylesheetResource } from "../types";
+import FloatingMenu from "./FloatingMenu";
 import ResourceDetails, { STYLE_LABEL, type DetailItem } from "./ResourceDetails";
 
-function ReportCard({ report }: { report: ReportMeta }) {
+/* The cards are memoized: a folder can hold hundreds, and they redraw only when their own data changes -- not on
+ * every drag, hover, menu or selection elsewhere on the page. Their handlers are stable functions that take the
+ * card's id, for the same reason. */
+const ReportCard = memo(function ReportCard({ report }: { report: ReportMeta }) {
   const draggable = useDraggable({ id: `drag-report:${report.report_id}`, data: { kind: "report", id: report.report_id } });
   return (
     <article
@@ -32,11 +36,21 @@ function ReportCard({ report }: { report: ReportMeta }) {
       </div>
     </article>
   );
-}
+});
 
 /** A report listed here from somewhere else. Not draggable: it is a link, and it opens the original, with the
  * original's permissions. */
-function ShortcutCard({ report, canManage, onRemove }: { report: ReportMeta; canManage: boolean; onRemove: () => void }) {
+const ShortcutCard = memo(function ShortcutCard({
+  shortcutId,
+  report,
+  canManage,
+  onRemove,
+}: {
+  shortcutId: string;
+  report: ReportMeta;
+  canManage: boolean;
+  onRemove: (shortcutId: string) => void;
+}) {
   return (
     <article className="card resource-card resource-card-shortcut">
       <div className="card-top">
@@ -51,38 +65,180 @@ function ShortcutCard({ report, canManage, onRemove }: { report: ReportMeta; can
           Open the original
         </a>
         {canManage && (
-          <button type="button" className="link-btn" onClick={onRemove}>
+          <button type="button" className="link-btn" onClick={() => onRemove(shortcutId)}>
             Remove shortcut
           </button>
         )}
       </div>
     </article>
   );
+});
+
+/* Card previews, kept for the session: going back to a folder shows them at once instead of fetching them again.
+ * Keyed by id and last change, so a replaced picture or an edited stylesheet is fetched fresh. Bounded: past the
+ * limit the oldest is dropped (and its object URL released). */
+const PREVIEW_LIMIT = 300;
+const thumbUrls = new Map<string, string>();
+const thumbLoads = new Map<string, Promise<string>>();
+const cssHeads = new Map<string, string>();
+
+function remember<V>(map: Map<string, V>, key: string, value: V, release?: (v: V) => void) {
+  map.set(key, value);
+  if (map.size > PREVIEW_LIMIT) {
+    const [oldKey, oldValue] = map.entries().next().value as [string, V];
+    map.delete(oldKey);
+    release?.(oldValue);
+  }
 }
 
+function loadThumbnail(image: ImageResource): Promise<string> {
+  const key = `${image.id}:${image.updated_at}`;
+  let pending = thumbLoads.get(key);
+  if (!pending) {
+    pending = api.images
+      .thumbnailBlob(image.id, 480)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        remember(thumbUrls, key, url, (old) => URL.revokeObjectURL(old));
+        return url;
+      })
+      .finally(() => thumbLoads.delete(key));
+    thumbLoads.set(key, pending);
+  }
+  return pending;
+}
+
+/** True once `ref` is on screen or close to it (and stays true): previews below the fold wait until scrolled near. */
+function useNearScreen(ref: RefObject<HTMLElement | null>): boolean {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return;
+    }
+    // Measured against the box that scrolls (the folder's own column), not the window: its edges clip the cards, so
+    // the margin only reads ahead when it's that box's.
+    let root: HTMLElement | null = el.parentElement;
+    while (root && !/(auto|scroll)/.test(getComputedStyle(root).overflowY)) root = root.parentElement;
+    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), {
+      root,
+      rootMargin: "300px 0px",
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, near]);
+  return near;
+}
+
+/* Every loading preview sweeps in step: an animation started now is set back by how far a shared 1.6s clock has
+ * run, so cards that appear at different moments still shimmer as one band across the grid instead of flickering
+ * out of phase. */
+const SWEEP_MS = 1600;
+const sweepDelay = () => ({ "--sweep-delay": `-${Math.round(performance.now() % SWEEP_MS)}ms` }) as CSSProperties;
+
 function ImageThumbnail({ image }: { image: ImageResource }) {
-  const [src, setSrc] = useState<string | null>(null);
+  const key = `${image.id}:${image.updated_at}`;
+  const ref = useRef<HTMLDivElement>(null);
+  const near = useNearScreen(ref);
+  const cached = thumbUrls.get(key);
+  const [src, setSrc] = useState<string | null>(cached ?? null);
+  // A preview already in memory is shown as it is -- no shimmer, no fade, every time the folder is reopened.
+  const [shown, setShown] = useState(!!cached);
+  const [shimmerGone, setShimmerGone] = useState(!!cached);
+  const [failed, setFailed] = useState(false);
+  const [delay] = useState(sweepDelay);
 
   useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    api.images
-      .fileBlob(image.id)
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setSrc(objectUrl);
-      })
-      .catch(() => {});
+    const ready = thumbUrls.get(key);
+    if (ready) {
+      setSrc(ready);
+      return;
+    }
+    setShown(false);
+    setShimmerGone(false);
+    if (!near) return;
+    let live = true;
+    setFailed(false);
+    loadThumbnail(image)
+      .then((url) => live && setSrc(url))
+      .catch(() => live && setFailed(true));
     return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      live = false;
     };
-  }, [image.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` covers the image's identity and version
+  }, [key, near]);
 
   return (
-    <div className="resource-thumb">
-      {src ? <img src={src} alt="" /> : <span className="muted">…</span>}
+    <div ref={ref} className="resource-thumb">
+      {src && (
+        <img
+          src={src}
+          alt=""
+          decoding="async"
+          className={shown ? "is-shown" : ""}
+          // Decoded before it's revealed, so the fade never starts on a picture that is still being drawn.
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            (img.decode ? img.decode() : Promise.resolve()).catch(() => undefined).then(() => setShown(true));
+          }}
+          onError={() => setFailed(true)}
+        />
+      )}
+      {/* Fades out under the picture as it fades in (one crossfade), then leaves. */}
+      {!shimmerGone && !failed && (
+        <div
+          className={`resource-thumb-skel${shown ? " is-done" : ""}`}
+          style={delay}
+          aria-hidden="true"
+          onTransitionEnd={() => shown && setShimmerGone(true)}
+        />
+      )}
+      {failed && <span className="muted text-[0.74rem]">No preview</span>}
+    </div>
+  );
+}
+
+/** A stylesheet card's first lines, fetched when the card comes near the screen and kept for the session. */
+function StylesheetHead({ sheet }: { sheet: StylesheetResource }) {
+  const key = `${sheet.id}:${sheet.updated_at}`;
+  const ref = useRef<HTMLDivElement>(null);
+  const near = useNearScreen(ref);
+  const [head, setHead] = useState<string | null>(() => cssHeads.get(key) ?? null);
+  const [delay] = useState(sweepDelay);
+  useEffect(() => {
+    const known = cssHeads.get(key);
+    if (known !== undefined) {
+      setHead(known);
+      return;
+    }
+    if (!near) return;
+    let live = true;
+    api.stylesheets
+      .source(sheet.id)
+      .then((text) => {
+        const first = text.split("\n").slice(0, 6).join("\n");
+        remember(cssHeads, key, first);
+        if (live) setHead(first);
+      })
+      .catch(() => live && setHead(""));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` covers the sheet's identity and version
+  }, [key, near]);
+  return (
+    <div ref={ref} className="resource-thumb items-start justify-start overflow-hidden p-2">
+      {head === null ? (
+        <div className="grid w-full gap-1.5 pt-0.5" aria-hidden="true">
+          {["72%", "48%", "86%", "60%", "40%"].map((w, n) => (
+            <div key={n} className="resource-line-skel" style={{ ...delay, width: w }} />
+          ))}
+        </div>
+      ) : (
+        <pre className="m-0 font-mono text-[0.64rem] leading-[1.45] whitespace-pre text-text-dim">{head}</pre>
+      )}
     </div>
   );
 }
@@ -90,70 +246,72 @@ function ImageThumbnail({ image }: { image: ImageResource }) {
 type CardAction = "open" | "copy" | "replace" | "move" | "delete";
 
 /** The one "…" menu on an image or stylesheet card -- everything else happens in its details panel. */
-function CardMenu({ canManage, onAction }: { canManage: boolean; onAction: (action: CardAction) => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => rootRef.current && !rootRef.current.contains(e.target as Node) && setOpen(false);
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [open]);
+function CardMenu({ label, canManage, onAction }: { label: string; canManage: boolean; onAction: (action: CardAction) => void }) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const items: [CardAction, string][] = [
     ["open", "Details"],
     ["copy", "Copy reference"],
     ...(canManage ? ([["replace", "Replace…"], ["move", "Move…"], ["delete", "Delete"]] as [CardAction, string][]) : []),
   ];
   return (
-    <div className="relative" ref={rootRef} onPointerDown={(e) => e.stopPropagation()}>
+    // A press here must not start dragging the card it sits on.
+    <div onPointerDown={(e) => e.stopPropagation()}>
       <button
+        ref={trigger}
         type="button"
         className="btn btn-ghost btn-sm icon-only"
         aria-label="More"
+        aria-haspopup="menu"
+        aria-expanded={at !== null}
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((o) => !o);
+          const r = e.currentTarget.getBoundingClientRect();
+          setAt((open) => (open ? null : { x: r.right - 190, y: r.bottom + 4 }));
         }}
       >
         <MoreHorizontal size={15} />
       </button>
-      {open && (
-        <div className="account-panel resource-row-panel right-0 left-auto" role="menu" onClick={(e) => e.stopPropagation()}>
-          {items.map(([action, label]) => (
-            <button
-              key={action}
-              type="button"
-              className={`account-item${action === "delete" ? " account-item-danger" : ""}`}
-              onClick={() => {
-                setOpen(false);
-                onAction(action);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      {at && (
+        <FloatingMenu x={at.x} y={at.y} width={190} label={label} onClose={() => setAt(null)} ignore={trigger.current}>
+          {(close) =>
+            items.map(([action, label]) => (
+              <button
+                key={action}
+                type="button"
+                role="menuitem"
+                className={`account-item${action === "delete" ? " account-item-danger" : ""}`}
+                onClick={() => {
+                  close();
+                  onAction(action);
+                }}
+              >
+                {label}
+              </button>
+            ))
+          }
+        </FloatingMenu>
       )}
     </div>
   );
 }
 
 /** An image or a stylesheet: its picture (or first lines of CSS), name, type, and the one menu. Click to open it. */
-function FileCard({ item, canManage, onAction }: { item: DetailItem; canManage: boolean; onAction: (action: CardAction) => void }) {
+const FileCard = memo(function FileCard({
+  kind,
+  data,
+  canManage,
+  onAction: onCardAction,
+}: {
+  kind: DetailItem["kind"];
+  data: DetailItem["data"];
+  canManage: boolean;
+  onAction: (item: DetailItem, action: CardAction) => void;
+}) {
+  const item = useMemo(() => ({ kind, data }) as DetailItem, [kind, data]);
+  const onAction = (action: CardAction) => onCardAction(item, action);
   const draggable = useDraggable({ id: `drag-${item.kind}:${item.data.id}`, data: { kind: item.kind, id: item.data.id } });
-  const [head, setHead] = useState<string | null>(null);
   const fmt = item.kind === "stylesheet" ? (item.data.source_format ?? "css") : null;
-  useEffect(() => {
-    if (item.kind !== "stylesheet") return;
-    let live = true;
-    api.stylesheets
-      .source(item.data.id)
-      .then((text) => live && setHead(text.split("\n").slice(0, 6).join("\n")))
-      .catch(() => live && setHead(""));
-    return () => {
-      live = false;
-    };
-  }, [item.kind, item.data.id, item.data.updated_at]);
   return (
     <article
       ref={draggable.setNodeRef}
@@ -165,25 +323,19 @@ function FileCard({ item, canManage, onAction }: { item: DetailItem; canManage: 
       onKeyDown={(e) => e.key === "Enter" && onAction("open")}
       title="Open — how to use it, where it's used"
     >
-      {item.kind === "image" ? (
-        <ImageThumbnail image={item.data} />
-      ) : (
-        <div className="resource-thumb items-start justify-start overflow-hidden p-2">
-          <pre className="m-0 font-mono text-[0.64rem] leading-[1.45] whitespace-pre text-text-dim">{head ?? "…"}</pre>
-        </div>
-      )}
+      {item.kind === "image" ? <ImageThumbnail image={item.data} /> : <StylesheetHead sheet={item.data} />}
       <div className="card-top items-center">
         <h3 className="card-name">{item.data.name}</h3>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           <span className={`badge ${item.kind === "image" ? "badge-docx" : fmt === "css" ? "badge-html" : "badge-xlsx"}`}>
             {item.kind === "image" ? item.data.file_ext : STYLE_LABEL[fmt ?? "css"]}
           </span>
-          <CardMenu canManage={canManage} onAction={onAction} />
+          <CardMenu label={data.name} canManage={canManage} onAction={onAction} />
         </span>
       </div>
     </article>
   );
-}
+});
 
 const STYLE_EXT = /\.(css|scss|sass|less)$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|tiff?)$/i;
@@ -285,7 +437,8 @@ export default function ResourceContentPane({
     }
   }
 
-  function act(item: DetailItem, action: CardAction) {
+  // Only state setters inside, so one function for the pane's whole life -- the memoized cards keep it.
+  const act = useCallback((item: DetailItem, action: CardAction) => {
     if (action === "copy") {
       void navigator.clipboard?.writeText(`{{ resource('${item.data.name}') }}`).then(() => {
         setCopied(item.data.id);
@@ -294,7 +447,7 @@ export default function ResourceContentPane({
       return;
     }
     setOpen({ item, action: action === "open" ? null : action });
-  }
+  }, []);
 
   function onDragOver(e: DragEvent<HTMLDivElement>) {
     if (!canManage || !e.dataTransfer.types.includes("Files")) return;
@@ -404,24 +557,24 @@ export default function ResourceContentPane({
           </p>
         </div>
       ) : (
-        <div className="card-grid">
+        <div className="card-grid resource-grid">
           {show("templates") &&
-            reports.map((r, i) => (
-              <div key={r.report_id} style={{ "--i": i } as CSSProperties}>
+            reports.map((r) => (
+              <div key={r.report_id} className="resource-grid-cell">
                 <ReportCard report={r} />
               </div>
             ))}
           {show("templates") &&
-            shortcuts.map(({ shortcut, report }, i) => (
-              <div key={shortcut.id} style={{ "--i": reports.length + i } as CSSProperties}>
-                <ShortcutCard report={report} canManage={canManage} onRemove={() => onRemoveShortcut(shortcut.id)} />
+            shortcuts.map(({ shortcut, report }) => (
+              <div key={shortcut.id} className="resource-grid-cell">
+                <ShortcutCard shortcutId={shortcut.id} report={report} canManage={canManage} onRemove={onRemoveShortcut} />
               </div>
             ))}
-          {files.map((item, i) => (
-            <div key={`${item.kind}-${item.data.id}`} className="relative" style={{ "--i": counts.templates + i } as CSSProperties}>
-              <FileCard item={item} canManage={canManage} onAction={(a) => act(item, a)} />
+          {files.map((item) => (
+            <div key={`${item.kind}-${item.data.id}`} className="resource-grid-cell relative">
+              <FileCard kind={item.kind} data={item.data} canManage={canManage} onAction={act} />
               {copied === item.data.id && (
-                <span className="pointer-events-none absolute top-2 right-2 rounded-full bg-accent px-2 py-0.5 text-[0.72rem] text-accent-ink">Copied</span>
+                <span className="resource-copied-badge pointer-events-none rounded-full bg-accent px-2 py-0.5 text-[0.72rem] text-accent-ink">Copied</span>
               )}
             </div>
           ))}

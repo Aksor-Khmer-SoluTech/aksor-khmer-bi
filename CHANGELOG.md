@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+- **Right-click a folder in Resources** for its actions at the pointer -- New subfolder, Rename, Manage access, the
+  project options and Delete (the same list as its "…" menu); right-click Root for New folder. The menu doesn't open
+  the folder: what's showing stays, and the folder is outlined while its menu is open. **F2** renames the
+  selected folder, and renaming starts with the whole name selected, so typing replaces it.
+- **Resources loads a big folder fast.** Image cards show a small preview from the new
+  `GET /api/v1/images/{id}/thumbnail` (WebP, made once and kept beside the picture, remade when it's replaced; the
+  same visibility as the picture) instead of downloading every original -- in a test folder 41.5 MB of scans became
+  454 KB. Previews load only as their cards come near the screen and are kept for the session, so going back to a
+  folder shows them at once. While loading, one light band sweeps across every card in step (moved by the GPU, not
+  repainted); each picture is decoded first, then crossfades in over the shimmer with a slight settle.
+- **Smaller cards in Resources:** about a third more fit on a row (two on a phone), with a smaller preview and type.
+- **Resources stays quick with hundreds of files in a folder.** Cards outside the scrolling column aren't laid out
+  or painted until they come near (`content-visibility`), the lists are grouped by folder once instead of filtered on
+  every render, and cards redraw only when their own data changes -- opening a folder of 360 cards went from about
+  310 ms of work to 25-45 ms.
+
+### Fixed
+- **Resources:** a folder's "…" menu was cut off by the folder tree's own box (only its first item showed), and a
+  file card's "…" menu was cut off by its card and hidden under the next row; both now open on top of the page, like
+  the right-click menu. The cards no longer scroll sideways under the folder tree. The page now fills the window
+  exactly, above the footer: the folder tree runs to the bottom even beside an empty folder, each column scrolls on
+  its own, and the page itself no longer scrolls (on a phone the two stack and scroll as one page).
+
 ## [1.0.0-beta.5] - 2026-10-15
 
 ### Added
