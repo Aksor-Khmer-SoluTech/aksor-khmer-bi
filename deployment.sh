@@ -105,7 +105,14 @@ redis() { docker compose -p "$REDIS_PROJECT" -f "$REDIS_FILE" "$@"; }
 db()    { docker compose -p "$DB_PROJECT"    -f "$DB_FILE"    "$@"; }
 # The app stack runs the released, version-pinned images docker-compose.yml names; building them is not part of
 # installing.
-app()   { docker compose -p "$APP_PROJECT"   -f "$APP_FILE"   "$@"; }
+# The JDBC worker (uploaded Oracle / SQL Server / Db2 drivers) sits behind compose's `jdbc` profile; it is switched on
+# by setting JDBC_WORKER_TOKEN in .env -- the worker can't start without one anyway -- so up, update, status, restart
+# and logs all include it then, with nothing else to remember.
+jdbc_on() { [ -n "${JDBC_WORKER_TOKEN:-}" ] || [ -n "$(env_value JDBC_WORKER_TOKEN)" ]; }   # .env, or the shell's own
+app()   {
+  local prof=(); jdbc_on && prof=(--profile jdbc)
+  docker compose -p "$APP_PROJECT" -f "$APP_FILE" ${prof[@]+"${prof[@]}"} "$@"
+}
 
 # Building the images from source is not a supported way to install (the maintainers publish released images), so
 # say so plainly instead of a bare usage line when an old instruction still passes --build / --pull.
@@ -425,7 +432,8 @@ cmd_up() {
   ensure_network
   mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs "${CONFIG_DIRS[@]}"
   start_infra
-  info "starting app (api, scheduler, worker, portal) -- migrations run as the api starts"
+  jdbc_worker_note
+  info "starting app (api, scheduler, worker, portal$(jdbc_on && echo ', jdbc-worker')) -- migrations run as the api starts"
   pull_app_images
   app up -d --wait || die "the app didn't come up healthy -- see why with: ./deployment.sh logs api"
   cmd_status
@@ -435,7 +443,7 @@ cmd_up() {
 cmd_down() {
   require_docker
   info "stopping app"
-  app down
+  app --profile jdbc down   # the worker too, even if JDBC_WORKER_TOKEN has since been taken out of .env
   info "stopping postgres (the database in ./$PG_DIR is kept)"
   db down
   info "stopping redis"
@@ -574,7 +582,7 @@ cmd_restore() {
   start_infra
   if [ "$safety" = 1 ]; then info "safety backup of the current state"; cmd_backup || die "the safety backup failed -- nothing was changed (--no-backup to restore anyway)"; fi
   info "stopping the app"
-  app down
+  app --profile jdbc down
   info "replacing the database"
   db exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"' || die "couldn't recreate the database"
   gzip -dc "$sql" | db exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -q -o /dev/null' || die "loading $sql failed -- the database is now empty; fix the cause and run restore again (the safety backup is in $BACKUP_DIR)"
@@ -760,6 +768,7 @@ cmd_update() {
     # The new deployment.sh pulls and starts what the new compose files name (migrations run at api start).
     SKIP_DOCTOR=1 exec ./deployment.sh up
   fi
+  jdbc_worker_note
   pull_app_images
   info "recreating the app (alembic upgrade head runs as the api starts)"
   app up -d --wait || die "the app didn't come up healthy -- see why with: ./deployment.sh logs api"
@@ -810,6 +819,13 @@ cmd_rollback() {
   info "files rolled back to $prev"
   if [ "$restore" = 1 ]; then ./deployment.sh restore "$bk" --yes || die "the restore failed -- see above"; fi
   SKIP_DOCTOR=1 exec ./deployment.sh up
+}
+
+# Uploaded drivers but no JDBC_WORKER_TOKEN: the worker that runs them stays off, so say how to turn it on.
+jdbc_worker_note() {
+  jdbc_on && return 0
+  [ -n "$(find data/jdbc_drivers -name '*.jar' -print -quit 2>/dev/null)" ] || return 0
+  warn "data/jdbc_drivers has uploaded drivers, but the jdbc-worker that runs them is off: set JDBC_WORKER_TOKEN in .env (generate one: openssl rand -hex 32), then ./deployment.sh up"
 }
 
 pull_app_images() {

@@ -325,18 +325,25 @@ def create_report(
             if code is not None:
                 _claim_code(session, code, org_id, report_id)
             session.add(row)
+            try:
+                # The report row goes in first, on its own: nothing tells SQLAlchemy that report_versions depends on
+                # reports (no relationship()), so in one flush it may insert the version first -- which PostgreSQL
+                # refuses (report_versions.report_id's foreign key; SQLite doesn't check it). Here too a request
+                # that claimed the same code at the same moment loses.
+                session.flush()
+            except IntegrityError as exc:
+                session.rollback()
+                if code is None:
+                    raise  # not about a code: let the real error show, not "that code is already taken"
+                raise CodeTakenError(code) from exc
             _snapshot(
                 session, report_id, 1, template_ext, content,
                 created_at=now, actor=actor, note=note, original_filename=original_filename,
             )
-            try:
-                session.commit()
-            except IntegrityError as exc:  # two requests claiming the same code at once
-                session.rollback()
-                raise CodeTakenError(code) from exc
+            session.commit()
             return _row_to_dict(row)
-    except CodeTakenError:
-        shutil.rmtree(report_dir, ignore_errors=True)  # the template file was written before the claim
+    except Exception:
+        shutil.rmtree(report_dir, ignore_errors=True)  # the template file was written first: no half-made report left
         raise
 
 

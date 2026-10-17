@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-10-17
+
+### Fixed
+- **New reports save on PostgreSQL again.** Creating a report -- a draft from the New report wizard ("Next" after the
+  data), an uploaded template or an imported project -- failed on every PostgreSQL install with
+  **409 "That code is already taken"**, even with no code given and no reports at all: the report's first version was
+  written before the report itself, which PostgreSQL's foreign key refuses (SQLite, used in development, doesn't check
+  it). The report is written first now, and any other database error is reported as itself instead of as a taken
+  code. The tests now check foreign keys too, so this can't come back unnoticed.
+- **`./deployment.sh up` starts the JDBC worker** whenever `JDBC_WORKER_TOKEN` is set in `.env` -- before, it never
+  did, and uploaded Oracle / SQL Server / Db2 drivers had nothing to run them unless the worker was started by hand
+  with its compose profile. `update`, `status`, `restart` and `logs` include it too, `down` always stops it, and `up`
+  warns when drivers are uploaded but the token isn't set.
+
 ## [1.0.0-beta.5] - 2026-10-16
 
 ### Added

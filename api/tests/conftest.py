@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 from app import auth_tokens, db, report_store, secret_store
@@ -52,6 +52,9 @@ def isolated_report_store(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
     test_engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
+    # Foreign keys checked, as PostgreSQL does (SQLite skips them unless asked): a row written before the row it points
+    # to fails here too, not only on a real server.
+    event.listen(test_engine, "connect", lambda conn, _: conn.execute("PRAGMA foreign_keys=ON"))
     db.Base.metadata.create_all(test_engine)
     TestSessionLocal = sessionmaker(bind=test_engine, expire_on_commit=False)
     monkeypatch.setattr(db, "SessionLocal", TestSessionLocal)
