@@ -15,6 +15,11 @@ COPY docs docs
 RUN cd portal && npm run build
 
 FROM nginx:alpine
+# .mjs is JavaScript too: nginx's mime.types maps only .js, so the PDF preview's worker (pdf.worker.min-*.mjs) went out
+# as application/octet-stream, and browsers refuse to load a module script of that type ("Setting up fake worker
+# failed: Failed to fetch dynamically imported module"). The grep fails the build if the line ever changes shape.
+RUN sed -i -E 's#^([[:space:]]*application/javascript[[:space:]]+)js;#\1js mjs;#' /etc/nginx/mime.types \
+    && grep -qE 'application/javascript[[:space:]]+js mjs;' /etc/nginx/mime.types
 COPY --from=build /app/portal/dist /usr/share/nginx/html
 # config.js is written at each start from this default plus the PORTAL_* settings, or replaced by a mounted
 # config/portal/config.js (docker-entrypoint.d/40-aksor-config.sh) -- a server needs no copy of the repository.

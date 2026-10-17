@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.7] - 2026-10-17
+
+### Fixed
+- **PDF previews show again on installed servers.** The portal's web server sent the PDF viewer's worker file
+  (`pdf.worker.min-….mjs`) as `application/octet-stream`, which browsers refuse to load as a script, so a preview
+  failed with "Setting up fake worker failed: Failed to fetch dynamically imported module". The portal image now
+  serves `.mjs` files as JavaScript. (It worked in development, where Vite serves the file itself.)
+
 ## [1.0.0-beta.6] - 2026-10-17
 
 ### Fixed
