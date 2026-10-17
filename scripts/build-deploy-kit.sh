@@ -35,6 +35,10 @@ done
 [ -n "$version" ] || { usage; exit 1; }
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || die "'$version' isn't a version like 1.2.0 or 1.2.0-beta.5"
 commit="$(git rev-parse --verify "$ref^{commit}")" || die "no such commit: $ref"
+# The kit is built from the commit, so image tags that publish-images.sh wrote but nobody committed would be left out:
+# a kit called <version> that runs the previous release's images (it happened with 1.0.0-beta.6).
+git diff --quiet "$commit" -- docker-compose.yml \
+  || die "docker-compose.yml differs from $(git rev-parse --short "$commit") -- commit the image tags publish-images.sh wrote (and push), then build the kit"
 
 name="aksor-khmer-bi-deploy-$version"
 stage="$(mktemp -d)"; trap 'rm -rf "$stage"' EXIT
