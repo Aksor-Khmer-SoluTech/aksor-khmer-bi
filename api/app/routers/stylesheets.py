@@ -106,6 +106,7 @@ def get_stylesheet(stylesheet_id: str, context: AuthContext = Depends(get_curren
         meta = stylesheet_store.get_stylesheet(stylesheet_id)
     except stylesheet_store.StylesheetNotFoundError:
         raise HTTPException(status_code=404, detail="Stylesheet not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Stylesheet not found")
@@ -118,6 +119,7 @@ def get_stylesheet_file(stylesheet_id: str, context: AuthContext = Depends(get_c
         meta = stylesheet_store.get_stylesheet(stylesheet_id)
     except stylesheet_store.StylesheetNotFoundError:
         raise HTTPException(status_code=404, detail="Stylesheet not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Stylesheet not found")
@@ -167,6 +169,7 @@ def _visible(stylesheet_id: str, context: AuthContext) -> dict:
         meta = stylesheet_store.get_stylesheet(stylesheet_id)
     except stylesheet_store.StylesheetNotFoundError:
         raise HTTPException(status_code=404, detail="Stylesheet not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Stylesheet not found")
@@ -179,6 +182,7 @@ def delete_stylesheet(stylesheet_id: str, request: Request, context: AuthContext
         meta = stylesheet_store.get_stylesheet(stylesheet_id)
     except stylesheet_store.StylesheetNotFoundError:
         raise HTTPException(status_code=404, detail="Stylesheet not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_manage_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=403, detail="Missing 'manage' access on this stylesheet's folder")
@@ -208,6 +212,7 @@ def update_stylesheet(stylesheet_id: str, body: ResourceUpdate, request: Request
         meta = stylesheet_store.get_stylesheet(stylesheet_id)
     except stylesheet_store.StylesheetNotFoundError:
         raise HTTPException(status_code=404, detail="Stylesheet not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Stylesheet not found")
@@ -235,6 +240,7 @@ def stylesheet_usage(stylesheet_id: str, context: AuthContext = Depends(get_curr
         meta = stylesheet_store.get_stylesheet(stylesheet_id)
     except stylesheet_store.StylesheetNotFoundError:
         raise HTTPException(status_code=404, detail="Stylesheet not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Stylesheet not found")

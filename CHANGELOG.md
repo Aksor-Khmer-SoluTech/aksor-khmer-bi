@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Changed
+- **The portal opens faster.** Its JavaScript was one 1.5 MB file that every visit downloaded whole; each page is now
+  fetched when it is first opened, so the first load downloads under a third as much. React, the code editor and the
+  icons have their own files, which a release that changes only the portal's pages leaves in the browser's cache.
+  The portal image's web server now compresses JavaScript, CSS and fonts (gzip) and lets browsers keep the built
+  files for good (their names change whenever their content does), while `index.html` and `config.js` are checked on
+  every load, so an upgrade or a changed `PORTAL_*` setting shows straight away. A tab left open across an upgrade
+  reloads itself once instead of failing to open its next page.
+
+### Security
+- **Organizations' reports and Resources are kept apart.** An organization's own admins (`report:manage` /
+  `folder:manage` -- the Org Admin and Report Admin roles) could reach another organization's folders, images and
+  stylesheets by id -- view, download, rename, move, replace and delete them -- and could grant themselves access to
+  another organization's report or folder, which then opened it fully. Each of these now answers 404 outside the
+  caller's own organization, like an id that doesn't exist. Server-wide administrators are unchanged, and so is
+  access given by a grant on the report or folder itself.
+
 ## [1.0.0-beta.7] - 2026-10-17
 
 ### Fixed

@@ -10,6 +10,20 @@ export default defineConfig({
   server: { fs: { allow: [".."] } },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      output: {
+        // React and the code editor change only on a dependency upgrade, so they get their own chunks: a release that
+        // touches only the portal's own code leaves them cached in the browser.
+        manualChunks(id) {
+          if (!id.includes("/node_modules/")) return undefined;
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
+          if (/\/node_modules\/(@codemirror|@lezer|@marijn|style-mod|w3c-keyname|crelt)\//.test(id)) return "codemirror";
+          // Without this each icon shared by two pages becomes a chunk of its own: dozens of sub-kilobyte requests.
+          if (id.includes("/node_modules/lucide-react/")) return "icons";
+          return undefined;
+        },
+      },
+    },
   },
   // Surfaces package.json's version as a build-time constant (see
   // AboutDialog.tsx) rather than a second hardcoded copy of the number

@@ -1,34 +1,36 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import AdminShell from "./admin/AdminShell";
 import { canManageTemplates, has, isManageRoute, manageItems } from "./admin/sections";
 import { api, onPasswordChangeRequired, onUnauthorized } from "./api";
 import AppSidebar from "./components/AppSidebar";
 import { BATCH_RENDER_ENABLED } from "./features";
-import BatchRender from "./components/BatchRender";
-import EmbedPage from "./components/EmbedPage";
 import ForcePasswordChange from "./components/ForcePasswordChange";
 import Footer from "./components/Footer";
-import Gallery from "./components/Gallery";
 import { TourHost } from "./components/GuidedTour";
 import Login from "./components/Login";
-import ReportsPage from "./components/ReportsPage";
-import RunReportPage from "./components/RunReportPage";
 import HomePage from "./components/HomePage";
-import MyRunsPage from "./components/MyRunsPage";
-import NewReportWizard from "./components/NewReportWizard";
-import SchedulesPage from "./components/SchedulesPage";
-import StarredPage from "./components/StarredPage";
-import AnalyzePage from "./components/AnalyzePage";
-import DashboardsPage from "./components/DashboardsPage";
-import TemplateDetail from "./components/TemplateDetail";
 import TopBar, { EVERYDAY } from "./components/TopBar";
 import { branding } from "./branding";
 import { useHashRoute, type Route } from "./hooks";
 import type { AuthInfo } from "./types";
 import { UserSettingsProvider } from "./userSettings";
 
-// Markdown renderer + the guides are only needed on the docs route.
+// Each page is its own chunk, loaded when its route is first opened: the first paint needs only the sign-in screen
+// or Home, not the editors, charts and admin pages behind the other routes. The markdown renderer and the guides
+// (DocsPage) are the largest of them.
+const AdminShell = lazy(() => import("./admin/AdminShell"));
+const AnalyzePage = lazy(() => import("./components/AnalyzePage"));
+const BatchRender = lazy(() => import("./components/BatchRender"));
+const DashboardsPage = lazy(() => import("./components/DashboardsPage"));
 const DocsPage = lazy(() => import("./components/DocsPage"));
+const EmbedPage = lazy(() => import("./components/EmbedPage"));
+const Gallery = lazy(() => import("./components/Gallery"));
+const MyRunsPage = lazy(() => import("./components/MyRunsPage"));
+const NewReportWizard = lazy(() => import("./components/NewReportWizard"));
+const ReportsPage = lazy(() => import("./components/ReportsPage"));
+const RunReportPage = lazy(() => import("./components/RunReportPage"));
+const SchedulesPage = lazy(() => import("./components/SchedulesPage"));
+const StarredPage = lazy(() => import("./components/StarredPage"));
+const TemplateDetail = lazy(() => import("./components/TemplateDetail"));
 
 const SIDEBAR_COLLAPSED_KEY = "portal_sidebar_collapsed";
 
@@ -67,7 +69,11 @@ export default function App() {
   // Chrome-less and checked before the session/login gates below — an
   // embedded report must never show this console's own login screen.
   if (route.view === "embed") {
-    return <EmbedPage reportId={route.id} />;
+    return (
+      <Suspense fallback={null}>
+        <EmbedPage reportId={route.id} />
+      </Suspense>
+    );
   }
 
   if (!checkedSession) return null;
@@ -133,54 +139,54 @@ export default function App() {
 
           <div className="app-main">
             <div className="app-content">
-              {effectiveRoute.view === "admin" ? (
-                <AdminShell route={effectiveRoute} auth={auth} />
-              ) : effectiveRoute.view === "docs" ? (
-                <Suspense fallback={null}>
+              <Suspense fallback={null}>
+                {effectiveRoute.view === "admin" ? (
+                  <AdminShell route={effectiveRoute} auth={auth} />
+                ) : effectiveRoute.view === "docs" ? (
                   <DocsPage route={effectiveRoute} navigate={navigate} />
-                </Suspense>
-              ) : effectiveRoute.view === "detail" ? (
-                // Same reasoning: a vertical tab rail + a pane that fills
-                // the rest supplies its own padding, not `.shell`'s.
-                <TemplateDetail
-                  reportId={effectiveRoute.id}
-                  tab={effectiveRoute.tab}
-                  onTabChange={(tab) => navigate({ view: "detail", id: effectiveRoute.id, tab }, { replace: true })}
-                  onBack={() => navigate({ view: "gallery" })}
-                  onDeleted={() => navigate({ view: "gallery" })}
-                  auth={auth}
-                />
-              ) : (
-                // The run view keeps its content high on the screen (a report
-                // wants every row of a small monitor), so it trims the top pad.
-                <div className={`shell${effectiveRoute.view === "run" ? " shell-tight" : ""}`}>
-                  {effectiveRoute.view === "gallery" && (
-                    <Gallery auth={auth} onOpenReport={(id) => navigate({ view: "detail", id })} onNewReport={() => navigate({ view: "new-report" })} />
-                  )}
-                  {effectiveRoute.view === "new-report" && (
-                    <NewReportWizard auth={auth} reportId={effectiveRoute.id} navigate={navigate} />
-                  )}
-                  {effectiveRoute.view === "home" && (
-                    <HomePage auth={auth} navigate={navigate} />
-                  )}
-                  {effectiveRoute.view === "runs" && <MyRunsPage navigate={navigate} />}
-                  {effectiveRoute.view === "starred" && <StarredPage username={auth.username} navigate={navigate} />}
-                  {effectiveRoute.view === "analyze" && <AnalyzePage auth={auth} viewId={effectiveRoute.id} navigate={navigate} />}
-                  {effectiveRoute.view === "dashboards" && <DashboardsPage auth={auth} dashboardId={effectiveRoute.id} navigate={navigate} />}
-                  {effectiveRoute.view === "reports" && (
-                    <ReportsPage
-                      username={auth.username}
-                      onRunReport={(id) => navigate({ view: "run", id })}
-                      onManageTemplate={(id) => navigate({ view: "detail", id })}
-                    />
-                  )}
-                  {effectiveRoute.view === "run" && (
-                    <RunReportPage reportId={effectiveRoute.id} onBack={() => navigate({ view: "reports" })} />
-                  )}
-                  {effectiveRoute.view === "batch" && <BatchRender />}
-                  {effectiveRoute.view === "schedules" && <SchedulesPage />}
-                </div>
-              )}
+                ) : effectiveRoute.view === "detail" ? (
+                  // Same reasoning: a vertical tab rail + a pane that fills
+                  // the rest supplies its own padding, not `.shell`'s.
+                  <TemplateDetail
+                    reportId={effectiveRoute.id}
+                    tab={effectiveRoute.tab}
+                    onTabChange={(tab) => navigate({ view: "detail", id: effectiveRoute.id, tab }, { replace: true })}
+                    onBack={() => navigate({ view: "gallery" })}
+                    onDeleted={() => navigate({ view: "gallery" })}
+                    auth={auth}
+                  />
+                ) : (
+                  // The run view keeps its content high on the screen (a report
+                  // wants every row of a small monitor), so it trims the top pad.
+                  <div className={`shell${effectiveRoute.view === "run" ? " shell-tight" : ""}`}>
+                    {effectiveRoute.view === "gallery" && (
+                      <Gallery auth={auth} onOpenReport={(id) => navigate({ view: "detail", id })} onNewReport={() => navigate({ view: "new-report" })} />
+                    )}
+                    {effectiveRoute.view === "new-report" && (
+                      <NewReportWizard auth={auth} reportId={effectiveRoute.id} navigate={navigate} />
+                    )}
+                    {effectiveRoute.view === "home" && (
+                      <HomePage auth={auth} navigate={navigate} />
+                    )}
+                    {effectiveRoute.view === "runs" && <MyRunsPage navigate={navigate} />}
+                    {effectiveRoute.view === "starred" && <StarredPage username={auth.username} navigate={navigate} />}
+                    {effectiveRoute.view === "analyze" && <AnalyzePage auth={auth} viewId={effectiveRoute.id} navigate={navigate} />}
+                    {effectiveRoute.view === "dashboards" && <DashboardsPage auth={auth} dashboardId={effectiveRoute.id} navigate={navigate} />}
+                    {effectiveRoute.view === "reports" && (
+                      <ReportsPage
+                        username={auth.username}
+                        onRunReport={(id) => navigate({ view: "run", id })}
+                        onManageTemplate={(id) => navigate({ view: "detail", id })}
+                      />
+                    )}
+                    {effectiveRoute.view === "run" && (
+                      <RunReportPage reportId={effectiveRoute.id} onBack={() => navigate({ view: "reports" })} />
+                    )}
+                    {effectiveRoute.view === "batch" && <BatchRender />}
+                    {effectiveRoute.view === "schedules" && <SchedulesPage />}
+                  </div>
+                )}
+              </Suspense>
             </div>
 
             <Footer />

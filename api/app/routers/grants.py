@@ -308,6 +308,7 @@ def grant_report_access(
         report = session.get(db.ReportRow, body.report_id)
         if report is None:
             raise HTTPException(status_code=404, detail="Report not found")
+        ensure_org_scope(context, report.org_id)
         parameter_limits = _validate_parameter_limits(report, body.permission_level, body.parameter_limits or {})
 
         if body.subject_type == "user":
@@ -351,8 +352,10 @@ def list_report_grants(
     report_id: str = Query(...), context: AuthContext = Depends(require_permission("report:manage"))
 ) -> list[GrantOut]:
     with db.SessionLocal() as session:
-        if session.get(db.ReportRow, report_id) is None:
+        report = session.get(db.ReportRow, report_id)
+        if report is None:
             raise HTTPException(status_code=404, detail="Report not found")
+        ensure_org_scope(context, report.org_id)
         rows = (
             session.query(db.ReportAccessGrant).filter(db.ReportAccessGrant.report_id == report_id).all()
         )
@@ -367,11 +370,13 @@ def revoke_report_grant(
         row = session.get(db.ReportAccessGrant, grant_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Grant not found")
+        report = session.get(db.ReportRow, row.report_id)
+        if report is not None:
+            ensure_org_scope(context, report.org_id)
         was_active = row.is_active
         row.is_active = False
         session.commit()
         if was_active:
-            report = session.get(db.ReportRow, row.report_id)
             who = _subject_name(session, row.subject_type, row.subject_id)
             audit.record(
                 audit.Actor.of(context, request), "report.access_revoke", "report", row.report_id,
@@ -410,6 +415,7 @@ def grant_folder_access(
         folder = session.get(db.Folder, body.folder_id)
         if folder is None:
             raise HTTPException(status_code=404, detail="Folder not found")
+        ensure_org_scope(context, folder.org_id)
 
         if body.subject_type == "user":
             _resolve_user_and_scope(session, context, body.subject_id)
@@ -450,8 +456,10 @@ def list_folder_grants(
     folder_id: str = Query(...), context: AuthContext = Depends(require_permission("folder:manage"))
 ) -> list[GrantOut]:
     with db.SessionLocal() as session:
-        if session.get(db.Folder, folder_id) is None:
+        folder = session.get(db.Folder, folder_id)
+        if folder is None:
             raise HTTPException(status_code=404, detail="Folder not found")
+        ensure_org_scope(context, folder.org_id)
         rows = session.query(db.FolderAccessGrant).filter(db.FolderAccessGrant.folder_id == folder_id).all()
         return [_folder_grant_out(row) for row in rows]
 
@@ -464,11 +472,13 @@ def revoke_folder_grant(
         row = session.get(db.FolderAccessGrant, grant_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Grant not found")
+        folder = session.get(db.Folder, row.folder_id)
+        if folder is not None:
+            ensure_org_scope(context, folder.org_id)
         was_active = row.is_active
         row.is_active = False
         session.commit()
         if was_active:
-            folder = session.get(db.Folder, row.folder_id)
             who = _subject_name(session, row.subject_type, row.subject_id)
             audit.record(
                 audit.Actor.of(context, request), "folder.access_revoke", "folder", row.folder_id,

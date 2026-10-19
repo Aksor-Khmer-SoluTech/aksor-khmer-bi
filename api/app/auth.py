@@ -59,6 +59,7 @@ import secrets
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
+from sqlalchemy import select
 
 from . import auth_tokens, db
 from .auth_events import client_ip
@@ -350,6 +351,13 @@ def ensure_org_scope(context: AuthContext, org_id: str) -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
+def _in_caller_org(context: AuthContext, org_id: str | None) -> bool:
+    """Whether a resource in `org_id` is within reach of the caller's role permissions: superusers reach every
+    organization, everyone else only their own. None (no such resource) counts as reachable, so the route itself
+    answers its usual 404."""
+    return context.is_superuser or org_id is None or org_id == context.org_id
+
+
 def require_folder_permission(level: str):
     """Like require_report_permission, but for a Resources folder
     (rbac.has_folder_access, which -- unlike report access -- inherits
@@ -363,12 +371,16 @@ def require_folder_permission(level: str):
     """
 
     def _dependency(folder_id: str, request: Request, context: AuthContext = Depends(get_current_user)) -> AuthContext:
-        if context.has_permission("folder:manage"):
-            return context
-        if not context.is_superuser:
-            with db.SessionLocal() as session:
-                if has_folder_access(session, context, folder_id, level):
-                    return context
+        with db.SessionLocal() as session:
+            folder_org = session.execute(select(db.Folder.org_id).where(db.Folder.id == folder_id)).scalar_one_or_none()
+            in_org = _in_caller_org(context, folder_org)
+            # folder:manage covers the caller's own organization; a grant on the folder itself counts wherever it is.
+            if context.has_permission("folder:manage") and in_org:
+                return context
+            if not context.is_superuser and has_folder_access(session, context, folder_id, level):
+                return context
+        if not in_org:
+            raise HTTPException(status_code=404, detail="Folder not found")
         _log.warning("Permission denied: username=%r missing folder:manage on folder_id=%r (level=%r)", context.username, folder_id, level)
         record_access_denied(
             username=context.username,
@@ -399,12 +411,16 @@ def require_report_permission(level: str):
     permission_code = f"report:{level}"
 
     def _dependency(report_id: str, request: Request, context: AuthContext = Depends(get_current_user)) -> AuthContext:
-        if context.has_permission(permission_code):
-            return context
-        if not context.is_superuser:
-            with db.SessionLocal() as session:
-                if has_report_access(session, context, report_id, level):
-                    return context
+        with db.SessionLocal() as session:
+            report_org = session.execute(select(db.ReportRow.org_id).where(db.ReportRow.report_id == report_id)).scalar_one_or_none()
+            in_org = _in_caller_org(context, report_org)
+            # report:* covers the caller's own organization; a grant on the report itself counts wherever it is.
+            if context.has_permission(permission_code) and in_org:
+                return context
+            if not context.is_superuser and has_report_access(session, context, report_id, level):
+                return context
+        if not in_org:
+            raise HTTPException(status_code=404, detail="Report not found")
         _log.warning("Permission denied: username=%r missing %r on report_id=%r", context.username, permission_code, report_id)
         record_access_denied(
             username=context.username,

@@ -104,6 +104,7 @@ def get_image(image_id: str, context: AuthContext = Depends(get_current_user)) -
         meta = image_store.get_image(image_id)
     except image_store.ImageNotFoundError:
         raise HTTPException(status_code=404, detail="Image not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Image not found")
@@ -116,6 +117,7 @@ def get_image_file(image_id: str, context: AuthContext = Depends(get_current_use
         meta = image_store.get_image(image_id)
     except image_store.ImageNotFoundError:
         raise HTTPException(status_code=404, detail="Image not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Image not found")
@@ -136,6 +138,7 @@ def get_image_thumbnail(
         meta = image_store.get_image(image_id)
     except image_store.ImageNotFoundError:
         raise HTTPException(status_code=404, detail="Image not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Image not found")
@@ -157,6 +160,7 @@ def delete_image(image_id: str, request: Request, context: AuthContext = Depends
         meta = image_store.get_image(image_id)
     except image_store.ImageNotFoundError:
         raise HTTPException(status_code=404, detail="Image not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_manage_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=403, detail="Missing 'manage' access on this image's folder")
@@ -186,6 +190,7 @@ def update_image(image_id: str, body: ResourceUpdate, request: Request, context:
         meta = image_store.get_image(image_id)
     except image_store.ImageNotFoundError:
         raise HTTPException(status_code=404, detail="Image not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Image not found")
@@ -213,6 +218,7 @@ def image_usage(image_id: str, context: AuthContext = Depends(get_current_user))
         meta = image_store.get_image(image_id)
     except image_store.ImageNotFoundError:
         raise HTTPException(status_code=404, detail="Image not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Image not found")
@@ -225,6 +231,7 @@ async def replace_image(image_id: str, request: Request, file: UploadFile = File
         meta = image_store.get_image(image_id)
     except image_store.ImageNotFoundError:
         raise HTTPException(status_code=404, detail="Image not found")
+    ensure_org_scope(context, meta["org_id"])
     with db.SessionLocal() as session:
         if not can_view_folder_contents(session, context, meta["folder_id"]):
             raise HTTPException(status_code=404, detail="Image not found")
