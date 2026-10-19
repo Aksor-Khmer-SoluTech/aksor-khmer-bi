@@ -34,8 +34,8 @@ which real AD always populates; fall back to a reverse `(member=<dn>)`
 search under `group_search_base` for directories -- most plain OpenLDAP
 setups -- that don't maintain memberOf without an extra overlay) and
 synced into internal role grants via LdapConfig's
-`ldap_group_role_mappings` (app/rbac.py's UserRoleAssignment, tagged
-granted_by="ldap-sync" so it's distinguishable from a manually-granted
+`ldap_group_role_mappings` (app/rbac.py's UserRoleAssignment, marked
+source="ldap" so it's distinguishable from a manually-granted
 role and safe to reconcile automatically on every login: added when
 newly a member of a mapped group, deactivated when no longer one, a
 manually-granted assignment of the same role is never touched).
@@ -70,7 +70,9 @@ from .db import LdapConfig, LdapGroupRoleMapping, User, UserRoleAssignment
 
 _log = logging.getLogger("aksor_khmer_bi.auth_ldap")
 
-LDAP_SYNC_TAG = "ldap-sync"
+# UserRoleAssignment.source of the grants the sync makes. (It used to be written into granted_by, a foreign key to
+# users.id, which PostgreSQL refused -- migration 0013_role_assignment_source.)
+LDAP_SYNC_SOURCE = "ldap"
 
 
 def _now_iso() -> str:
@@ -236,10 +238,10 @@ def authenticate(config: LdapConfig, username: str, password: str) -> LdapBindRe
 
 
 def _sync_group_roles(session: Session, config: LdapConfig, user: User, groups: list[str]) -> None:
-    """Reconcile `user`'s ldap-sync-tagged role assignments against their
+    """Reconcile `user`'s LDAP-synced role assignments against their
     current group membership for this config: grant roles for groups
-    they're newly in, deactivate ldap-sync grants for groups they've left.
-    Manually-granted assignments (granted_by != "ldap-sync") of the same
+    they're newly in, deactivate synced grants for groups they've left.
+    Manually-granted assignments (source is null) of the same
     role are never touched -- e.g. a role given by an org admin directly
     survives even if the matching group later disappears from `groups`.
     """
@@ -255,7 +257,7 @@ def _sync_group_roles(session: Session, config: LdapConfig, user: User, groups: 
             select(UserRoleAssignment).where(
                 UserRoleAssignment.user_id == user.id,
                 UserRoleAssignment.role_id == mapping.role_id,
-                UserRoleAssignment.granted_by == LDAP_SYNC_TAG,
+                UserRoleAssignment.source == LDAP_SYNC_SOURCE,
             )
         ).scalar_one_or_none()
 
@@ -269,7 +271,8 @@ def _sync_group_roles(session: Session, config: LdapConfig, user: User, groups: 
                         user_id=user.id,
                         role_id=mapping.role_id,
                         granted_at=_now_iso(),
-                        granted_by=LDAP_SYNC_TAG,
+                        granted_by=None,
+                        source=LDAP_SYNC_SOURCE,
                         expires_at=None,
                         is_active=True,
                     )

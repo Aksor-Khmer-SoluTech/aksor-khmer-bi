@@ -137,6 +137,9 @@ class UserRoleAssignment(Base):
     granted_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     expires_at: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Where the grant came from when no person made it: "ldap" for LDAP group sync (app/auth_ldap.py); null for one an
+    # administrator made (granted_by) or one given at sign-up.
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class UserPermissionGrant(Base):

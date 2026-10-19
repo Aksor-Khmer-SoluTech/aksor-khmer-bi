@@ -55,7 +55,7 @@ class LdapGroupRoleMapping(Base):
     """One directory group -> one internal role. On successful bind,
     every mapping for that config whose `group_dn` appears in the user's
     resolved group membership is synced into a non-expiring
-    UserRoleAssignment tagged granted_by="ldap-sync" (app/auth_ldap.py) --
+    UserRoleAssignment marked source="ldap" (app/auth_ldap.py) --
     added when newly a member, deactivated when no longer one, and never
     touching a manually-granted assignment of the same role.
     """

@@ -14,6 +14,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   every load, so an upgrade or a changed `PORTAL_*` setting shows straight away. A tab left open across an upgrade
   reloads itself once instead of failing to open its next page.
 
+### Fixed
+- **LDAP users whose directory group maps to a role can sign in on PostgreSQL.** The group sync recorded the roles it
+  gives with `granted_by = "ldap-sync"`, but that column holds the id of the user who made a grant, and PostgreSQL
+  refused the value: the sign-in failed with a server error. Synced roles now say where they came from in a column of
+  their own (`source = "ldap"`); a database migration moves any already written that way. A new test runs the sync
+  everywhere, not only where a test directory server is running.
+
 ### Security
 - **Organizations' reports and Resources are kept apart.** An organization's own admins (`report:manage` /
   `folder:manage` -- the Org Admin and Report Admin roles) could reach another organization's folders, images and

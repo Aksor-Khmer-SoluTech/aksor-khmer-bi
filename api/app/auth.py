@@ -130,7 +130,7 @@ def resolve_auth_context(credentials: HTTPBasicCredentials) -> AuthContext:
             authenticated = verify_password(credentials.password, user.password_hash)
         elif user is not None and user.auth_source == "ldap":
             # May commit (updates external_dn/last_login_at and syncs
-            # ldap-sync role grants) -- see auth_ldap.attempt_ldap_login.
+            # LDAP group role grants) -- see auth_ldap.attempt_ldap_login.
             authenticated = attempt_ldap_login(session, user, credentials.password)
 
         if user is not None and authenticated and user.is_locked:
