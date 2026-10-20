@@ -420,6 +420,19 @@ def update_data_config(report_id: str, parameters: list[dict], data_source: dict
         return _row_to_dict(row)
 
 
+def update_resource_bindings(report_id: str, bindings: dict | None) -> dict:
+    """Replace which library resource each `resource('name')` in the template places (the caller has already run
+    html_template.validate_resource_bindings). Stored as null when empty."""
+    with db.SessionLocal() as session:
+        row = session.get(ReportRow, report_id)
+        if row is None:
+            raise ReportNotFoundError(report_id)
+        row.resource_bindings = bindings or None
+        row.updated_at = datetime.now(timezone.utc).isoformat()
+        session.commit()
+        return _row_to_dict(row)
+
+
 def update_protected_terms_config(report_id: str, config: dict) -> dict:
     """Replace a report's own protected-terms layer wholesale (the
     caller has already run

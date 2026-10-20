@@ -149,18 +149,24 @@ class ResourceBindingError(ValueError):
     """
 
 
-def validate_resource_bindings(resource_names: set[str], bindings: dict[str, dict], org_id: str) -> list[str]:
+def validate_resource_bindings(
+    resource_names: set[str], bindings: dict[str, dict], org_id: str, *, images_only: bool = False
+) -> list[str]:
     """Authoritative check run at register time (routers/reports.py's
     create_report) -- returns human-readable error strings, empty means
     valid. The register dialog also calls POST /reports/parse-template
     first and won't normally let a caller submit past this, but the
     server re-checks rather than trusting the client's own bookkeeping.
+    `images_only`: a Word template's resource() places a picture, so each name must map to an image.
     """
     errors: list[str] = []
     for name in sorted(resource_names):
         binding = bindings.get(name)
         if binding is None:
             errors.append(f"No resource mapped for {name!r}")
+            continue
+        if images_only and binding.get("kind") != "image":
+            errors.append(f"{name!r} must map to an image: a Word template's resource() places a picture")
             continue
         errors.extend(_check_binding_exists(name, binding, org_id))
     return errors
@@ -188,16 +194,19 @@ def _check_binding_exists(name: str, binding: dict, org_id: str) -> list[str]:
     return [f"{name!r} has an unrecognized resource kind {kind!r}"]
 
 
-def build_resource_resolver(bindings: dict[str, dict] | None, org_id: str | None):
+def build_resource_resolver(bindings: dict[str, dict] | None, org_id: str | None, *, as_bytes: bool = False):
     """Returns the callable bound into a render context under
     RESOURCE_CONTEXT_KEY (see routers/reports.py's _render_one) so
     `{{ resource('logo.png') }}` resolves to a self-contained `data:` URI
     -- WeasyPrint never needs to fetch a real file path or URL for
     anything a template author referenced through the sanctioned path.
+
+    `as_bytes`: for a Word template -- the image's own bytes, which the docx engine turns into a picture
+    (doc_engine's libreoffice_engine._resource_function). Only images: a Word document has no use for a stylesheet.
     """
     bindings = bindings or {}
 
-    def _resolve(name: str) -> str:
+    def _resolve(name: str) -> str | bytes:
         binding = bindings.get(name)
         if binding is None:
             raise ResourceBindingError(f"Template references resource {name!r} with no mapping")
@@ -221,6 +230,21 @@ def build_resource_resolver(bindings: dict[str, dict] | None, org_id: str | None
             raise ResourceBindingError(f"Resource {name!r} has an unrecognized kind {kind!r}")
         if org_id is None or meta["org_id"] != org_id:
             raise ResourceBindingError(f"Resource mapped to {name!r} does not belong to this report's organization")
+        if as_bytes:
+            if kind != "image":
+                raise ResourceBindingError(f"{name!r} is mapped to a stylesheet; a Word template can only place images")
+            return content
         return f"data:{content_type};base64,{b64encode(content).decode('ascii')}"
 
     return _resolve
+
+
+def with_resources(data: dict, meta: dict) -> dict:
+    """The render context with `resource` bound for a report whose template names library resources: an html
+    template's resolve to `data:` URIs, a Word template's to image bytes. Used by every render path -- the API's
+    and a job's -- so a scheduled report places the same pictures as one rendered by hand."""
+    if meta["template_ext"] == "html":
+        return {**data, RESOURCE_CONTEXT_KEY: build_resource_resolver(meta.get("resource_bindings"), meta["org_id"])}
+    if meta["template_ext"] == "docx" and meta.get("resource_bindings"):
+        return {**data, RESOURCE_CONTEXT_KEY: build_resource_resolver(meta["resource_bindings"], meta["org_id"], as_bytes=True)}
+    return data

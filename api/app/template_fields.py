@@ -22,6 +22,7 @@ the caller supplies, so a name used only as such a call is left out; a field tha
 """
 from __future__ import annotations
 
+import io
 import re
 import zipfile
 from pathlib import Path
@@ -46,7 +47,11 @@ _CODE_ARGUMENT_RE = re.compile(r"\b(?:qrcode|barcode)\(\s*([A-Za-z_][A-Za-z0-9_]
 _JINJA_KEYWORDS = {"for", "endfor", "if", "endif", "else", "elif"}
 
 CODE_FUNCTIONS = ("qrcode", "barcode")
+# Functions the renderer provides rather than fields the caller supplies: the codes, and (Word) a library image.
+TEMPLATE_FUNCTIONS = (*CODE_FUNCTIONS, "resource")
 _XML_TAG_RE = re.compile(r"<[^>]+>")
+# `{{ resource('ministry-logo', width_mm=52) }}` in a Word template -- the literal name, as html_template finds it.
+_DOCX_RESOURCE_RE = re.compile(r"""\bresource\(\s*(?:'([^'{}]+)'|"([^"{}]+)")""")
 
 
 def called_only(name: str, text: str) -> bool:
@@ -56,13 +61,21 @@ def called_only(name: str, text: str) -> bool:
 
 
 def _without_functions(names: set[str], text: str) -> set[str]:
-    return {n for n in names if not (n in CODE_FUNCTIONS and called_only(n, text))}
+    return {n for n in names if not (n in TEMPLATE_FUNCTIONS and called_only(n, text))}
 
 
-def _package_text(path: Path) -> str:
+def _package_text(path: Path | io.BytesIO) -> str:
     """The text of every XML part, tags taken out -- so a placeholder Word split across runs reads whole."""
     with zipfile.ZipFile(path) as zf:
         return " ".join(_XML_TAG_RE.sub("", zf.read(n).decode("utf-8", errors="ignore")) for n in zf.namelist() if n.endswith(".xml"))
+
+
+def docx_resource_names(content: bytes) -> list[str]:
+    """The library images a Word template places with `{{ resource('name') }}` -- in the body, headers and footers
+    alike -- sorted. Each must be mapped to an image when the template is registered (html_template's bindings).
+    Word's curly quotes (‘name’, “name”) count too: autocorrect turns typed quotes into them."""
+    text = _package_text(io.BytesIO(content)).translate({0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'})
+    return sorted({a or b for a, b in _DOCX_RESOURCE_RE.findall(text)})
 
 # Which engine produced the answer, per template type -- what the schema
 # route reports back alongside the field list.

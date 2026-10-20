@@ -51,7 +51,7 @@ from .. import audit, datasets, batch_limits, font_catalog, clients, connections
 from ..auth import ensure_org_scope, get_current_user, optional_auth_context, require_permission, require_report_permission
 from ..auth_events import client_ip
 from ..context_media import ImageResolutionError, resolve_image_refs
-from ..html_template import ResourceBindingError, build_resource_resolver, parse_html_template, validate_resource_bindings
+from ..html_template import ResourceBindingError, parse_html_template, validate_resource_bindings, with_resources
 from ..models import (
     AccessibleReport,
     BatchLimits,
@@ -117,7 +117,7 @@ def _template_ext_for(filename: str) -> str | None:
 
 @router.post(
     "/parse-template",
-    summary="Pre-flight parse of an HTML template, before registering it",
+    summary="Pre-flight parse of an HTML or Word template, before registering it",
     response_model=ParsedTemplate,
     dependencies=[Depends(require_permission("report:manage"))],
 )
@@ -136,9 +136,15 @@ async def parse_template(
     they even have a resource_bindings value to submit.
     """
     filename = (file.filename or "").lower()
-    if _template_ext_for(filename) != "html":
-        raise HTTPException(status_code=400, detail="Template file must be a .html or .htm")
+    ext = _template_ext_for(filename)
+    if ext not in ("html", "docx"):
+        raise HTTPException(status_code=400, detail="Template file must be a .html, .htm or .docx")
     content = await file.read()
+    if ext == "docx":
+        # A Word template's resource() names, for the same mapping step; its fields are listed after registering.
+        if not report_store.is_valid_office_file(content, "docx"):
+            return {"fields": [], "resources": [], "errors": [{"message": "Uploaded file is not a valid .docx", "line": None, "column": None}]}
+        return {"fields": [], "resources": template_fields.docx_resource_names(content), "errors": []}
     try:
         source = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -162,7 +168,8 @@ async def create_report(
     name: str = Form(..., description="Display name for this report"),
     description: str | None = Form(None),
     resource_bindings: str | None = Form(
-        None, description="html templates only — JSON object mapping each resource() name to {kind, id}"
+        None, description="html and docx templates — JSON object mapping each resource() name to {kind, id} "
+        "(a docx template's map to images only)"
     ),
     note: str | None = Form(None, description="Optional note recorded against this first version in the changelog"),
     code: str | None = Form(
@@ -215,10 +222,33 @@ async def create_report(
 
     if not report_store.is_valid_office_file(content, template_ext):
         raise HTTPException(status_code=400, detail=f"Uploaded file is not a valid .{template_ext}")
+    docx_bindings = None
+    if template_ext == "docx":
+        # `{{ resource('logo', width_mm=40) }}`: a picture from Resources > Images, so a letterhead used by many
+        # Word templates is changed once, there.
+        names = set(template_fields.docx_resource_names(content))
+        bindings = _bindings_from_form(resource_bindings)
+        binding_errors = validate_resource_bindings(names, bindings, org_id, images_only=True)
+        if binding_errors:
+            raise HTTPException(status_code=400, detail="; ".join(binding_errors))
+        docx_bindings = {n: bindings[n] for n in sorted(names)} or None
     return _register(
         actor, filename, note,
         name=name, content=content, template_ext=template_ext, description=description, org_id=org_id, code=code, folder_id=folder_id,
+        resource_bindings=docx_bindings,
     )
+
+
+def _bindings_from_form(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        bindings = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"resource_bindings is not valid JSON: {exc}") from exc
+    if not isinstance(bindings, dict):
+        raise HTTPException(status_code=400, detail="resource_bindings must be a JSON object")
+    return bindings
 
 
 _CODE_TAKEN = "That code is already taken — choose another"
@@ -537,6 +567,10 @@ async def replace_report_file(
     file: UploadFile = File(..., description="A .docx, .xlsx or .html template with Jinja2 placeholders"),
     note: str | None = Form(None, description="Optional: what changed in this version -- shown in the changelog"),
     version_label: str | None = Form(None, description="Optional name for this version, e.g. 1.0.1 -- shown instead of v<N>; unique per report"),
+    resource_bindings: str | None = Form(
+        None, description="Optional: mappings for resource() names this file adds (JSON, name -> {kind, id}); "
+        "the report's existing mappings stay unless named here"
+    ),
     context: AuthContext = Depends(require_report_permission("manage")),
 ) -> dict:
     try:
@@ -548,9 +582,11 @@ async def replace_report_file(
     if template_ext is None:
         raise HTTPException(status_code=400, detail="Template file must be a .docx, .xlsx or .html")
     content = await file.read()
+    added = _bindings_from_form(resource_bindings)
+    bindings = {**(current.get("resource_bindings") or {}), **added}
     if template_ext == "html":
-        # The same checks a new html template gets on registering, against the resources this report already has
-        # mapped: a replacement can't bring in a resource() nobody mapped (map it by registering, or keep the name).
+        # The same checks a new html template gets on registering, against the resources this report has mapped
+        # (plus any this request maps): a replacement can't bring in a resource() nobody mapped.
         try:
             source = content.decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -558,11 +594,17 @@ async def replace_report_file(
         parsed = parse_html_template(source)
         if parsed.errors:
             raise HTTPException(status_code=400, detail="; ".join(e.message for e in parsed.errors))
-        binding_errors = validate_resource_bindings(set(parsed.resources), current.get("resource_bindings") or {}, current["org_id"])
+        binding_errors = validate_resource_bindings(set(parsed.resources), bindings, current["org_id"])
         if binding_errors:
             raise HTTPException(status_code=400, detail="; ".join(binding_errors))
     elif not report_store.is_valid_office_file(content, template_ext):
         raise HTTPException(status_code=400, detail=f"Uploaded file is not a valid .{template_ext}")
+    elif template_ext == "docx":
+        binding_errors = validate_resource_bindings(
+            set(template_fields.docx_resource_names(content)), bindings, current["org_id"], images_only=True
+        )
+        if binding_errors:
+            raise HTTPException(status_code=400, detail="; ".join(binding_errors))
     actor = audit.Actor.of(context, request)
     try:
         replaced = report_store.replace_report_file(
@@ -571,6 +613,8 @@ async def replace_report_file(
         )
     except report_store.VersionLabelError as exc:
         raise HTTPException(status_code=409 if "already" in str(exc) else 400, detail=str(exc))
+    if added:
+        replaced = report_store.update_resource_bindings(report_id, bindings)
     version = report_store.list_versions(report_id)[0]
     audit.record(
         actor, "report.file_replace", "report", report_id,
@@ -581,6 +625,7 @@ async def replace_report_file(
             "sha256": version["sha256"], "size_bytes": version["size_bytes"], "size_delta": version["size_delta"],
             "original_filename": file.filename or None, "note": note or None,
             "fields_added": version["fields_added"], "fields_removed": version["fields_removed"],
+            "resources_mapped": added or None,
         },
     )
     return replaced
@@ -821,13 +866,10 @@ def _render_one(
     except ImageResolutionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if meta["template_ext"] == "html":
-        # The html-template counterpart to resolve_image_refs above: binds
-        # a `resource` callable into the context so {{ resource('name') }}
-        # in the template resolves to a data: URI — see html_template.py's
-        # module docstring for why this, not a real file path, is what
-        # WeasyPrint ever sees for a custom template's assets.
-        data = {**data, "resource": build_resource_resolver(meta.get("resource_bindings"), meta["org_id"])}
+    # The template's counterpart to resolve_image_refs above: binds a `resource` callable into the context so
+    # {{ resource('name') }} resolves -- an html template's to a data: URI (see html_template.py's module docstring
+    # for why this, not a real file path, is what WeasyPrint ever sees), a Word template's to the image's bytes.
+    data = with_resources(data, meta)
 
     backend = "weasyprint" if meta["template_ext"] == "html" else "libreoffice"
     inject_terms, protected_exclude_terms = resolve_protected_terms(meta.get("protected_terms_config"))

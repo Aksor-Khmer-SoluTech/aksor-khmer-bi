@@ -156,6 +156,29 @@ itself would silently break type detection.
 
 ## Images (docx templates only)
 
+### A logo or letterhead every report shares: `resource()`
+
+Put the picture in the template itself, named, and keep the file in the Resources library:
+
+```
+{{ resource('ministry-logo', width_mm=52) }}
+{{ resource('kingdom', height_mm=28) }}
+{{ resource('seal') }}                       ← at the image's own size
+```
+
+When you register the template, the portal lists every `resource('…')` name it found (in the body, the page header
+and the footer) and you pick the library image for each. From then on the image is changed **once**, under
+Resources → Images → *Replace*: every report that places it, Word and HTML alike, shows the new picture at its next
+render, with no template to edit. Give `width_mm` or `height_mm` (the other follows the picture's proportions), or
+neither.
+
+A new version of the template may use a name the report hasn't mapped yet; send its mapping with the file
+(`PUT /api/v1/reports/{id}/file` with `resource_bindings`, as when registering). A name must map to an image, from the
+report's own organization. A picture placed this way sits in a line of text like any inline picture; a watermark
+*behind* the text still has to be pasted into the template.
+
+### A picture chosen by the data: `image_id`
+
 An image you've uploaded to the Resources library (`POST /api/v1/images`
 on the api service, or the portal's Manage → Resources page) embeds into a
 rendered document the same way a chart does — a plain `{{ field }}`

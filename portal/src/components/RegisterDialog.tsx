@@ -51,6 +51,7 @@ function ResourceMapRow({
   onBind,
   onUploaded,
   orgId,
+  imagesOnly = false,
 }: {
   name: string;
   binding: ResourceBinding | undefined;
@@ -59,6 +60,8 @@ function ResourceMapRow({
   onBind: (binding: ResourceBinding) => void;
   onUploaded: (resource: ImageResource | StylesheetResource, kind: "image" | "stylesheet") => void;
   orgId: string;
+  /** A Word template: resource() places a picture, so only images are offered. */
+  imagesOnly?: boolean;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -69,7 +72,7 @@ function ResourceMapRow({
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
-    const kind = guessKind(f.name);
+    const kind = imagesOnly ? "image" : guessKind(f.name);
     setUploading(true);
     setUploadError(null);
     try {
@@ -112,7 +115,7 @@ function ResourceMapRow({
             ))}
           </optgroup>
         )}
-        {stylesheets.length > 0 && (
+        {!imagesOnly && stylesheets.length > 0 && (
           <optgroup label="Stylesheets">
             {stylesheets.map((css) => (
               <option key={css.id} value={`stylesheet:${css.id}`}>
@@ -127,14 +130,14 @@ function ResourceMapRow({
         className="btn btn-sm resource-map-upload"
         onClick={() => uploadInputRef.current?.click()}
         disabled={uploading}
-        title="Upload a new image or stylesheet for this reference"
+        title={imagesOnly ? "Upload a new image for this reference" : "Upload a new image or stylesheet for this reference"}
       >
         {uploading ? <span className="spinner" /> : "Upload new"}
       </button>
       <input
         ref={uploadInputRef}
         type="file"
-        accept={[...IMAGE_EXTS, ".css", ".scss", ".sass", ".less"].join(",")}
+        accept={(imagesOnly ? IMAGE_EXTS : [...IMAGE_EXTS, ".css", ".scss", ".sass", ".less"]).join(",")}
         className="sr-only-input"
         onChange={handleUploadFile}
       />
@@ -166,7 +169,7 @@ export default function RegisterDialog({
   const [pending, setPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // html-template-only: the pre-flight parse result, and the resource()
+  // html and Word templates: the pre-flight parse result, and the resource()
   // name -> uploaded resource mapping the caller picks from it.
   const [parsedTemplate, setParsedTemplate] = useState<ParsedTemplate | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -198,7 +201,7 @@ export default function RegisterDialog({
     setParsedTemplate(null);
     setResourceMap({});
 
-    if (ext !== "html") return;
+    if (ext !== "html" && ext !== "docx") return;
     setParsing(true);
     try {
       const parsed = await api.parseTemplate(f);
@@ -262,9 +265,11 @@ export default function RegisterDialog({
   }
 
   const isHtml = file !== null && extOf(file.name) === "html";
+  const isWord = file !== null && extOf(file.name) === "docx";
+  const mapsResources = isHtml || isWord;
   const templateErrors = parsedTemplate?.errors ?? [];
   const unmappedResources = (parsedTemplate?.resources ?? []).filter((r) => !resourceMap[r]);
-  const blockedByHtmlValidation = isHtml && (parsing || templateErrors.length > 0 || unmappedResources.length > 0);
+  const blockedByHtmlValidation = mapsResources && (parsing || templateErrors.length > 0 || unmappedResources.length > 0);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -285,7 +290,7 @@ export default function RegisterDialog({
     setError(null);
     setCodeError(null);
     try {
-      const report = await api.createReport(name, description, file, isHtml ? resourceMap : undefined, code, folderId);
+      const report = await api.createReport(name, description, file, mapsResources ? resourceMap : undefined, code, folderId);
       onCreated(report);
       onClose();
     } catch (err) {
@@ -302,7 +307,7 @@ export default function RegisterDialog({
       <h2 className="panel-title">Upload Template</h2>
       <p className="panel-subtitle">
         A .docx, .xlsx, or .html file with {"{{ field }}"} placeholders — an html template can also reference an
-        uploaded image or stylesheet via {"{{ resource('name') }}"}.{" "}
+        uploaded image or stylesheet via {"{{ resource('name') }}"}, and a Word template an uploaded image.{" "}
         <a href="#/docs/create-a-template" target="_blank" rel="noreferrer">
           Create a template: the guide
         </a>
@@ -400,9 +405,9 @@ export default function RegisterDialog({
           </label>
         </div>
 
-        {isHtml && parsing && <p className="muted template-parse-status">Checking template…</p>}
+        {mapsResources && parsing && <p className="muted template-parse-status">Checking template…</p>}
 
-        {isHtml && !parsing && templateErrors.length > 0 && (
+        {mapsResources && !parsing && templateErrors.length > 0 && (
           <div className="alert alert-error template-errors">
             <p className="template-errors-title">This template has {templateErrors.length === 1 ? "an error" : "errors"}:</p>
             <ul>
@@ -416,13 +421,13 @@ export default function RegisterDialog({
           </div>
         )}
 
-        {isHtml && !parsing && templateErrors.length === 0 && parsedTemplate && parsedTemplate.resources.length > 0 && (
+        {mapsResources && !parsing && templateErrors.length === 0 && parsedTemplate && parsedTemplate.resources.length > 0 && (
           <div className="field-block resource-map">
             <span className="field-label">Map referenced resources</span>
             <p className="field-hint" style={{ marginTop: -2 }}>
               This template points at {parsedTemplate.resources.length} resource
               {parsedTemplate.resources.length === 1 ? "" : "s"} via {"{{ resource('name') }}"} — pick which uploaded
-              file each one renders as.
+              {isWord ? " image each one places. Replacing that image under Resources later changes every report using it." : " file each one renders as."}
             </p>
             {parsedTemplate.resources.map((resourceName) => (
               <ResourceMapRow
@@ -434,6 +439,7 @@ export default function RegisterDialog({
                 orgId={orgId}
                 onBind={(binding) => bindResource(resourceName, binding)}
                 onUploaded={addUploadedResource}
+                imagesOnly={isWord}
               />
             ))}
           </div>

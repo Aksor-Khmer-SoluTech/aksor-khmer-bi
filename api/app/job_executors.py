@@ -78,6 +78,7 @@ from zeep.transports import Transport
 
 from . import report_store
 from .context_media import ImageResolutionError, resolve_image_refs
+from .html_template import ResourceBindingError, with_resources
 from .db import Job
 
 _RETRYABLE_HTTP_STATUS = {408, 425, 429, 500, 502, 503, 504}
@@ -162,9 +163,12 @@ def render_with_data(report_id: str, fmt: str, context: dict, parameters: dict |
         context = resolve_image_refs(context, meta["org_id"])
     except ImageResolutionError as exc:
         raise PermanentJobError(str(exc)) from exc
+    context = with_resources(context, meta)
 
     try:
         return doc_render(context, fmt, template_path=template_path), data
+    except ResourceBindingError as exc:
+        raise PermanentJobError(str(exc)) from exc
     except ConversionError as exc:
         raise RetryableJobError(f"Rendering failed: {exc}") from exc
 

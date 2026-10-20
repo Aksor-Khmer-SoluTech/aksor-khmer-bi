@@ -66,6 +66,23 @@ def _code_functions(tpl: DocxTemplate) -> dict:
     return {"qrcode": qrcode, "barcode": barcode}
 
 
+def _resource_function(tpl: DocxTemplate, fetch):
+    """`{{ resource('logo', width_mm=40) }}` in a Word template: a library image, as a picture. `fetch` comes in the
+    context under `resource` (the API binds it: name -> the image's bytes); doc_engine never reads the image store
+    itself, the same as for an `image_id` in the data (images.py). Without a width or height the picture keeps its
+    own size; with one of them it keeps its proportions."""
+
+    def resource(name, width_mm=None, height_mm=None):
+        return InlineImage(
+            tpl,
+            io.BytesIO(fetch(name)),
+            width=Mm(float(width_mm)) if width_mm else None,
+            height=Mm(float(height_mm)) if height_mm else None,
+        )
+
+    return resource
+
+
 _CORE_PROPERTIES_REL = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"
 _WRONG_CORE_PROPERTIES_REL = re.compile(r'Type="[^"]*/metadata/core-properties"')
 
@@ -123,7 +140,12 @@ def render_docx(context: dict, template_path: str | Path) -> bytes:
     # autoescape: a value is data, not markup. Without it a `&`, `<` or `>` in a value ("R&D", "a<b") is
     # written into the document's XML as-is, and everything from that character on is silently dropped
     # ("R&D Dept" prints as "R "). docxtpl's own objects (images, rich text, sub-documents) are exempt.
-    tpl.render(codes.with_functions(_resolve_media(context, tpl), _code_functions(tpl)), autoescape=True)
+    functions = _code_functions(tpl)
+    fetch = context.get("resource")
+    if callable(fetch):
+        context = {k: v for k, v in context.items() if k != "resource"}
+        functions["resource"] = _resource_function(tpl, fetch)
+    tpl.render(codes.with_functions(_resolve_media(context, tpl), functions), autoescape=True)
     with tempfile.TemporaryDirectory() as tmp:
         out_path = Path(tmp) / "report.docx"
         tpl.save(str(out_path))

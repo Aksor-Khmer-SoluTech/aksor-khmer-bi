@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.0.0-beta.8] - 2026-10-20
 
+### Added
+- **Word templates place library images by name: `{{ resource('logo', width_mm=40) }}`**, as HTML templates already
+  could. Registering the template maps each name (in the body, header or footer) to an image under Resources →
+  Images; replacing that image there changes every report that places it, so a letterhead shared by many Word
+  templates is updated once instead of in each file. A new version of a template can map names it adds
+  (`resource_bindings` on `PUT /reports/{id}/file`), and scheduled jobs place the images too. See
+  [Charts, images and data](docs/building-a-report.md#images-docx-templates-only).
+
 ### Changed
 - **A short install guide.** [Install Aksor Khmer BI](docs/getting-started.md) takes a server from nothing to a
   signed-in portal in four steps, with the Docker commands for Ubuntu / Debian, the RHEL family and macOS / Windows,
