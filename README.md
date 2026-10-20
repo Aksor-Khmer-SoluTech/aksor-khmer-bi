@@ -81,8 +81,9 @@ From a clone of this repository:
 ```
 
 See [`docs/getting-started.md`](docs/getting-started.md) for the full
-walkthrough (Docker and local-venv paths, registering and rendering your
-own template) — or the short version:
+install: Docker for your system, the one-line install or one without
+internet, setting the address, and checking it. To run the rendering
+library on its own, without Docker:
 
 ```bash
 python3 -m venv venv
@@ -129,7 +130,7 @@ xlsx_bytes = render(data, "xlsx", template_path="my_template.xlsx")
 
 ## Documentation
 
-- [`docs/getting-started.md`](docs/getting-started.md) — install and run (Docker or local dev)
+- [`docs/getting-started.md`](docs/getting-started.md) — install it on a server: Docker, install kit, first sign-in
 - [`docs/building-a-report.md`](docs/building-a-report.md) — build your own receipt/invoice/certificate template
 - [`docs/deployment.md`](docs/deployment.md) — install it (Docker, quick or step by step), then env vars, volumes, TLS
 - [`docs/architecture.md`](docs/architecture.md) — engine-selection decision table

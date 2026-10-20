@@ -122,6 +122,9 @@ services:
       - ./data/image_resources:/app/data/image_resources:z
       - ./data/stylesheet_resources:/app/data/stylesheet_resources:z
       - ./data/avatars:/app/data/avatars:z
+      # A project package uploaded for import waits here between its preview and "Import" (app/projects.py). Mounted
+      # so the two steps may land on different api containers, and a recreate in between doesn't lose it.
+      - ./data/project_imports:/app/data/project_imports:z
       # Files report jobs produced, kept JOB_OUTPUT_DAYS (30) days so a failed email can be re-sent with the same
       # report (app/job_delivery.py); `worker` writes them, `api` checks they're still there. Not backed up.
       - ./data/job_outputs:/app/data/job_outputs:z
@@ -225,6 +228,13 @@ services:
       # .env also holds the break-glass login; this service has no use for it.
       PORTAL_USERNAME: ""
       PORTAL_PASSWORD: ""
+      # A report job whose data source runs on an uploaded JDBC driver sends its query to `jdbc-worker`, as `api`
+      # does (JDBC_WORKER_TOKEN comes from .env); without these the job fails with "isn't set up to run uploaded
+      # JDBC drivers".
+      JDBC_WORKER_URL: ${JDBC_WORKER_URL:-http://jdbc-worker:9000}
+    networks:
+      - default
+      - jdbc
     volumes:
       # A file_output/render_report job may need to reach the same
       # registered report templates `api` itself uses (report_store.py's
@@ -282,6 +292,6 @@ networks:
   default:
     name: aksor-network
     external: true
-  # Only `api` and `jdbc-worker` are on this one; see jdbc-worker above.
+  # Only `api`, `worker` and `jdbc-worker` are on this one -- never postgres or redis; see jdbc-worker above.
   jdbc:
     name: aksor-jdbc

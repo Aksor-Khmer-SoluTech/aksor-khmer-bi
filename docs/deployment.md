@@ -1,6 +1,7 @@
 # Deployment
 
-This page has two halves. **[Install it](#install-it)** is the how-to: get Docker and the code, then start the stack
+Installing for the first time? [Install Aksor Khmer BI](getting-started.md) is the short version: four steps,
+with the commands for your system. This page is everything around it, in two halves. **[Install it](#install-it)** is the how-to: get Docker and the code, then start the stack
 with one script or step by step, run it day to day, and fix what goes wrong. Everything from
 **[Docker (recommended)](#docker-recommended)** onward is the reference: how it is built, the settings, volumes,
 database, LDAP, scheduling, TLS and running without Docker.
@@ -24,34 +25,12 @@ between hosts is only (1) how Docker was installed, (2) whether containers can g
 `./deployment.sh doctor` checks the lot for you in seconds — `./deployment.sh up` runs it before every start.
 
 Skip the installation if `docker --version` and `docker compose version` already answer. Otherwise install Docker
-Engine and the Compose plugin from **Docker's own repository** — not the distribution's `docker.io` / `podman-docker`
-packages or the snap, which are the usual source of odd networking problems. Only Docker Engine with Compose v2 is
-supported; Podman is not tested.
+Engine and the Compose plugin from **Docker's own repository**, with the commands for your system in
+[Install Aksor Khmer BI](getting-started.md#1-get-docker) (Ubuntu / Debian, the RHEL family and Fedora, macOS /
+Windows). Not the distribution's `docker.io` / `podman-docker` packages or the snap, which are the usual source of
+odd networking problems. Only Docker Engine with Compose v2 is supported; Podman is not tested.
 
-**Ubuntu** (24.04 and others; for **Debian** replace `linux/ubuntu` with `linux/debian` in both URLs):
-
-```bash
-sudo apt-get update && sudo apt-get install -y ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker "$USER"      # then log out and back in, so `docker` works without sudo
-```
-
-**CentOS Stream / RHEL / Rocky / AlmaLinux** (for Fedora use `…/linux/fedora/docker-ce.repo`, for RHEL `…/linux/rhel/…`):
-
-```bash
-sudo dnf -y install dnf-plugins-core
-sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"      # then log out and back in
-```
-
-On these systems two things are different, and both are already handled or flagged for you:
+On CentOS / RHEL / Rocky / Alma / Fedora two things are different, and both are already handled or flagged for you:
 
 - **SELinux** (enforcing by default) blocks a container from reading a mounted folder unless it is labelled. Every
   bind mount in `docker-compose.yml` carries the `z` label for exactly this, so `data/` and `config/` just work.
@@ -83,29 +62,10 @@ You need Docker with the Compose v2 plugin, and ports **8000** (API) and **8080*
 `deployment.sh`, the three compose files, `.env.example` and a `config/` folder. The application itself comes as
 released images from Docker Hub.
 
-**One line** (downloads the newest release, checks its checksum, unpacks it into `./aksor-khmer-bi`, then runs
-`init` and `up`):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/main/install.sh | bash -s -- --no-start
-```
-
-`--no-start` stops after `init`, so you can check `.env` first (see [Option 1](#option-1--quick-deployment-deploymentsh));
-leave it out to start straight away. Add a version to install that one (`bash -s -- 1.0.0-beta.5 --no-start`), or
-`--dir /opt/aksor` for another folder.
-
-**By hand**, from the [Releases page](https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases) — also the way
-for a server **without internet**, after copying the two files across:
-
-```bash
-VERSION=1.0.0-beta.5
-curl -fLO https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases/download/v$VERSION/aksor-khmer-bi-deploy-$VERSION.tar.gz
-curl -fLO https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases/download/v$VERSION/aksor-khmer-bi-deploy-$VERSION.tar.gz.sha256
-sha256sum -c aksor-khmer-bi-deploy-$VERSION.tar.gz.sha256      # macOS: shasum -a 256 -c …
-tar xzf aksor-khmer-bi-deploy-$VERSION.tar.gz
-mv aksor-khmer-bi-deploy-$VERSION aksor-khmer-bi && cd aksor-khmer-bi
-docker --version && docker compose version     # both must answer
-```
+Install it with the one-line `install.sh`, or by hand from the
+[Releases page](https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases) on a server without internet: both
+are in [Install Aksor Khmer BI](getting-started.md#2-install), with their options (a version, another folder,
+`--no-start`).
 
 What the folder holds, and what is yours:
 
@@ -299,7 +259,7 @@ The app stores templates, credentials' encryption key, images and logs on disk. 
 they belong to you, not to root:
 
 ```bash
-mkdir -p data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/logs data/jdbc_drivers data/font_resources
+mkdir -p data/report_templates data/secrets data/image_resources data/stylesheet_resources data/avatars data/logs data/jdbc_drivers data/font_resources data/job_outputs data/project_imports
 ```
 
 **Back up `data/secrets/` together with the database** — without its key, saved credentials and users' 2FA secrets can't be decrypted. (It also holds the sign-in signing key; losing that only signs everyone out.)
@@ -508,7 +468,7 @@ More detail on every setting is in the reference sections below and in `.env.exa
 
 Everything in the reference describes what's actually in the repo and was verified
 by building and running it, not a hypothetical setup — see the root
-[`Dockerfile`](../Dockerfile), [`portal/Dockerfile`](../portal/Dockerfile),
+[`api/Dockerfile`](../api/Dockerfile), [`portal/Dockerfile`](../portal/Dockerfile),
 and [`docker-compose.yml`](../docker-compose.yml).
 
 ### Docker (recommended)
@@ -520,7 +480,7 @@ LibreOffice/Tesseract/ICU), `portal` (the management console, a React
 in it, see `portal/Dockerfile`'s multi-stage build), `postgres`
 (report *metadata*, the multi-tenant auth/RBAC schema, and job
 definitions/run history — the template files themselves stay on disk,
-see [`api/app/db.py`](../api/app/db.py)), `redis` (Celery's broker),
+see [`api/app/db/`](../api/app/db/__init__.py)), `redis` (Celery's broker),
 and `scheduler`/`worker` (the job-scheduling split — see "Job scheduling"
 below). `api` and `portal` can each be built, deployed, and scaled
 independently.
@@ -691,7 +651,7 @@ behind one reverse proxy. See [Sign-in and sessions](authentication.md#deploying
 (organizations, users, roles, permissions, and three expiring
 access-grant tables — see `api/README.md`'s "Multi-tenant auth, roles &
 permissions") in the same Postgres database — see
-[`api/app/db.py`](../api/app/db.py). No separate database or service is
+[`api/app/db/`](../api/app/db/__init__.py). No separate database or service is
 needed for this; it's all one schema, migrated together
 (`api/migrations/`). The template *files themselves* are unaffected:
 still plain files under `./data/report_templates/` (see the volumes
@@ -918,7 +878,7 @@ docker compose --profile jdbc up -d jdbc-worker api     # pulls the released jdb
 ```
 
 The `jdbc-worker` service has no published port, a read-only filesystem and read-only drivers, no
-capabilities, capped memory/CPU/processes, and its own network (`aksor-jdbc`, shared only with `api`) —
+capabilities, capped memory/CPU/processes, and its own network (`aksor-jdbc`, shared only with `api` and `worker`, which send it queries) —
 so a driver can't reach PostgreSQL or Redis. It holds no database credentials or encryption key: each
 query carries the one connection's login, used and forgotten. Every request runs in a fresh JVM that is
 killed at the timeout — a report with several queries sends them as one request, run in order over one

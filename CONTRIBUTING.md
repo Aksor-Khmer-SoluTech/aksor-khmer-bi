@@ -42,7 +42,7 @@ CI (`.github/workflows/ci.yml`) runs all three on every PR.
 - `api/` — the FastAPI service; see `api/README.md`.
 - `portal/` — the management UI's static HTML/CSS/JS, a separate deployable service from `api/` (see `portal/README.md`); its `config.js` points it at wherever `api` runs.
 - `examples/` — standalone scripts showing each pipeline in isolation, useful for debugging without spinning up the API, plus `examples/report_templates/` — real `.docx`/`.xlsx` templates to register via `/api/v1/reports`.
-- `docs/` — see `docs/getting-started.md` for the full map; `architecture.md` (why two rendering engines), `khmer-line-breaking.md` (the underlying research), `building-a-report.md` (how to build your own template), `deployment.md`, `protected-terms-guide.md`, `why-aksor-khmer-bi.md`.
+- `docs/` — `getting-started.md` (installing a server); `architecture.md` (why two rendering engines), `khmer-line-breaking.md` (the underlying research), `building-a-report.md` (how to build your own template), `deployment.md`, `protected-terms-guide.md`, `why-aksor-khmer-bi.md`.
 - `specs/` — local technical design notes for individual features (e.g. `specs/template_portal_design.md`), written before implementation. Gitignored: kept on a maintainer's disk, not in the repo.
 
 ## Before opening a PR

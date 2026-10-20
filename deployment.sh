@@ -390,7 +390,7 @@ EOF
 cmd_init() {
   require_docker
   ensure_network
-  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs "$BACKUP_DIR" "${CONFIG_DIRS[@]}"
+  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs data/project_imports "$BACKUP_DIR" "${CONFIG_DIRS[@]}"
   if [ -f .env ]; then
     info ".env already exists -- leaving it untouched"
     return
@@ -430,7 +430,7 @@ cmd_up() {
     cmd_doctor || die "fix the above, or SKIP_DOCTOR=1 to go on anyway"
   fi
   ensure_network
-  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs "${CONFIG_DIRS[@]}"
+  mkdir -p "${DATA_DIRS[@]}" data/logs data/job_outputs data/project_imports "${CONFIG_DIRS[@]}"
   start_infra
   jdbc_worker_note
   info "starting app (api, scheduler, worker, portal$(jdbc_on && echo ', jdbc-worker')) -- migrations run as the api starts"

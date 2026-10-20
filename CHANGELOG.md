@@ -5,7 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.8] - 2026-10-20
+
 ### Changed
+- **A short install guide.** [Install Aksor Khmer BI](docs/getting-started.md) takes a server from nothing to a
+  signed-in portal in four steps, with the Docker commands for Ubuntu / Debian, the RHEL family and macOS / Windows,
+  the one-line install and one without internet, the two addresses to set, and how to check it worked. It replaces
+  the old "Install and run" page, which still cloned the repository. The developer setup is in `CONTRIBUTING.md`.
 - **The portal opens faster.** Its JavaScript was one 1.5 MB file that every visit downloaded whole; each page is now
   fetched when it is first opened, so the first load downloads under a third as much. React, the code editor and the
   icons have their own files, which a release that changes only the portal's pages leaves in the browser's cache.
@@ -15,6 +21,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   reloads itself once instead of failing to open its next page.
 
 ### Fixed
+- **Scheduled jobs can read data sources on uploaded JDBC drivers** (Oracle, SQL Server, Db2). The job `worker`
+  wasn't given the address of the `jdbc-worker` nor its network, so such a job failed with "isn't set up to run
+  uploaded JDBC drivers" even though the same report rendered from the portal. A project package uploaded for import
+  is now kept in `data/project_imports/` (mounted), so it survives a container recreate between its preview and
+  "Import". **Upgrade note:** `./deployment.sh update` applies both; nothing to change in `.env`.
 - **LDAP users whose directory group maps to a role can sign in on PostgreSQL.** The group sync recorded the roles it
   gives with `granted_by = "ldap-sync"`, but that column holds the id of the user who made a grant, and PostgreSQL
   refused the value: the sign-in failed with a server error. Synced roles now say where they came from in a column of

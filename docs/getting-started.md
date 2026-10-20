@@ -1,120 +1,216 @@
-# Install and run
+# Install Aksor Khmer BI
 
-Two paths: Docker (fastest, recommended) or a local Python venv (if
-you're actively developing this codebase). Either way, by the end
-you'll have registered and rendered your own template.
+Four steps take you from a fresh server to a signed-in portal: get Docker, install, set the address and start,
+then check it. Nothing is compiled on the server. The install downloads a small kit (a script and three compose
+files) and pulls the released images from Docker Hub.
 
-## Path A: Docker
+| You need | |
+|---|---|
+| Docker | Docker Engine with the Compose v2 plugin (`docker compose`), or Docker Desktop on macOS / Windows |
+| CPU | Intel/AMD (`linux/amd64`) or ARM (`linux/arm64`), Apple silicon included |
+| Memory and disk | 4 GB of memory, 10 GB of free disk (the engine image carries LibreOffice and the Khmer fonts) |
+| Ports | **8000** (API) and **8080** (portal) free, or others you choose in `.env` |
+| Network | Access to Docker Hub and GitHub. A server without internet can install too: see [Without internet](#without-internet) |
+
+Only the install is covered here. Running, updating, backing up and every setting are in
+[Deployment](deployment.md).
+
+---
+
+## 1. Get Docker
+
+Skip this step if both of these print a version:
 
 ```bash
-git clone --depth 1 https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi.git   # public: no login needed
+docker --version
+docker compose version
+```
+
+Install Docker from **Docker's own repository**. Avoid the distribution's `docker.io` / `podman-docker` packages
+and the snap, which cause most odd networking problems.
+
+### Ubuntu / Debian
+
+For Debian, replace `linux/ubuntu` with `linux/debian` in both URLs.
+
+```bash
+sudo apt-get update && sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"      # then log out and back in, so docker works without sudo
+```
+
+### CentOS Stream / RHEL / Rocky / AlmaLinux / Fedora
+
+For Fedora use `…/linux/fedora/docker-ce.repo`; for RHEL, `…/linux/rhel/docker-ce.repo`.
+
+```bash
+sudo dnf -y install dnf-plugins-core
+sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"      # then log out and back in
+```
+
+SELinux needs nothing: every mounted folder is already labelled for it. firewalld must let containers out and
+people in:
+
+```bash
+sudo firewall-cmd --permanent --zone=public --add-masquerade
+sudo firewall-cmd --permanent --add-port=8080/tcp --add-port=8000/tcp
+sudo firewall-cmd --reload && sudo systemctl restart docker
+```
+
+### macOS / Windows
+
+Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and give it at least 4 GB of memory
+(Settings → Resources). On Windows, run the commands below in a WSL terminal.
+
+### Check that Docker can download
+
+Most first installs that fail, fail here. Both lines must print `ok`:
+
+```bash
+docker pull -q alpine && echo "docker hub: ok"
+docker run --rm alpine wget -q -T 5 -O /dev/null http://example.com && echo "containers: ok"
+```
+
+If one fails, [Get Docker ready](deployment.md#a-get-docker-ready-ubuntu-debian-centos--rhel--rocky--alma-and-others)
+has the fix for each case (IP forwarding, UFW, DNS, a proxy).
+
+---
+
+## 2. Install
+
+### One line
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/main/install.sh | bash -s -- --no-start
+```
+
+This downloads the newest release's install kit, checks its SHA-256 checksum, unpacks it into `./aksor-khmer-bi`,
+and runs `./deployment.sh init`. `init` creates the Docker network, the `data/` folders, and a `.env` file with
+generated passwords. It prints the admin sign-in once:
+
+```text
+    portal login:  admin / <generated password>
+```
+
+Write the password down. It is also saved in `.env` as `PORTAL_PASSWORD`, and you choose your own at the first
+sign-in.
+
+Options, added after `--`:
+
+| Option | Does |
+|---|---|
+| `1.0.0-beta.8` | installs that version instead of the newest (the list is on the [Releases page](https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases)) |
+| `--dir /opt/aksor` | installs into another folder |
+| `--no-start` | stops after `init` so you can set the address first (step 3). Leave it out to start straight away, which is fine for a try-out on your own computer |
+
+### Without internet
+
+On a machine that has internet, download the kit and its checksum from the
+[Releases page](https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases), and save the images:
+
+```bash
+VERSION=1.0.0-beta.8
+curl -fLO https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases/download/v$VERSION/aksor-khmer-bi-deploy-$VERSION.tar.gz
+curl -fLO https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases/download/v$VERSION/aksor-khmer-bi-deploy-$VERSION.tar.gz.sha256
+```
+
+Copy both files to the server, then check and unpack them there:
+
+```bash
+sha256sum -c aksor-khmer-bi-deploy-$VERSION.tar.gz.sha256      # macOS: shasum -a 256 -c …
+tar xzf aksor-khmer-bi-deploy-$VERSION.tar.gz
+mv aksor-khmer-bi-deploy-$VERSION aksor-khmer-bi && cd aksor-khmer-bi
+./deployment.sh init
+```
+
+The server still needs the images. Pull the ones the kit's `docker-compose.yml` names on a machine with internet,
+`docker save` them into a file, copy it across and `docker load` it on the server.
+
+---
+
+## 3. Set the address and start
+
+```bash
 cd aksor-khmer-bi
-./deployment.sh init   # once: creates the shared network and a .env with generated secrets
-./deployment.sh up     # starts postgres + redis, then api / scheduler / worker / portal
 ```
 
-Open http://localhost:8000/docs — that's the full interactive API
-reference (Swagger UI), generated from the actual code, not hand-written
-and liable to drift.
+People's browsers open the portal, and the portal's JavaScript calls the API from the browser. So `.env` must name
+both addresses **as people's browsers reach them**. The default, `localhost`, only works in a browser on the server
+itself.
 
-### Register and render your own template
+For a server people reach at `192.0.2.10`, set in `.env`:
+
+```env
+CORS_ALLOWED_ORIGINS=http://192.0.2.10:8080
+PORTAL_API_BASE_URL=http://192.0.2.10:8000
+```
+
+With a domain name and HTTPS in front, use those addresses instead (`https://reports.example.com`,
+`https://api.reports.example.com`). See [A server with a domain name](deployment.md#variations) and
+[TLS](deployment.md#tls--not-included-add-a-reverse-proxy).
+
+If 8000 or 8080 is taken, change `API_PORT` / `PORTAL_PORT` too, and the two addresses with them. Every setting is
+explained in `.env.example`.
+
+Then start it:
 
 ```bash
-# PORTAL_USERNAME / PORTAL_PASSWORD are in .env (./deployment.sh init generated them);
-# after editing .env: ./deployment.sh up
-
-# Sign in once -- the answer holds a 15-minute access token (see docs/authentication.md).
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username": "admin", "password": "pick something real"}' | jq -r .access_token)
-
-curl -X POST http://localhost:8000/api/v1/reports \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "file=@examples/report_templates/receipt.docx" \
-  -F "name=Receipt"
-# -> {"report_id": "...", ...} — save the report_id
-# (For a quick one-off, `curl -u admin:'pick something real' …` works too — HTTP Basic is still accepted.)
-
-curl -X POST "http://localhost:8000/api/v1/reports/<report_id>/render?format=pdf" \
-  -H "Content-Type: application/json" \
-  -d '{"receipt_no": "R-0001", "date": "១ តុលា ២០២៦", "payer_name": "សុខ សុភា", "received_by": "ជា សុវណ្ណ", "items": [{"label": "ថ្លៃជួលបន្ទប់", "amount": 350000}]}' \
-  -o receipt.pdf
+./deployment.sh up
 ```
 
-Or skip `curl` and use the management portal at http://localhost:8080
-(a separate, independently deployable service from the API — see
-[`deployment.md`](deployment.md)) for the same thing with a UI — upload,
-preview, edit, and delete templates there instead. See
-[`building-a-report.md`](building-a-report.md) for how to build a
-template like `receipt.docx` from scratch, and
-[`deployment.md`](deployment.md) for what those env vars actually gate.
+`up` first checks the machine (Docker, CPU, disk, ports) and the settings above, and stops with the fix if
+something is wrong. Then it starts Redis and Postgres, pulls the app images, and starts the API, the scheduler, the
+job worker and the portal. The database tables are created as the API starts. The first start takes a few minutes,
+most of it the download.
 
-## Path B: local Python venv
+---
 
-For developing the codebase itself — running tests, editing the
-packages directly:
+## 4. Check it
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-
-# macOS/Homebrew system deps
-./packages/aksor_khmer_ocr_segmenter/scripts/setup_env.sh
-brew install --cask libreoffice
-
-pip install -e packages/aksor_khmer_ocr_segmenter
-pip install -e packages/doc_engine
-pip install -r api/requirements.txt
-
-cd api
-export PORTAL_USERNAME=admin PORTAL_PASSWORD='pick something real'
-export CORS_ALLOWED_ORIGINS=http://localhost:8080
+./deployment.sh status                                # every service "running" or "healthy"
+curl -fsS http://localhost:8000/api/v1/health && echo # the API answers
 ```
 
-Then start the API (port 8000, reloads on changes) with either command:
+Open the portal (`http://<server>:8080`) and sign in as `admin` with the password from step 2. You are asked to
+choose your own password straight away.
 
-```bash
-python -m app
-```
+If something doesn't start, `./deployment.sh logs api` shows why. The
+[Troubleshooting](deployment.md#troubleshooting) table lists the usual causes.
 
-or
+---
 
-```bash
-uvicorn app.main:app --reload --port 8000
-```
+## Release information
 
-And separately, in another terminal, serve the portal:
+| | |
+|---|---|
+| Installed version | `cat VERSION` in the install folder, or `./deployment.sh status` |
+| What changed | [CHANGELOG](../CHANGELOG.md). Read it before every update |
+| Downloads and checksums | [Releases page](https://github.com/Aksor-Khmer-SoluTech/aksor-khmer-bi/releases): each kit has a `.sha256` file next to it |
+| Images | `aksorkhmerbi/aksor-khmer-bi-engine`, `-portal`, `-jdbc-worker` on Docker Hub. The versions are fixed in the kit's `docker-compose.yml` |
+| Update | `./deployment.sh update`: backup, new kit, new images, restart. See [Running it every day](deployment.md#running-it-every-day) |
 
-```bash
-cd portal && python3 -m http.server 8080
-```
+---
 
-Same endpoints, same `/docs` — just running directly on your machine
-instead of in a container; the portal is its own static-file process
-now too, not something the API serves. On Linux, see
-[`deployment.md`](deployment.md#without-docker) for the apt package list
-instead of the Homebrew one above.
+## Next steps
 
-### Running the test suite
+- **[Create a template](create-a-template.md)**: write a Word, Excel or HTML template and render your first
+  report.
+- **[Run it day to day](deployment.md#option-1--quick-deployment-deploymentsh)**: every `deployment.sh` command,
+  including update, rollback, backup and restore.
+- **[Put HTTPS in front](deployment.md#tls--not-included-add-a-reverse-proxy)**: a reverse proxy before you open it
+  to other people.
+- **[Sign-in and sessions](authentication.md)**: two-step verification, LDAP / Active Directory, API tokens.
+- **[Databases and JDBC drivers](deployment.md#database-connections-and-jdbc-drivers)**: let reports read
+  PostgreSQL, MySQL, Oracle, SQL Server or Db2.
 
-```bash
-cd packages/aksor_khmer_ocr_segmenter && python -m pytest tests/ -v
-cd packages/doc_engine && python -m pytest tests/ -v
-cd api && python -m pytest tests/ -v
-```
-
-Or skip the API/venv entirely and call the rendering library directly —
-see the root [README](../README.md#quickstart) for that path, if you
-just want `doc_engine.render()` in a Python script with no HTTP layer at
-all.
-
-## Where to go next
-
-- [`building-a-report.md`](building-a-report.md) — build your own
-  receipt/invoice/certificate/whatever template
-- [`deployment.md`](deployment.md) — env vars, volumes, TLS, what's in
-  the Docker image and why
-- [`architecture.md`](architecture.md) — why there are two rendering
-  engines and which one a given format uses
-- [`why-aksor-khmer-bi.md`](why-aksor-khmer-bi.md) — the problem this
-  solves and what it deliberately doesn't try to be
+Working on Aksor's own code instead? [CONTRIBUTING](../CONTRIBUTING.md) sets up a Python environment and runs the
+tests without Docker.

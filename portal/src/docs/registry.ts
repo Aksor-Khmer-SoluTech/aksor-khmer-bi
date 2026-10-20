@@ -57,8 +57,8 @@ export const DOCS: DocMeta[] = [
   },
   {
     slug: "getting-started",
-    title: "Install and run",
-    description: "Set up Docker or a local dev environment, up to a first rendered report.",
+    title: "Install",
+    description: "From a fresh server to a signed-in portal: Docker for your system, the one-line install, first sign-in.",
     group: "For administrators",
   },
   {
