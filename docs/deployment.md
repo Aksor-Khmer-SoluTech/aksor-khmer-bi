@@ -444,6 +444,20 @@ command: `docker compose -p aksor-app -f docker-compose.yml -f docker-compose.cu
 
 ### Troubleshooting
 
+**When the portal shows an error.** Every failed request is shown on screen with a plain message, and under
+**Technical details** with what was called, the HTTP status, the time and a **reference** (for example
+`ef77e1109e72`). Account menu → **Recent errors** lists everything that failed in that browser tab, and **Copy all**
+puts it in one block of text to paste into a ticket. The reference is the request's id: the API sends it back in the
+`X-Request-ID` header and writes it on every log line about that request (`[req ef77e1109e72]`), so on the server
+
+```bash
+grep ef77e1109e72 data/logs/*
+```
+
+finds the full error, traceback included. (A reverse proxy that already sets `X-Request-ID` keeps its own id, so
+its log and ours line up.) "Can't reach the server" with no reference means the request never got an answer — see
+the "failed to fetch" row below.
+
 | You see | Cause and fix |
 |---|---|
 | `network aksor-network declared as external, but could not be found` | Step by step, 0.1 wasn't run: `docker network create aksor-network` |

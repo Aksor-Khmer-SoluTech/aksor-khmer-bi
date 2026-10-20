@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.9] - 2026-10-20
+
+### Fixed
+- **The guides' tables no longer split a setting's name over two lines** (`CORS_ALLOWED_ORI` / `GINS`): their first
+  column widens to fit the names in it.
+- **Deleting a template that had ever been run failed with a server error (500) on PostgreSQL**: its render history
+  and per-report access grants still pointed at it. They now go with the template. The same kind of failure is fixed
+  for an LDAP configuration with group mappings, a folder that had been shared, and a custom role with revoked
+  assignments; a role an LDAP group still maps to is refused with a message saying so, and a folder holding
+  stylesheets counts as not empty. An administrator naming an organization that doesn't exist (creating a dashboard
+  or a protected-term set, among others) now gets "Organization not found" instead of a 500. A job deleted while a
+  run of it is in progress no longer crashes the worker when that run records its result.
+- **Every failed request is shown in the portal**, never only in the browser's network tab. Confirm dialogs (Delete,
+  Revoke…) stay open and show why it failed; anything else that fails without its own message raises a notice in
+  the corner. Answers without a message of their own (a 502 from the proxy while the API restarts, the API
+  unreachable, a rejected form field) are explained in plain words instead of `Request failed (502)` or
+  `Failed to fetch`.
+- **Errors carry what a technician needs, without the browser's developer tools.** Under **Technical details** an
+  error shows the request, its HTTP status, the time, a reference and what to check next, with **Copy details**;
+  Account menu → **Recent errors** lists every failure in the tab with **Copy all**. The reference is a request id
+  the API now returns on every answer (`X-Request-ID`, or the proxy's own) and writes on every log line about that
+  request (`[req …]`), so `grep <reference> data/logs/*` finds the full error. Refused requests (4xx/5xx) are also
+  logged once each with method, path, status and time taken. See
+  [Troubleshooting](docs/deployment.md#troubleshooting).
+
 ## [1.0.0-beta.8] - 2026-10-20
 
 ### Added

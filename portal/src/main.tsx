@@ -1,6 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import RecentErrorsDialog from "./components/RecentErrorsDialog";
+import Toaster from "./components/Toaster";
+import { failureInfo, reportError } from "./notify";
 import "./styles/index.css";
 import { keepTooltipsOnScreen } from "./tooltips";
 
@@ -21,8 +24,22 @@ window.addEventListener("vite:preloadError", (event) => {
   location.reload();
 });
 
+// The net under every async handler that doesn't catch its own failure (a Delete button whose request answered
+// 500, a background reload): say what went wrong on screen instead of only in the console and network tab.
+window.addEventListener("unhandledrejection", (event) => {
+  reportError(event.reason);
+});
+// A script error nobody caught is kept for Account menu -> Recent errors (not toasted: the browser's own benign
+// ones, like a ResizeObserver loop, would be noise).
+window.addEventListener("error", (event) => {
+  if (!event.error || /ResizeObserver/.test(event.message)) return;
+  failureInfo(event.error);
+});
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
+    <Toaster />
+    <RecentErrorsDialog />
   </StrictMode>
 );

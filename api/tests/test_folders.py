@@ -94,6 +94,20 @@ def test_delete_nonempty_folder_rejected(auth_headers):
     assert resp.status_code == 409
 
 
+def test_delete_shared_folder(auth_headers):
+    """A folder's own access grants go with it; they used to make the delete fail with a 500."""
+    from app import db
+
+    folder = _create_folder(auth_headers, "Shared").json()
+    with db.SessionLocal() as session:
+        session.add(db.FolderAccessGrant(
+            subject_type="role", subject_id="ROLE_USER", folder_id=folder["id"], permission_level="view", granted_at="now",
+        ))
+        session.commit()
+    resp = client.delete(f"/api/v1/folders/{folder['id']}", headers=auth_headers)
+    assert resp.status_code == 204
+
+
 # --- inheritance + union-not-override ---------------------------------
 
 

@@ -6,6 +6,7 @@ import type { AuthInfo, Organization, User } from "../../types";
 import { has } from "../sections";
 import UserDetailPanel, { type UserTab } from "./UserDetailPanel";
 import UserFormDialog from "./UserFormDialog";
+import { reportLoadError } from "../../notify";
 
 function StatusBadges({ user }: { user: User }) {
   return (
@@ -58,7 +59,7 @@ export default function UsersPage({ auth }: { auth: AuthInfo }) {
   }, []);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

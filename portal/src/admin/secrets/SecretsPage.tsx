@@ -6,6 +6,7 @@ import { TableSkeleton } from "../../components/Skeletons";
 import type { AuthInfo, Organization, Secret, SecretSummary } from "../../types";
 import { has } from "../sections";
 import SecretDialog from "./SecretDialog";
+import { reportLoadError } from "../../notify";
 
 /** Admin > Secrets: named credentials -- a bearer token, a basic-auth password
  * -- created, rotated and revoked here instead of as an environment variable
@@ -31,7 +32,7 @@ export default function SecretsPage({ auth }: { auth: AuthInfo }) {
   const [deleteTarget, setDeleteTarget] = useState<SecretSummary | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

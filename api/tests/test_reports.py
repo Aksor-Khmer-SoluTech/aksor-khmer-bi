@@ -204,6 +204,30 @@ def test_delete_report(auth_headers):
     assert client.get(f"/api/v1/reports/{created['report_id']}").status_code == 404
 
 
+def test_delete_report_that_was_rendered_and_shared(auth_headers):
+    """A template that has been run and shared still deletes: its render
+    history and per-report grants reference it, and used to make the
+    delete fail with a 500 on databases that enforce foreign keys."""
+    from app import db
+    from app.render_log import record_render_event
+
+    created = _register_report(auth_headers).json()
+    report_id = created["report_id"]
+    record_render_event(report_id, None, "pdf", "libreoffice", "success", 12, "run", None)
+    with db.SessionLocal() as session:
+        session.add(db.ReportAccessGrant(
+            subject_type="role", subject_id="ROLE_REPORT_VIEWER", report_id=report_id,
+            permission_level="view", granted_at="2026-01-01T00:00:00+00:00",
+        ))
+        session.commit()
+
+    resp = client.delete(f"/api/v1/reports/{report_id}", headers=auth_headers)
+    assert resp.status_code == 204
+    assert client.get(f"/api/v1/reports/{report_id}").status_code == 404
+    with db.SessionLocal() as session:
+        assert session.query(db.ReportAccessGrant).filter_by(report_id=report_id).count() == 0
+
+
 def test_delete_report_not_found(auth_headers):
     resp = client.delete("/api/v1/reports/does-not-exist", headers=auth_headers)
     assert resp.status_code == 404

@@ -305,6 +305,13 @@
   border-bottom: 0;
 }
 
+/* The first column is usually what the row is about -- a setting, a field, a tag. Its code breaks only at spaces,
+   never inside a name, so the column widens to fit CORS_ALLOWED_ORIGINS instead of splitting it over two lines
+   (the table scrolls sideways if that makes it too wide). */
+.doc-table td:first-child code {
+  overflow-wrap: normal;
+}
+
 /* A picture in a guide -- the barcode and QR code samples. Always on white with dark marks, like the printed page:
    codes are only readable that way round, in either theme. Kept to a row's height inside a table. */
 .doc-specimen {

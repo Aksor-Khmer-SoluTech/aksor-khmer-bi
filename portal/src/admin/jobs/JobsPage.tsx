@@ -4,6 +4,7 @@ import { TableSkeleton } from "../../components/Skeletons";
 import type { AuthInfo, Job, Organization } from "../../types";
 import JobDetailPanel from "./JobDetailPanel";
 import JobFormDialog from "./JobFormDialog";
+import { reportLoadError } from "../../notify";
 
 function triggerSummary(job: Job): string {
   if (job.trigger_type === "cron") return job.cron_expression ?? "—";
@@ -23,7 +24,7 @@ export default function JobsPage({ auth }: { auth: AuthInfo }) {
   const [runError, setRunError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

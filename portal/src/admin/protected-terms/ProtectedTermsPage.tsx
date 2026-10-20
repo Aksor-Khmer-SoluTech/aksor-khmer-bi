@@ -6,6 +6,7 @@ import type { AuthInfo, Organization, ProtectedTermSet } from "../../types";
 import { has } from "../sections";
 import DeploymentTermsPanel from "./DeploymentTermsPanel";
 import TermSetDialog from "./TermSetDialog";
+import { reportLoadError } from "../../notify";
 
 /** Manage → Protected Terms. Khmer word-breaking never splits a "protected
  * term" (a brand name, a proper noun); this is where the organization keeps
@@ -30,7 +31,7 @@ export default function ProtectedTermsPage({ auth }: { auth: AuthInfo }) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   useEffect(() => {

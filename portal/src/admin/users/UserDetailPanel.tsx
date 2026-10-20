@@ -8,6 +8,7 @@ import type { Grant, Role, User, UserOverview } from "../../types";
 import ResetPasswordDialog from "./ResetPasswordDialog";
 import { GrantAccessDialog, type GrantKind } from "./UserGrants";
 import { OverviewStrip, PermissionMap, roleLabel, TemplatesTab, WhereTheyHaveAccess, type StripTarget } from "./UserOverview";
+import { reportLoadError } from "../../notify";
 
 export type UserTab = "profile" | "templates" | "access" | "activity";
 type Tab = UserTab;
@@ -95,7 +96,7 @@ export default function UserDetailPanel({
   }, [jump, overview, catalog, tab]);
 
   function loadOverview() {
-    api.users.overview(user.id).then(setOverview).catch(() => {});
+    api.users.overview(user.id).then(setOverview).catch(reportLoadError);
   }
 
   // The strip above the tabs needs it whichever tab is open.
@@ -103,19 +104,19 @@ export default function UserDetailPanel({
   useEffect(loadOverview, [user.id]);
 
   function loadAccess() {
-    api.grants.roles.list(user.id).then(setRoleGrants).catch(() => {});
-    api.grants.permissions.list(user.id).then(setPermGrants).catch(() => {});
-    api.roles.list(user.org_id).then(setOrgRoles).catch(() => {});
+    api.grants.roles.list(user.id).then(setRoleGrants).catch(reportLoadError);
+    api.grants.permissions.list(user.id).then(setPermGrants).catch(reportLoadError);
+    api.roles.list(user.org_id).then(setOrgRoles).catch(reportLoadError);
     if (isSuperuser) {
       api.roles
         .list()
         .then((all) => setSystemRoles(all.filter((r) => r.org_id === null)))
-        .catch(() => {});
+        .catch(reportLoadError);
     }
     api.permissions
       .list()
       .then((list) => setCatalog(list.map((p) => ({ code: p.code, description: p.description }))))
-      .catch(() => {});
+      .catch(reportLoadError);
   }
 
   useEffect(() => {

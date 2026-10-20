@@ -199,6 +199,8 @@ def delete_ldap_config(
             ensure_org_scope(context, row.org_id)
         elif not context.is_superuser:
             raise HTTPException(status_code=404, detail="LDAP config not found")
+        # Its group->role mappings mean nothing without it (and their foreign key would refuse the delete).
+        session.query(db.LdapGroupRoleMapping).filter(db.LdapGroupRoleMapping.ldap_config_id == config_id).delete()
         session.delete(row)
         session.commit()
         audit.record(

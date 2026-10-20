@@ -4,6 +4,7 @@ import { TableSkeleton } from "../../components/Skeletons";
 import type { AuthInfo, LdapConfig, Organization } from "../../types";
 import LdapConfigDetailPanel from "./LdapConfigDetailPanel";
 import LdapConfigFormDialog from "./LdapConfigFormDialog";
+import { reportLoadError } from "../../notify";
 
 export default function LdapConfigsPage({ auth }: { auth: AuthInfo }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -14,7 +15,7 @@ export default function LdapConfigsPage({ auth }: { auth: AuthInfo }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

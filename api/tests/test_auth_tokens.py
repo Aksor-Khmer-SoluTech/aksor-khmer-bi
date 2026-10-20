@@ -557,3 +557,32 @@ def test_an_unhandled_error_answers_json_with_a_reference_and_no_internals(make_
     assert "unexpected error (ref " in detail and "secret_internal_name" not in resp.text
     reference = detail.split("ref ")[1].split(")")[0]
     assert any(reference in record.getMessage() for record in caplog.records)  # the same reference is in the log
+    assert resp.headers["X-Request-ID"] == reference  # the portal shows it from the header too
+
+
+def test_every_answer_carries_a_request_id_and_failures_are_logged_with_it(auth_headers, caplog):
+    import logging
+
+    from app.logging_config import RequestIdFilter
+
+    http = TestClient(app, raise_server_exceptions=False)
+    ok = http.get("/api/v1/health")
+    assert len(ok.headers["X-Request-ID"]) == 12
+    assert http.get("/api/v1/health").headers["X-Request-ID"] != ok.headers["X-Request-ID"]
+
+    # A proxy's own id is kept, so both logs line up; anything that isn't plainly an id is replaced.
+    with caplog.at_level(logging.INFO, logger="aksor_khmer_bi.requests"):
+        missing = http.get("/api/v1/reports/does-not-exist", headers={**auth_headers, "X-Request-ID": "proxy-abc123"})
+    assert missing.status_code == 404 and missing.headers["X-Request-ID"] == "proxy-abc123"
+    assert http.get("/api/v1/health", headers={"X-Request-ID": "bad id\nwith newline"}).headers["X-Request-ID"] != "bad id\nwith newline"
+
+    record = next(r for r in caplog.records if r.name == "aksor_khmer_bi.requests")
+    assert "GET /api/v1/reports/does-not-exist -> 404" in record.getMessage()
+    # Filtered the way the log handlers are, the line names the request.
+    from app.error_middleware import current_request_id
+
+    token = current_request_id.set("proxy-abc123")
+    try:
+        assert RequestIdFilter().filter(record) and record.request_id == " [req proxy-abc123]"
+    finally:
+        current_request_id.reset(token)

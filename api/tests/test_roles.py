@@ -150,3 +150,67 @@ def test_cannot_delete_role_with_active_assignments(auth_headers, make_local_use
 
     resp = client.delete(f"/api/v1/roles/{created['id']}", headers=auth_headers)
     assert resp.status_code == 400
+
+
+def _ldap_config_with_mapping(role_id: str) -> str:
+    with db.SessionLocal() as session:
+        config = db.LdapConfig(
+            org_id=ROOT_ORG_ID, server_uri="ldap://ldap.example.test:389", bind_method="direct",
+            base_dn="dc=example,dc=test", created_at="now", updated_at="now",
+        )
+        session.add(config)
+        session.flush()
+        session.add(db.LdapGroupRoleMapping(ldap_config_id=config.id, group_dn="cn=staff,dc=example,dc=test", role_id=role_id))
+        session.commit()
+        return config.id
+
+
+def test_delete_role_with_only_revoked_assignments(auth_headers, make_local_user):
+    """Revoked assignments are kept as history; they used to make deleting the role fail with a 500."""
+    created = client.post(
+        "/api/v1/roles", json={"org_id": ROOT_ORG_ID, "name": "ROLE_ONCE_USED"}, headers=auth_headers
+    ).json()
+    user_id, _ = make_local_user("formerassignee", "pw12345", role_names=())
+    with db.SessionLocal() as session:
+        session.add(db.UserRoleAssignment(user_id=user_id, role_id=created["id"], granted_at="now", is_active=False))
+        session.commit()
+
+    resp = client.delete(f"/api/v1/roles/{created['id']}", headers=auth_headers)
+    assert resp.status_code == 204
+
+
+def test_cannot_delete_role_an_ldap_group_maps_to(auth_headers):
+    created = client.post(
+        "/api/v1/roles", json={"org_id": ROOT_ORG_ID, "name": "ROLE_LDAP_TARGET"}, headers=auth_headers
+    ).json()
+    _ldap_config_with_mapping(created["id"])
+
+    resp = client.delete(f"/api/v1/roles/{created['id']}", headers=auth_headers)
+    assert resp.status_code == 400
+    assert "LDAP group mapping" in resp.json()["detail"]
+
+
+def test_delete_ldap_config_with_group_mappings(auth_headers):
+    created = client.post(
+        "/api/v1/roles", json={"org_id": ROOT_ORG_ID, "name": "ROLE_LDAP_MAPPED"}, headers=auth_headers
+    ).json()
+    config_id = _ldap_config_with_mapping(created["id"])
+
+    resp = client.delete(f"/api/v1/ldap-configs/{config_id}", headers=auth_headers)
+    assert resp.status_code == 204
+    with db.SessionLocal() as session:
+        assert session.query(db.LdapGroupRoleMapping).filter_by(ldap_config_id=config_id).count() == 0
+
+
+def test_superuser_naming_an_unknown_organization_gets_404(auth_headers, make_local_user):
+    """Superusers skip the same-organization check, but the organization still has to exist: naming one that
+    doesn't used to reach the database's foreign key and fail with a 500."""
+    resp = client.post(
+        "/api/v1/protected-term-sets", json={"org_id": "no-such-org", "name": "Terms", "terms": ["x"], "exclude_terms": []},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404 and resp.json()["detail"] == "Organization not found"
+
+    _, admin = make_local_user("orgless-admin", "pw-admin-Passw0rd!", (SYSTEM_ADMIN_ROLE_NAME,))
+    resp = client.post("/api/v1/dashboards", json={"title": "Sales", "org_id": "no-such-org"}, headers=admin)
+    assert resp.status_code == 404 and resp.json()["detail"] == "Organization not found"

@@ -12,6 +12,7 @@ import {
 } from "../../components/AuditParts";
 import { TableSkeleton } from "../../components/Skeletons";
 import type { AuditEvent, AuthInfo, Organization } from "../../types";
+import { reportLoadError } from "../../notify";
 
 const PAGE_SIZE = 50;
 
@@ -141,7 +142,7 @@ export default function AuditLogPage({ auth }: { auth: AuthInfo }) {
   const requestSeq = useRef(0);
 
   useEffect(() => {
-    if (auth.isSuperuser) api.organizations.list().then(setOrganizations).catch(() => {});
+    if (auth.isSuperuser) api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, [auth.isSuperuser]);
 
   const query = useMemo(

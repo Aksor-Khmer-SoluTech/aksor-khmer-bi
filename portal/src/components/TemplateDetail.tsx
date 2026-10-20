@@ -36,6 +36,7 @@ import ShortcutsField from "./ShortcutsField";
 import ReportSkeleton from "./ReportSkeleton";
 import { LinesSkeleton } from "./Skeletons";
 import TemplateDownloadButtons from "./TemplateDownload";
+import { reportError, reportLoadError } from "../notify";
 
 // Lazy -- pdfjs-dist alone is well over a third of this app's entire
 // bundle (see ReportViewer.tsx), and the vast majority of sessions never
@@ -303,9 +304,9 @@ function OverviewTab({
         open={confirmOpen}
         title="Delete template?"
         body={`"${report.name}" and its render history link will be gone for good.`}
-        onConfirm={() => {
+        onConfirm={async () => {
+          await handleDelete();
           setConfirmOpen(false);
-          handleDelete();
         }}
         onCancel={() => setConfirmOpen(false)}
       />
@@ -720,9 +721,9 @@ function AccessTab({ report, onUpdated }: { report: ReportMeta; onUpdated: (r: R
   }, [report.report_id]);
 
   function load() {
-    api.grants.reports.list(report.report_id).then(setGrants).catch(() => {});
-    api.users.list(report.org_id ?? undefined).then(setUsers).catch(() => {});
-    api.roles.list(report.org_id ?? undefined).then(setRoles).catch(() => {});
+    api.grants.reports.list(report.report_id).then(setGrants).catch(reportLoadError);
+    api.users.list(report.org_id ?? undefined).then(setUsers).catch(reportLoadError);
+    api.roles.list(report.org_id ?? undefined).then(setRoles).catch(reportLoadError);
   }
 
   useEffect(load, [report.report_id]);
@@ -999,7 +1000,7 @@ export default function TemplateDetail({
     setSchema(null);
     setLoadError(null);
     api.getReport(reportId).then(setReport).catch(() => setLoadError("Template not found."));
-    api.getSchema(reportId).then(setSchema).catch(() => {});
+    api.getSchema(reportId).then(setSchema).catch(reportLoadError);
 
     if (has(auth, "report:manage")) {
       setCanManage(true);
@@ -1149,7 +1150,7 @@ export default function TemplateDetail({
             <button
               type="button"
               className="btn btn-sm btn-primary"
-              onClick={() => api.wizard.publish(report.report_id).then(setReport).catch(() => {})}
+              onClick={() => api.wizard.publish(report.report_id).then(setReport).catch((err) => reportError(err, "Publish"))}
             >
               Publish
             </button>
@@ -1189,7 +1190,7 @@ export default function TemplateDetail({
               onDeleted={onDeleted}
               onOpenHistory={() => onTabChange(tabSlug("history"))}
             />}
-          {tab === "history" && <HistoryTab report={report} changelog={changelog} error={changelogError} onReload={loadChangelog} onChanged={() => { loadChangelog(); api.getReport(reportId).then(setReport).catch(() => {}); }} />}
+          {tab === "history" && <HistoryTab report={report} changelog={changelog} error={changelogError} onReload={loadChangelog} onChanged={() => { loadChangelog(); api.getReport(reportId).then(setReport).catch(reportLoadError); }} />}
           {tab === "placeholders" && <PlaceholdersTab schema={schema} reportId={report.report_id} />}
           {tab === "parameters" && (
             <ParametersTab

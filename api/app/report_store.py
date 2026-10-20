@@ -667,6 +667,10 @@ def delete_report(report_id: str) -> None:
         session.execute(delete(db.ReportShortcut).where(db.ReportShortcut.report_id == report_id))
         # Not left to the FK's ON DELETE CASCADE: SQLite ignores foreign keys unless asked to.
         session.execute(delete(ApiClientReport).where(ApiClientReport.report_id == report_id))
+        # These reference the report without ON DELETE CASCADE, so leaving them made the delete fail
+        # (a 500) for any template that had ever been run or shared on its own.
+        session.execute(delete(db.ReportAccessGrant).where(db.ReportAccessGrant.report_id == report_id))
+        session.execute(delete(db.RenderEvent).where(db.RenderEvent.report_id == report_id))
         session.delete(row)
         session.commit()
 

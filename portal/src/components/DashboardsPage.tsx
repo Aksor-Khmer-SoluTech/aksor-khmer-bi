@@ -352,8 +352,8 @@ function DashboardView({ id, auth, navigate }: { id: string; auth: AuthInfo; nav
         body={`Delete “${dashboard.title}”? Its tiles go with it; the datasets and saved views stay.`}
         confirmLabel="Delete"
         onConfirm={async () => {
+          await api.dashboards.delete(dashboard.id);
           setConfirmDelete(false);
-          await api.dashboards.delete(dashboard.id).catch(() => {});
           navigate({ view: "dashboards" });
         }}
         onCancel={() => setConfirmDelete(false)}

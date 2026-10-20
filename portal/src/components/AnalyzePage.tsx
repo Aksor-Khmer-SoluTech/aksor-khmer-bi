@@ -8,6 +8,7 @@ import type { Route } from "../hooks";
 import type { AnalysisChart, AnalysisView, AnalyzeDataset, AnalyzeForm, AuthInfo, DateBucket, PivotLayout, PivotResult, PivotValue, ShowAsMode } from "../types";
 import { ParameterField } from "./RunReportPage";
 import { AddToDashboard, AlertMe } from "./AnalyzeActions";
+import { reportError } from "../notify";
 
 /** Analyze (api/app/analyze.py): pick a dataset, set its filters (narrowed to your access), put fields in rows and
  * columns and measures in values -- a pivot table or a chart -- then export it or keep the view. The server fetches
@@ -495,7 +496,12 @@ export default function AnalyzePage({ auth, viewId, navigate }: { auth: AuthInfo
   }
 
   async function removeView(v: AnalysisView) {
-    await api.analyze.views.delete(v.id).catch(() => {});
+    try {
+      await api.analyze.views.delete(v.id);
+    } catch (err) {
+      reportError(err, "Delete view");
+      return;
+    }
     setViews((prev) => prev.filter((x) => x.id !== v.id));
     if (current?.id === v.id) {
       setCurrent(null);

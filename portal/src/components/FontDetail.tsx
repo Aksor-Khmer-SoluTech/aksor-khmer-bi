@@ -4,6 +4,7 @@ import { api, ApiError } from "../api";
 import type { FontBlock, FontResource } from "../types";
 import ConfirmDialog from "./ConfirmDialog";
 import { Coverage } from "./FontsPanel";
+import { reportLoadError } from "../notify";
 
 const SAMPLE = "ក្រសួងសេដ្ឋកិច្ច និងហិរញ្ញវត្ថុ ០១២៣៤៥៦៧៨៩ — Hello World 0123456789";
 
@@ -38,7 +39,7 @@ export default function FontDetail({ font, canManage, onClose, onChanged }: { fo
         setLoaded("ready");
       })
       .catch(() => !cancelled && setLoaded("failed"));
-    api.fonts.coverage(font.id).then((b) => !cancelled && setBlocks(b)).catch(() => {});
+    api.fonts.coverage(font.id).then((b) => !cancelled && setBlocks(b)).catch(reportLoadError);
     return () => {
       cancelled = true;
       if (face) document.fonts.delete(face);

@@ -90,7 +90,7 @@ app = FastAPI(
         "line-breaking/justify hold up regardless of field length. Swagger "
         "UI at /docs, ReDoc at /redoc. See docs/building-a-report.md."
     ),
-    version="1.0.0-beta.8",
+    version="1.0.0-beta.9",
     lifespan=_lifespan,
 )
 
@@ -115,8 +115,9 @@ if _cors_origins:
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Aksor-Client", "X-Aksor-Browser"],
         # Not readable cross-origin unless exposed: the portal reads the
-        # download's file name and how many files a split report has.
-        expose_headers=["Content-Disposition", "X-Report-Parts", "X-Report-Part", "X-Report-Name", "X-Report-Ext"],
+        # download's file name and how many files a split report has, and a
+        # failed request's id (error_middleware.py) to show under its details.
+        expose_headers=["Content-Disposition", "X-Report-Parts", "X-Report-Part", "X-Report-Name", "X-Report-Ext", "X-Request-ID"],
     )
 
 app.include_router(example_lookups.router)

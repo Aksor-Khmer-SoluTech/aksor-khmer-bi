@@ -6,6 +6,7 @@ import type { ApiClient, ApiClientWithSecret, AuthInfo, Organization, ReportMeta
 import ClientFormDialog from "./ClientFormDialog";
 import ClientReportsPanel from "./ClientReportsPanel";
 import ClientSecretDialog from "./ClientSecretDialog";
+import { reportLoadError } from "../../notify";
 
 export default function ClientsPage({ auth }: { auth: AuthInfo }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -22,8 +23,8 @@ export default function ClientsPage({ auth }: { auth: AuthInfo }) {
   const [revealed, setRevealed] = useState<{ result: ApiClientWithSecret; heading: string } | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
-    api.listReports().then(setReports).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
+    api.listReports().then(setReports).catch(reportLoadError);
   }, []);
 
   function load() {

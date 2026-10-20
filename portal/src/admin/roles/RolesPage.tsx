@@ -8,6 +8,7 @@ import { roleHint } from "../users/UserGrants";
 import { roleLabel } from "../users/UserOverview";
 import PermissionMatrix from "./PermissionMatrix";
 import RoleFormDialog from "./RoleFormDialog";
+import { reportLoadError } from "../../notify";
 
 /** The open role lives in the address (#/admin/roles?role=<id>) -- linkable, and kept on reload. */
 function roleInHash(): string | null {
@@ -51,7 +52,7 @@ export default function RolesPage({ auth }: { auth: AuthInfo }) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

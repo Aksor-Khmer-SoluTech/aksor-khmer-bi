@@ -8,6 +8,7 @@ import { downloadBlob } from "../../download";
 import type { AuthInfo, JdbcDriver, JdbcEngine, Organization } from "../../types";
 import { has } from "../sections";
 import DriverUploadDialog from "./DriverUploadDialog";
+import { reportLoadError } from "../../notify";
 
 const formatSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
@@ -30,7 +31,7 @@ export default function DriversPage({ auth }: { auth: AuthInfo }) {
 
   useEffect(() => {
     api.jdbc.engines().then(setEngines).catch(() => setError("Couldn't load the database engines"));
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

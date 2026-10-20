@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import type { LdapBindMethod, LdapConfig, LdapGroupMapping, LdapTestResult, Role } from "../../types";
+import { reportLoadError } from "../../notify";
 
 type Tab = "settings" | "groups" | "test";
 
@@ -44,11 +45,11 @@ export default function LdapConfigDetailPanel({
   const [testResult, setTestResult] = useState<LdapTestResult | null>(null);
 
   function loadGroups() {
-    api.ldap.groupMappings.list(config.id).then(setMappings).catch(() => {});
+    api.ldap.groupMappings.list(config.id).then(setMappings).catch(reportLoadError);
     api.roles
       .list(config.org_id ?? undefined)
       .then((all) => setRoles(all.filter((r) => r.org_id === config.org_id)))
-      .catch(() => {});
+      .catch(reportLoadError);
   }
 
   useEffect(() => {

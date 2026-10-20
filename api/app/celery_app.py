@@ -21,6 +21,8 @@ import logging
 from datetime import datetime, timezone
 
 from celery import Celery
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from . import db
 from .db import Job, JobRun
@@ -49,13 +51,32 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _job_exists(job_id: str) -> bool:
+    with db.SessionLocal() as session:
+        return session.get(Job, job_id) is not None
+
+
 @celery_app.task(bind=True, name="run_job")
 def run_job(self, job_id: str, run_id: str) -> str:
     """Load `job_id`/`run_id`, execute via app/job_executors.execute,
     update the JobRun row at each transition. Retries (with the job's
     own max_retries/retry_backoff_seconds) only for RetryableJobError;
     anything else fails the run immediately, no retry.
+
+    A job deleted while it runs takes its runs and deliveries with it, so what the run then writes (a delivery row,
+    its final status) has nothing to point at: the database refuses it. That ends the run quietly instead of as a
+    worker crash and pointless retries.
     """
+    try:
+        return _run_job(self, job_id, run_id)
+    except (IntegrityError, StaleDataError, ObjectDeletedError):
+        if _job_exists(job_id):
+            raise
+        _log.info("run_job: job_id=%r was deleted while run %r was in progress; stopped", job_id, run_id)
+        return "job deleted while running"
+
+
+def _run_job(self, job_id: str, run_id: str) -> str:
     with db.SessionLocal() as session:
         job = session.get(Job, job_id)
         run = session.get(JobRun, run_id)

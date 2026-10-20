@@ -156,8 +156,20 @@ def delete_role(role_id: str, request: Request, context: AuthContext = Depends(r
                 detail=f"Role is still assigned to {len(active_assignments)} user(s) -- revoke those grants first",
             )
 
+        mapped = session.execute(
+            select(db.LdapGroupRoleMapping.id).where(db.LdapGroupRoleMapping.role_id == role_id)
+        ).scalars().all()
+        if mapped:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Role is the target of {len(mapped)} LDAP group mapping(s) -- remove those mappings first",
+            )
+
         permissions = _role_permissions(session, role_id)
         session.execute(db.RolePermission.__table__.delete().where(db.RolePermission.role_id == role_id))
+        # Revoked or expired assignments are history of a role that no longer exists; left in place their
+        # foreign key made the delete fail with a 500.
+        session.execute(db.UserRoleAssignment.__table__.delete().where(db.UserRoleAssignment.role_id == role_id))
         session.delete(row)
         session.commit()
         audit.record(

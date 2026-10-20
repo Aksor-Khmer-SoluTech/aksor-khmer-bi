@@ -546,7 +546,8 @@ export interface RenderErrorInfo {
 }
 
 export interface ApiErrorBody {
-  detail?: string;
+  /** A message, or -- for a request FastAPI rejected before it reached the route -- a list of validation problems. */
+  detail?: string | { loc?: (string | number)[]; msg?: string }[];
   render_error?: RenderErrorInfo;
 }
 

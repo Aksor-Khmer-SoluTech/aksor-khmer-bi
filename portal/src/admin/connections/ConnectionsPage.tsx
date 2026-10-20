@@ -8,6 +8,7 @@ import DbEngineIcon from "../../components/DbEngineIcon";
 import ConnectionDialog from "./ConnectionDialog";
 import JdbcConnectionDialog from "./JdbcConnectionDialog";
 import MailServerDialog from "./MailServerDialog";
+import { reportLoadError } from "../../notify";
 
 const AUTH_LABEL: Record<ConnectionSummary["auth_type"], string> = { none: "None", bearer: "Bearer token", basic: "Basic" };
 const CREDENTIAL_LABEL: Record<ConnectionSummary["credential"], (c: ConnectionSummary) => string | null> = {
@@ -29,7 +30,7 @@ export default function ConnectionsPage({ auth }: { auth: AuthInfo }) {
   const [deleteTarget, setDeleteTarget] = useState<ConnectionSummary | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

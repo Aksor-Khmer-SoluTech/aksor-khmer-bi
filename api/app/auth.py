@@ -343,9 +343,16 @@ def ensure_org_scope(context: AuthContext, org_id: str) -> None:
     tell "exists in another org" apart from "doesn't exist at all") if a
     non-superuser context's own org doesn't match `org_id`. Superusers
     (break-glass, or a database user holding the cross-org
-    ROLE_ADMINISTRATOR) are exempt -- that's the point of that role.
+    ROLE_ADMINISTRATOR) are exempt -- that's the point of that role --
+    but the organization must still exist: a superuser naming one that
+    doesn't would otherwise reach the database's foreign key and fail
+    with a 500 instead of this 404.
     """
     if context.is_superuser:
+        if org_id is not None:
+            with db.SessionLocal() as session:
+                if session.get(db.Organization, org_id) is None:
+                    raise HTTPException(status_code=404, detail="Organization not found")
         return
     if context.org_id != org_id:
         raise HTTPException(status_code=404, detail="Not found")

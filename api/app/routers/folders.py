@@ -197,12 +197,17 @@ def delete_folder(
         has_subfolder = session.execute(select(db.Folder.id).where(db.Folder.parent_folder_id == folder_id).limit(1)).scalar_one_or_none()
         has_report = session.execute(select(db.ReportRow.report_id).where(db.ReportRow.folder_id == folder_id).limit(1)).scalar_one_or_none()
         has_image = session.execute(select(db.ImageResource.id).where(db.ImageResource.folder_id == folder_id).limit(1)).scalar_one_or_none()
-        if has_subfolder or has_report or has_image:
+        has_stylesheet = session.execute(
+            select(db.StylesheetResource.id).where(db.StylesheetResource.folder_id == folder_id).limit(1)
+        ).scalar_one_or_none()
+        if has_subfolder or has_report or has_image or has_stylesheet:
             raise HTTPException(status_code=409, detail="Folder is not empty -- move or delete its contents first")
 
         # Shortcuts are only links -- the reports they point at stay where they are -- so they don't hold a
         # folder open; they go with it.
         session.execute(sa_delete(db.ReportShortcut).where(db.ReportShortcut.folder_id == folder_id))
+        # Its access grants share nothing once it's gone (and would otherwise refuse the delete with a 500).
+        session.execute(sa_delete(db.FolderAccessGrant).where(db.FolderAccessGrant.folder_id == folder_id))
         session.delete(row)
         session.commit()
         audit.record(

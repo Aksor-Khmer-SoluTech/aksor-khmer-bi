@@ -586,3 +586,187 @@ dialog.modal::backdrop {
   background: color-mix(in srgb, var(--meter-warning) 18%, transparent);
 }
 
+
+/* ---- toasts (components/Toaster.tsx) --------------------------------
+   A popover, so the UA gives it inset:0 / margin:auto / a border; all
+   reset here. Without popover support it is a plain fixed element. */
+.toaster {
+  position: fixed;
+  inset: auto 16px 16px auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(400px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toaster:popover-open,
+.toaster:not([popover]) {
+  display: flex;
+}
+.toaster[popover]:not(:popover-open) {
+  display: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  animation: toast-in 160ms ease-out;
+}
+.toast-error {
+  border-left-color: var(--danger);
+}
+.toast-success {
+  border-left-color: var(--success);
+}
+.toast-info {
+  border-left-color: var(--info);
+}
+.toast-body {
+  flex: 1;
+  min-width: 0;
+}
+.toast-title {
+  display: block;
+  font-size: 0.88rem;
+}
+.toast-error .toast-title {
+  color: var(--danger-strong);
+}
+.toast-message {
+  margin: 3px 0 0;
+  font-size: 0.83rem;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.toast-close {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.toast-close:hover {
+  color: var(--text);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+/* An error inside a confirm dialog (components/ConfirmDialog.tsx). */
+.dialog-error {
+  margin: 12px 0 0;
+}
+
+/* "Technical details" under an error (components/ErrorDetails.tsx). */
+.error-details {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.error-details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-dim);
+  user-select: none;
+}
+.error-details > summary:hover {
+  color: var(--text);
+}
+.error-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 8px 0;
+}
+.error-details dt {
+  color: var(--text-faint);
+}
+.error-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.error-details code {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+.toast .error-details {
+  max-height: 50vh;
+  overflow: auto;
+}
+.error-details-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Account menu -> Recent errors (components/RecentErrorsDialog.tsx). */
+dialog.recent-errors {
+  width: min(720px, calc(100vw - 32px));
+}
+.recent-errors-list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  max-height: 55vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.recent-errors-list > li {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.recent-errors-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+.recent-errors-status {
+  font-weight: 600;
+  color: var(--highlight-strong);
+}
+.recent-errors-status.is-server {
+  color: var(--danger-strong);
+}
+.recent-errors-request {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.recent-errors-message {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+}

@@ -354,3 +354,25 @@ def test_schedule_preview_stops_at_the_end_date_and_rejects_nonsense(auth_header
     assert 1 <= len(body["next_runs"]) <= 2
     bad = client.post("/api/v1/jobs/schedule-preview", json={"cron_expression": "every day"}, headers=auth_headers)
     assert bad.status_code == 400 and "Invalid cron_expression" in bad.json()["detail"]
+
+
+
+@pytest.mark.parametrize("writes_a_delivery", [True, False])
+def test_a_job_deleted_while_it_runs_ends_the_run_quietly(auth_headers, monkeypatch, writes_a_delivery):
+    """Deleting a job removes its runs and deliveries; the worker still running it then writes rows that point at
+    nothing (a delivery: foreign key; the run's final status: a row that's gone). That used to crash the task; it
+    now stops quietly."""
+    from app import celery_app as worker
+    from app import job_delivery
+
+    job = _create_job(auth_headers)
+    run_id = client.post(f"/api/v1/jobs/{job['id']}/run", headers=auth_headers).json()["id"]
+
+    def execute_while_the_job_is_deleted(job_row, run_id_):
+        assert client.delete(f"/api/v1/jobs/{job['id']}", headers=auth_headers).status_code == 204
+        if writes_a_delivery:
+            job_delivery._record(job_id=job["id"], run_id=run_id_, status="sent")
+        return "done"
+
+    monkeypatch.setattr(worker, "execute", execute_while_the_job_is_deleted)
+    assert worker.run_job.apply(args=[job["id"], run_id]).get() == "job deleted while running"

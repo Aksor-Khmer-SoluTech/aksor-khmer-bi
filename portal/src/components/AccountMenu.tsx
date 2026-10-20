@@ -3,6 +3,8 @@ import { api, ApiError } from "../api";
 import type { AuthInfo, User } from "../types";
 import UserAvatar from "./UserAvatar";
 import { startTour } from "./GuidedTour";
+import { openRecentErrors } from "./RecentErrorsDialog";
+import { subscribeFailures } from "../errorLog";
 import UserSettingsModal, { type SettingsTab } from "./UserSettingsModal";
 
 /** Dropdown for the signed-in account — "Profile", "Preferences" and "Settings" all
@@ -38,6 +40,8 @@ export default function AccountMenu({ auth }: { auth: AuthInfo }) {
   // back to the break-glass copy in UserSettingsModal's sidebar.
   const [profileError, setProfileError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [failureCount, setFailureCount] = useState(0);
+  useEffect(() => subscribeFailures((list) => setFailureCount(list.length)), []);
 
   function loadProfile() {
     setProfileError(null);
@@ -156,6 +160,17 @@ export default function AccountMenu({ auth }: { auth: AuthInfo }) {
             }}
           >
             Show me around
+          </button>
+
+          <button
+            type="button"
+            className="account-item"
+            onClick={() => {
+              setOpen(false);
+              openRecentErrors();
+            }}
+          >
+            Recent errors{failureCount > 0 ? ` (${failureCount})` : ""}
           </button>
 
           <div className="account-divider" />

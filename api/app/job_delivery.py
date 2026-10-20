@@ -203,6 +203,8 @@ def _record(**fields) -> db.JobDelivery:
 def _update(delivery_id: str, **fields) -> None:
     with db.SessionLocal() as session:
         row = session.get(db.JobDelivery, delivery_id)
+        if row is None:  # its job was deleted meanwhile, history and all
+            return
         for key, value in fields.items():
             setattr(row, key, value)
         session.commit()

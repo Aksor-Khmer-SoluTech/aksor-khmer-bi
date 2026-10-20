@@ -27,7 +27,21 @@ _VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 _DEFAULT_LOG_DIR = "logs"
 _DEFAULT_MAX_BYTES = 25 * 1024 * 1024  # 25MB
 
-_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+# `request_id` is " [req <id>]" while a request is being handled, else empty -- see RequestIdFilter.
+_FORMAT = "%(asctime)s %(levelname)-8s %(name)s%(request_id)s: %(message)s"
+
+
+class RequestIdFilter(logging.Filter):
+    """Tags each record with the id of the API request it was written during (error_middleware.py), so the
+    reference a user reads out of the portal finds every line about their request. The scheduler and worker have
+    no requests: their lines carry nothing extra."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from .error_middleware import current_request_id
+
+        rid = current_request_id.get()
+        record.request_id = f" [req {rid}]" if rid else ""
+        return True
 
 
 class DailySizeRotatingFileHandler(logging.Handler):
@@ -122,11 +136,13 @@ def configure_logging(service: str = "app") -> None:
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(RequestIdFilter())
 
     log_dir = os.environ.get("LOG_DIR", _DEFAULT_LOG_DIR)
     max_bytes = int(os.environ.get("LOG_MAX_BYTES", _DEFAULT_MAX_BYTES))
     file_handler = DailySizeRotatingFileHandler(log_dir, prefix=service, max_bytes=max_bytes)
     file_handler.setFormatter(formatter)
+    file_handler.addFilter(RequestIdFilter())
 
     logging.basicConfig(level=level, handlers=[console_handler, file_handler])
 

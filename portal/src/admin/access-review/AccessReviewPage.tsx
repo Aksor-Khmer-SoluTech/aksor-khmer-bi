@@ -3,6 +3,7 @@ import { api, ApiError } from "../../api";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { TableSkeleton } from "../../components/Skeletons";
 import type { AccessReviewGrant, AuthInfo, Organization } from "../../types";
+import { reportLoadError } from "../../notify";
 
 type TypeFilter = "all" | "report" | "folder" | "dataset";
 
@@ -27,7 +28,7 @@ export default function AccessReviewPage({ auth }: { auth: AuthInfo }) {
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.organizations.list().then(setOrganizations).catch(() => {});
+    api.organizations.list().then(setOrganizations).catch(reportLoadError);
   }, []);
 
   function load() {

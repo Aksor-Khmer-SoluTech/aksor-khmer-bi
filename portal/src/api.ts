@@ -106,6 +106,7 @@ import type {
   UserSession,
 } from "./types";
 import { FORMATS_BY_EXT } from "./types";
+import { recordFailure, type FailureInfo } from "./errorLog";
 
 declare global {
   interface Window {
@@ -114,15 +115,82 @@ declare global {
 }
 
 const API = (window.PORTAL_API_BASE_URL || "") + "/api/v1";
+
+/** What a status means in plain words, for an answer that carries no message of its own (a proxy's HTML error
+ * page, an empty body). Keeps a failed request readable without opening the browser's network tab. */
+export function statusMessage(status: number): string {
+  if (status === 0) return "Can't reach the server. Check your connection, or the server may be restarting — try again in a moment.";
+  if (status === 400) return "The request wasn't accepted — check the values and try again.";
+  if (status === 401) return "Your session has ended. Sign in again.";
+  if (status === 403) return "You don't have permission to do this.";
+  if (status === 404) return "It no longer exists — it may have been deleted or moved. Reload the page.";
+  if (status === 408) return "The server took too long to answer. Try again.";
+  if (status === 409) return "It conflicts with something that already exists or was changed meanwhile. Reload and try again.";
+  if (status === 413) return "The file or request is too large for the server to accept.";
+  if (status === 415) return "That file type isn't supported here.";
+  if (status === 422) return "Some of the values aren't valid.";
+  if (status === 429) return "Too many requests. Wait a moment and try again.";
+  if (status === 502 || status === 503 || status === 504)
+    return "The server isn't responding right now (it may be restarting or overloaded). Try again in a minute; if it persists, contact your administrator.";
+  if (status >= 500) return "The server hit an unexpected error. Try again; if it keeps happening, contact your administrator.";
+  return "The request failed.";
+}
+
+/** The message for a failed request: the API's own `detail` when it sent one -- a string, or FastAPI's list of
+ * validation problems -- else `fallback` plus what the status means. */
+export function errorDetail(status: number, body: ApiErrorBody | null | undefined, fallback = "Request failed"): string {
+  const detail = body?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail
+      .map((d) => {
+        const field = (d.loc ?? []).filter((part) => part !== "body" && part !== "query" && part !== "path").join(".");
+        return field ? `${field}: ${d.msg ?? "invalid"}` : (d.msg ?? "invalid value");
+      })
+      .join("; ");
+  }
+  return `${fallback} (HTTP ${status}): ${statusMessage(status)}`;
+}
+
 export class ApiError extends Error {
   status: number;
   /** Present when a report failed to render -- see RenderErrorInfo. */
   renderError?: RenderErrorInfo;
-  constructor(status: number, message: string, renderError?: RenderErrorInfo) {
+  /** What a technician needs (request, status, request id, time) -- see errorLog.ts. Absent for an error the portal
+   * made up itself (a form check). */
+  info?: FailureInfo;
+  constructor(status: number, message: string, renderError?: RenderErrorInfo, info?: FailureInfo) {
     super(message);
     this.status = status;
     this.renderError = renderError;
+    this.info = info;
   }
+}
+
+// The method and path each apiFetch() answer was for, so the error built from it later can say what was called.
+const requestOf = new WeakMap<Response, { method: string; path: string }>();
+
+function apiPath(url: string): string {
+  try {
+    const u = new URL(url, location.href);
+    return u.pathname + u.search;
+  } catch {
+    return url;
+  }
+}
+
+/** The ApiError for a failed answer, with its technical details recorded (errorLog.ts). */
+function failure(resp: Response, message: string, renderError?: RenderErrorInfo): ApiError {
+  const sent = requestOf.get(resp);
+  const info = recordFailure({
+    kind: "http",
+    method: sent?.method ?? "?",
+    path: sent?.path ?? apiPath(resp.url),
+    status: resp.status,
+    requestId: resp.headers.get("X-Request-ID"),
+    message,
+  });
+  return new ApiError(resp.status, message, renderError, info);
 }
 
 let unauthorizedHandler: (() => void) | null = null;
@@ -226,7 +294,23 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
   const send = () => {
     const headers = new Headers(options.headers || {});
     if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-    return fetch(API + path, { ...options, headers });
+    // No answer at all (offline, DNS, the API container down, CORS) surfaces as a bare "TypeError: Failed to
+    // fetch"; make it an ApiError with a sentence a person can act on. Aborts stay as they are.
+    const method = (options.method || "GET").toUpperCase();
+    return fetch(API + path, { ...options, headers }).then(
+      (resp) => {
+        requestOf.set(resp, { method, path: apiPath(resp.url || API + path) });
+        return resp;
+      },
+      (err: unknown) => {
+        if (err instanceof TypeError) {
+          const message = statusMessage(0);
+          const info = recordFailure({ kind: "network", method, path: apiPath(API + path), status: 0, requestId: null, message });
+          throw new ApiError(0, message, undefined, info);
+        }
+        throw err;
+      }
+    );
   };
   let resp = await send();
   if (resp.status === 401) {
@@ -252,7 +336,7 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
 async function asJson<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
     const body: ApiErrorBody = await resp.json().catch(() => ({}));
-    throw new ApiError(resp.status, body.detail || `Request failed (${resp.status})`);
+    throw failure(resp, errorDetail(resp.status, body, "Request failed"));
   }
   return resp.json() as Promise<T>;
 }
@@ -307,7 +391,7 @@ async function requestEmbedRun(
   });
   if (!resp.ok) {
     const body: ApiErrorBody = await resp.json().catch(() => ({}));
-    throw new ApiError(resp.status, typeof body.detail === "string" ? body.detail : `Run failed (${resp.status})`);
+    throw failure(resp, errorDetail(resp.status, body, "Run failed"));
   }
   return renderResult(resp, fallbackName, format);
 }
@@ -352,7 +436,7 @@ async function del(path: string, fallbackMessage: string, ignoreStatuses: number
   const resp = await apiFetch(path, { method: "DELETE" });
   if (!resp.ok && !ignoreStatuses.includes(resp.status)) {
     const body: ApiErrorBody = await resp.json().catch(() => ({}));
-    throw new ApiError(resp.status, body.detail || `${fallbackMessage} (${resp.status})`);
+    throw failure(resp, errorDetail(resp.status, body, fallbackMessage));
   }
 }
 
@@ -435,9 +519,9 @@ export const api = {
     }
     if (!resp.ok) {
       const body: ApiErrorBody = await resp.json().catch(() => ({}));
-      if (typeof body.detail === "string") return new ApiError(resp.status, body.detail);
-      return new ApiError(
-        resp.status,
+      if (typeof body.detail === "string") return failure(resp, body.detail);
+      return failure(
+        resp,
         resp.status >= 500
           ? `The server had a problem (HTTP ${resp.status}). Try again, and if it keeps happening tell whoever runs it — its log has the details.`
           : `Sign-in failed (HTTP ${resp.status}).`
@@ -472,7 +556,7 @@ export const api = {
     });
     if (!resp.ok) {
       const body: ApiErrorBody = await resp.json().catch(() => ({}));
-      throw new ApiError(resp.status, typeof body.detail === "string" ? body.detail : `Setup failed (HTTP ${resp.status}).`);
+      throw failure(resp, errorDetail(resp.status, body, "Setup failed"));
     }
     return adopt(await resp.json());
   },
@@ -571,7 +655,7 @@ export const api = {
     });
     if (!resp.ok) {
       const body: ApiErrorBody = await resp.json().catch(() => ({}));
-      throw new ApiError(resp.status, typeof body.detail === "string" ? body.detail : `Run failed (${resp.status})`, body.render_error);
+      throw failure(resp, errorDetail(resp.status, body, "Run failed"), body.render_error);
     }
     return renderResult(resp, fallbackName, format);
   },
@@ -725,7 +809,7 @@ export const api = {
     const resp = await apiFetch(`/reports/${id}/file${qs({ version: version !== undefined ? String(version) : undefined })}`);
     if (!resp.ok) {
       const body: ApiErrorBody = await resp.json().catch(() => ({}));
-      throw new ApiError(resp.status, body.detail || `Download failed (${resp.status})`);
+      throw failure(resp, errorDetail(resp.status, body, "Download failed"));
     }
     return { blob: await resp.blob(), filename: filenameFromDisposition(resp, `${id}-v${version ?? "current"}`) };
   },
@@ -754,7 +838,7 @@ export const api = {
     });
     if (!resp.ok) {
       const body: ApiErrorBody = await resp.json().catch(() => ({}));
-      throw new ApiError(resp.status, body.detail || `Render failed (${resp.status})`, body.render_error);
+      throw failure(resp, errorDetail(resp.status, body, "Render failed"), body.render_error);
     }
     return renderResult(resp, fallbackName, format);
   },
@@ -776,7 +860,7 @@ export const api = {
     });
     if (!resp.ok) {
       const body: ApiErrorBody = await resp.json().catch(() => ({}));
-      throw new ApiError(resp.status, body.detail || `Batch render failed (${resp.status})`);
+      throw failure(resp, errorDetail(resp.status, body, "Batch render failed"));
     }
     const blob = await resp.blob();
     return { blob, filename: filenameFromDisposition(resp, `${id}-batch.zip`) };
@@ -805,7 +889,7 @@ export const api = {
       const resp = await apiFetch("/analyze/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!resp.ok) {
         const err: ApiErrorBody = await resp.json().catch(() => ({}));
-        throw new ApiError(resp.status, err.detail || `Export failed (${resp.status})`);
+        throw failure(resp, errorDetail(resp.status, err, "Export failed"));
       }
       return { blob: await resp.blob(), filename: filenameFromDisposition(resp, `${body.dataset}-analysis.${body.format}`) };
     },
@@ -948,7 +1032,7 @@ export const api = {
       const resp = await apiFetch(`/users/me/avatar`);
       if (!resp.ok) {
         const body: ApiErrorBody = await resp.json().catch(() => ({}));
-        throw new ApiError(resp.status, body.detail || `Couldn't load avatar (${resp.status})`);
+        throw failure(resp, errorDetail(resp.status, body, "Couldn't load avatar"));
       }
       return resp.blob();
     },
@@ -1128,7 +1212,7 @@ export const api = {
         const resp = await apiFetch(`/jdbc/drivers/${id}/download`);
         if (!resp.ok) {
           const body: ApiErrorBody = await resp.json().catch(() => ({}));
-          throw new ApiError(resp.status, body.detail || `Download failed (${resp.status})`);
+          throw failure(resp, errorDetail(resp.status, body, "Download failed"));
         }
         return { blob: await resp.blob(), filename: filenameFromDisposition(resp, "driver.jar") };
       },
@@ -1539,7 +1623,7 @@ export const api = {
       const resp = await apiFetch(`/projects/${id}/export`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!resp.ok) {
         const err: ApiErrorBody = await resp.json().catch(() => ({}));
-        throw new ApiError(resp.status, err.detail || `Export failed (${resp.status})`);
+        throw failure(resp, errorDetail(resp.status, err, "Export failed"));
       }
       return { blob: await resp.blob(), filename: filenameFromDisposition(resp, "project.aksor-project.zip") };
     },
@@ -1583,7 +1667,7 @@ export const api = {
       const resp = await apiFetch(`/fonts/${id}/file`);
       if (!resp.ok) {
         const body: ApiErrorBody = await resp.json().catch(() => ({}));
-        throw new ApiError(resp.status, body.detail || `Couldn't load the font (${resp.status})`);
+        throw failure(resp, errorDetail(resp.status, body, "Couldn't load the font"));
       }
       return resp.blob();
     },
@@ -1626,7 +1710,7 @@ export const api = {
       const resp = await apiFetch(`/images/${id}/file`);
       if (!resp.ok) {
         const body: ApiErrorBody = await resp.json().catch(() => ({}));
-        throw new ApiError(resp.status, body.detail || `Couldn't load image (${resp.status})`);
+        throw failure(resp, errorDetail(resp.status, body, "Couldn't load image"));
       }
       return resp.blob();
     },
@@ -1635,7 +1719,7 @@ export const api = {
       const resp = await apiFetch(`/images/${id}/thumbnail?size=${size}`);
       if (!resp.ok) {
         const body: ApiErrorBody = await resp.json().catch(() => ({}));
-        throw new ApiError(resp.status, body.detail || `Couldn't load the preview (${resp.status})`);
+        throw failure(resp, errorDetail(resp.status, body, "Couldn't load the preview"));
       }
       return resp.blob();
     },
@@ -1660,13 +1744,13 @@ export const api = {
     /** What was uploaded: the SCSS / Sass / Less source, or the CSS itself. */
     async source(id: string): Promise<string> {
       const resp = await apiFetch(`/stylesheets/${id}/source`);
-      if (!resp.ok) throw new ApiError(resp.status, `Couldn't load it (${resp.status})`);
+      if (!resp.ok) throw failure(resp, errorDetail(resp.status, await resp.json().catch(() => null), "Couldn't load it"));
       return resp.text();
     },
     /** The compiled CSS a template gets. */
     async css(id: string): Promise<string> {
       const resp = await apiFetch(`/stylesheets/${id}/file`);
-      if (!resp.ok) throw new ApiError(resp.status, `Couldn't load it (${resp.status})`);
+      if (!resp.ok) throw failure(resp, errorDetail(resp.status, await resp.json().catch(() => null), "Couldn't load it"));
       return resp.text();
     },
     update(id: string, body: { name?: string; folder_id?: string | null }): Promise<StylesheetResource> {
