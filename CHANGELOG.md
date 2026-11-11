@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [1.0.0-beta.10] - 2026-11-11
 
+### Added
+- **Embedding without a secret in the browser: embed tickets.** The host's server calls
+  `POST /api/v1/reports/{id}/embed-ticket` with its API client's id and secret (and the `presets` it wants forced,
+  such as the signed-in user's name) and hands the browser only a short-lived ticket (15 minutes by default, 30 at
+  most). A ticket is bound to one report and one client; disabling the client or removing its grant ends every ticket
+  at once. `embed-run`, `embed-form` and the frame's `render` message accept a ticket wherever they accepted client
+  credentials. See [Building a report](docs/building-a-report.md).
+- **Form mode for the embed frame** (`#/embed/<report>?form=1&theme=light|dark`): the frame draws the report's own
+  filter form beside the viewer, so the host builds no filter UI. Parameters a ticket presets are shown locked or
+  hidden, and the frame posts `submitted` when someone runs the report. A new `embed-form` route serves the form.
+
 ### Changed
 - **Deleting a template asks you to type its name first**, like GitHub's danger zone: the Delete button in the
   confirmation stays off until the name is typed exactly (Enter then deletes).
