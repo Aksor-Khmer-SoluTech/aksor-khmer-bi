@@ -87,6 +87,15 @@ def authenticate(client_id: str, secret: str) -> ClientIdentity | None:
         return ClientIdentity(pk=row.id, client_id=row.client_id, org_id=row.org_id, name=row.name)
 
 
+def identity_by_pk(pk: str) -> ClientIdentity | None:
+    """The client with this primary key, if it exists and is still active (a ticket names its client this way)."""
+    with db.SessionLocal() as session:
+        row = session.get(db.ApiClient, pk)
+        if row is None or not row.is_active:
+            return None
+        return ClientIdentity(pk=row.id, client_id=row.client_id, org_id=row.org_id, name=row.name)
+
+
 def may_run(identity: ClientIdentity, report: dict) -> bool:
     """Whether the client holds a grant for this report, and the report is in the client's organization."""
     if (report.get("org_id") or ROOT_ORG_ID) != identity.org_id:

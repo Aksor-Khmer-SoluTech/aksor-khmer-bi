@@ -505,6 +505,20 @@ export interface RunForm {
   has_data_source: boolean;
 }
 
+/** POST /reports/{id}/embed-form: the filter form an embed frame shows. A `locked` parameter was preset by the host. */
+export interface EmbedFormParameter extends RunFormParameter {
+  locked: boolean;
+}
+
+export interface EmbedForm {
+  report_id: string;
+  name: string;
+  description: string | null;
+  template_ext: TemplateExt;
+  formats: RenderFormat[];
+  parameters: EmbedFormParameter[];
+}
+
 export interface ReportSchema {
   fields: string[];
   engine: "docxtpl" | "regex-scan" | "jinja2-ast";

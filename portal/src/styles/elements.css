@@ -507,6 +507,19 @@ dialog.modal::backdrop {
   margin-top: 6px;
 }
 
+/* ConfirmDialog's "type the name to confirm" field. The name can be Khmer and long, so it wraps; overflow-wrap keeps a
+   long unspaced name inside the dialog. */
+.confirm-type-label {
+  font-size: 0.88rem;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.confirm-type-label strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* ---- badges (admin status variants) -------------------------------------- */
 
 .badge-active {

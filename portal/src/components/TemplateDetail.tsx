@@ -304,6 +304,8 @@ function OverviewTab({
         open={confirmOpen}
         title="Delete template?"
         body={`"${report.name}" and its render history link will be gone for good.`}
+        confirmText={report.name}
+        confirmLabel="Delete this template"
         onConfirm={async () => {
           await handleDelete();
           setConfirmOpen(false);

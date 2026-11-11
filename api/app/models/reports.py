@@ -281,18 +281,72 @@ class RunRequest(BaseModel):
 
 class EmbedRunRequest(RunRequest):
     """POST /reports/{id}/embed-run -- what an embedded viewer posts: the report's
-    parameter values (the same ones /run takes) plus what authorizes them: an
+    parameter values (the same ones /run takes) plus what authorizes them: either an
+    embed `ticket` (app/embed_tickets.py, issued to the host's server) or an
     API client's `client_id` + `client_secret` (app/clients.py), which must have
     been granted this report. Otherwise the request is refused."""
 
     client_id: str | None = Field(None, min_length=1, max_length=64)
     client_secret: str | None = Field(None, min_length=1, max_length=256)
+    ticket: str | None = Field(None, min_length=1, max_length=2048)
 
     @model_validator(mode="after")
-    def _both_or_neither(self) -> "EmbedRunRequest":
+    def _one_way_in(self) -> "EmbedRunRequest":
         if (self.client_id is None) != (self.client_secret is None):
             raise ValueError("client_id and client_secret go together")
+        if self.ticket is not None and self.client_id is not None:
+            raise ValueError("send a ticket or client credentials, not both")
         return self
+
+
+class EmbedTicketRequest(BaseModel):
+    """POST /reports/{id}/embed-ticket -- called by the host's *server* with the API client's credentials."""
+
+    client_id: str = Field(..., min_length=1, max_length=64)
+    client_secret: str = Field(..., min_length=1, max_length=256)
+    presets: dict[str, str] = Field(
+        default_factory=dict,
+        description="Parameter values the frame cannot change (for example the signer's name); they win over anything it submits",
+    )
+    subject: str | None = Field(None, max_length=128, description="Who the ticket is for, recorded in the run log")
+    ttl_seconds: int | None = Field(None, ge=30, le=1800)
+
+
+class EmbedTicket(BaseModel):
+    ticket: str
+    expires_in: int
+
+
+class EmbedFormRequest(BaseModel):
+    """POST /reports/{id}/embed-form -- same ways in as embed-run."""
+
+    client_id: str | None = Field(None, min_length=1, max_length=64)
+    client_secret: str | None = Field(None, min_length=1, max_length=256)
+    ticket: str | None = Field(None, min_length=1, max_length=2048)
+
+    @model_validator(mode="after")
+    def _one_way_in(self) -> "EmbedFormRequest":
+        if (self.client_id is None) != (self.client_secret is None):
+            raise ValueError("client_id and client_secret go together")
+        if self.ticket is not None and self.client_id is not None:
+            raise ValueError("send a ticket or client credentials, not both")
+        return self
+
+
+class EmbedFormParameter(RunFormParameter):
+    locked: bool = Field(False, description="Preset by the host: the form must not show or send it")
+
+
+class EmbedForm(BaseModel):
+    """What the embed frame renders as its filter form. Options are unrestricted (an embed has no per-user
+    limits); a preset parameter is listed as `locked` with no default or options."""
+
+    report_id: str
+    name: str
+    description: str | None = None
+    template_ext: str
+    formats: list[str]
+    parameters: list[EmbedFormParameter]
 
 
 class BatchLimits(BaseModel):

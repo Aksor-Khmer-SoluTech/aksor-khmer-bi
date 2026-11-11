@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+## [1.0.0-beta.10] - 2026-11-11
+
+### Changed
+- **Deleting a template asks you to type its name first**, like GitHub's danger zone: the Delete button in the
+  confirmation stays off until the name is typed exactly (Enter then deletes).
+
 ## [1.0.0-beta.9] - 2026-10-20
 
 ### Fixed

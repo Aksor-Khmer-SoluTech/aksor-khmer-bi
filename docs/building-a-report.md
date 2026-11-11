@@ -858,6 +858,22 @@ parameter-validated runs), instant revocation and per-client accounting; keep ea
 list minimal. A server-side embedder keeps the secret fully private.
 Design and security notes: `specs/api_clients_design.md` (a local design note, not in the repo).
 
+### Embedding without a secret in the browser: tickets and form mode
+
+A browser app should not hold an API client's secret. Instead the host's **server** (which keeps the secret) calls
+`POST /api/v1/reports/{id}/embed-ticket` with `{client_id, client_secret, presets, subject, ttl_seconds}` -- after it
+has decided the signed-in user may run the report -- and hands the browser only the returned `ticket` (default 15 minutes, at most 30). A ticket is
+bound to one report and one client; `presets` (for example a signer's name) are forced onto every run made with it
+and win over anything the frame submits. Disabling the client or removing its grant for the report ends its tickets at once.
+
+The frame accepts a ticket wherever it accepts client credentials (`embed-run`, `embed-form`, and the `render` message's `ticket`).
+
+**Form mode** -- `#/embed/<report>?form=1&theme=light|dark` -- makes the frame draw the report's own filter form (the
+template's parameters, with their defaults and option lists) beside the viewer, so the host builds no filter UI. After the
+frame posts `ready`, the host answers `{source: "aksor-report-viewer", type: "init", ticket}`. A parameter the ticket presets
+is not shown (`locked`). The frame also posts `submitted {parameters}` when someone runs the report, plus the usual
+`rendered` / `error`. Add or change a filter by editing the template's parameters; the host needs no release.
+
 ### Getting a template back out, and what changed
 
 The file you upload is kept, not just used. On a template's **Overview** tab,

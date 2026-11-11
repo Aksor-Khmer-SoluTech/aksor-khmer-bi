@@ -19,7 +19,7 @@ from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app import clients, db, report_data, report_store
+from app import clients, db, embed_tickets, report_data, report_store
 from app.routers.reports import _report_headers
 from app.main import app
 
@@ -150,7 +150,7 @@ def test_defaults_to_pdf_and_honours_part(report, erp, granted):
 def test_a_run_without_client_credentials_is_refused(report, erp):
     resp = embed_run("sales", {"parameters": PARAMS})
     assert resp.status_code == 401
-    assert resp.json()["detail"] == "This report can only be run with API client credentials"
+    assert resp.json()["detail"] == "This report can only be run with a ticket or API client credentials"
     assert erp.calls == []
     assert _denials() == []  # anyone can send these: logged, not written to the security feed
 
@@ -410,3 +410,113 @@ def test_a_parameter_the_embed_leaves_out_takes_its_default(report, erp, auth_he
     blank = {**params, "p_signed": ""}
     resp = embed_run("sales", {"parameters": blank, "format": "docx", **creds(secret)})
     assert _text(resp.content) == "Sales 2026-08-01 to 2026-08-31: 1200 at Phnom Penh, signed "
+
+
+# --- embed tickets: the browser gets a ticket, never the client's secret -----------------------
+
+
+def _docx_bytes() -> bytes:
+    buf = BytesIO()
+    doc = Document()
+    doc.add_paragraph("Other")
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def embed_ticket(ref, body):
+    return client.post(f"/api/v1/reports/{ref}/embed-ticket", json=body)
+
+
+def embed_form(ref, body):
+    return client.post(f"/api/v1/reports/{ref}/embed-form", json=body)
+
+
+def _ticket(granted, presets=None, **extra) -> str:
+    resp = embed_ticket("sales", {**granted, "presets": presets or {}, "subject": "sok.sophea", **extra})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["ticket"]
+
+
+def test_a_ticket_runs_the_report_without_client_credentials(report, erp, granted):
+    ticket = _ticket(granted, {"p_signed": "Sok Sophea"})
+    params = {"p_from": PARAMS["p_from"], "p_to": PARAMS["p_to"]}
+    resp = embed_run("sales", {"parameters": params, "format": "docx", "ticket": ticket})
+    assert resp.status_code == 200, resp.text
+    assert _text(resp.content).endswith("signed Sok Sophea")
+
+
+def test_ticket_presets_win_over_what_the_frame_submits(report, erp, granted):
+    ticket = _ticket(granted, {"p_signed": "Sok Sophea"})
+    resp = embed_run("sales", {"parameters": {**PARAMS, "p_signed": "Someone Else"}, "format": "docx", "ticket": ticket})
+    assert resp.status_code == 200
+    assert _text(resp.content).endswith("signed Sok Sophea")
+
+
+def test_a_ticket_is_for_one_report_only(report, erp, granted, auth_headers):
+    ticket = _ticket(granted)
+    other = client.post(
+        "/api/v1/reports",
+        files={"file": ("o.docx", _docx_bytes(), "application/octet-stream")},
+        data={"name": "Other", "code": "other"},
+        headers=auth_headers,
+    )
+    assert other.status_code == 200, other.text
+    resp = embed_run("other", {"parameters": {}, "ticket": ticket})
+    assert resp.status_code == 401
+    assert erp.calls == []
+
+
+def test_a_forged_or_garbled_ticket_is_refused(report, erp, granted):
+    ticket = _ticket(granted)
+    for bad in (ticket[:-3] + "abc", "x.y.z", "nonsense"):
+        assert embed_run("sales", {"parameters": PARAMS, "ticket": bad}).status_code == 401
+    assert erp.calls == []
+
+
+def test_an_expired_ticket_is_refused(report, erp, granted, monkeypatch):
+    ticket = _ticket(granted, ttl_seconds=30)
+    real = embed_tickets.time.time
+    monkeypatch.setattr(embed_tickets.time, "time", lambda: real() + 3600)
+    assert embed_run("sales", {"parameters": PARAMS, "ticket": ticket}).status_code == 401
+
+
+def test_disabling_the_client_ends_its_tickets(report, erp, granted, auth_headers):
+    ticket = _ticket(granted)
+    with db.SessionLocal() as session:
+        for row in session.scalars(select(db.ApiClient)):
+            row.is_active = False
+        session.commit()
+    assert embed_run("sales", {"parameters": PARAMS, "ticket": ticket}).status_code == 401
+    assert erp.calls == []
+
+
+def test_a_ticket_cannot_be_issued_with_wrong_credentials_or_unknown_presets(report, erp, granted):
+    assert embed_ticket("sales", {**granted, "client_secret": "nope"}).status_code == 401
+    resp = embed_ticket("sales", {**granted, "presets": {"p_missing": "x"}})
+    assert resp.status_code == 400 and "p_missing" in resp.json()["detail"]
+
+
+def test_an_access_token_is_not_a_ticket(report, erp, auth_headers):
+    token = auth_headers["Authorization"].split(" ", 1)[1]
+    assert embed_run("sales", {"parameters": PARAMS, "ticket": token}).status_code == 401
+
+
+def test_sending_both_a_ticket_and_credentials_is_a_422(report, erp, granted):
+    ticket = _ticket(granted)
+    assert embed_run("sales", {"parameters": PARAMS, "ticket": ticket, **granted}).status_code == 422
+
+
+def test_the_embed_form_lists_the_filters_and_locks_the_presets(report, erp, granted):
+    ticket = _ticket(granted, {"p_signed": "Sok Sophea"})
+    resp = embed_form("sales", {"ticket": ticket})
+    assert resp.status_code == 200, resp.text
+    form = {p["name"]: p for p in resp.json()["parameters"]}
+    assert list(form) == ["p_from", "p_to", "p_signed"]
+    assert form["p_from"]["type"] == "date" and form["p_from"]["locked"] is False
+    assert form["p_signed"]["locked"] is True and form["p_signed"]["default_value"] is None
+    assert "Sok Sophea" not in resp.text
+    assert erp.calls == []  # a form needs no data
+
+
+def test_the_embed_form_needs_a_ticket_or_credentials(report, erp):
+    assert embed_form("sales", {}).status_code == 401

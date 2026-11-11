@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { api, ApiError, type EmbedAuth } from "../api";
 import type { ReportMeta, TemplateExt } from "../types";
+import EmbedFormPage from "./EmbedFormPage";
 import ReportSkeleton from "./ReportSkeleton";
 
 const ReportViewer = lazy(() => import("./ReportViewer"));
@@ -31,6 +32,9 @@ interface ParametersMessage {
   source: typeof SOURCE;
   type: "render";
   parameters: Record<string, string>;
+  /** Either a ticket the host's server obtained (preferred -- no secret in the page) ... */
+  ticket?: string;
+  /** ... or an API client's credentials. */
   clientId?: string;
   clientSecret?: string;
 }
@@ -48,7 +52,8 @@ function isInboundMessage(data: unknown): data is InboundMessage {
       isPlainObject(data.parameters) &&
       Object.values(data.parameters).every((v) => typeof v === "string") &&
       (data.clientId === undefined) === (data.clientSecret === undefined) &&
-      (data.clientId === undefined || (typeof data.clientId === "string" && typeof data.clientSecret === "string"))
+      (data.clientId === undefined || (typeof data.clientId === "string" && typeof data.clientSecret === "string")) &&
+      (data.ticket === undefined || (typeof data.ticket === "string" && data.clientId === undefined))
     );
   }
   return isPlainObject(data.context);
@@ -106,6 +111,12 @@ function postToParent(message: Record<string, unknown>) {
  * real rather than a blank frame.
  */
 export default function EmbedPage({ reportId }: { reportId: string }) {
+  // `?form=1` (inside the hash): the frame draws the filter form itself -- see EmbedFormPage.tsx.
+  const formMode = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("form") === "1";
+  return formMode ? <EmbedFormPage reportId={reportId} /> : <ParameterEmbed reportId={reportId} />;
+}
+
+function ParameterEmbed({ reportId }: { reportId: string }) {
   const [report, setReport] = useState<ReportMeta | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [contextData, setContextData] = useState<Record<string, unknown> | null>(null);
@@ -199,7 +210,9 @@ export default function EmbedPage({ reportId }: { reportId: string }) {
       setLoadError(null);
       const message = event.data;
       if ("parameters" in message) {
-        const auth: EmbedAuth = { clientId: message.clientId, clientSecret: message.clientSecret };
+        const auth: EmbedAuth = message.ticket
+          ? { ticket: message.ticket }
+          : { clientId: message.clientId, clientSecret: message.clientSecret };
         setParamRun((previous) => ({ parameters: message.parameters, auth, id: (previous?.id ?? 0) + 1 }));
       } else {
         setParamRun(null);

@@ -10,6 +10,7 @@ export default function ConfirmDialog({
   title,
   body,
   confirmLabel = "Delete",
+  confirmText,
   onConfirm,
   onCancel,
 }: {
@@ -17,6 +18,9 @@ export default function ConfirmDialog({
   title: string;
   body: string;
   confirmLabel?: string;
+  /** When set, the confirm button stays disabled until this exact text is typed (GitHub-style), for deletes that
+   * can't be undone. */
+  confirmText?: string;
   /** May return a promise: the dialog then waits on it, and if it rejects shows the reason here and stays open,
    * so a failed delete is never silent. */
   onConfirm: () => void | Promise<unknown>;
@@ -25,15 +29,19 @@ export default function ConfirmDialog({
   const ref = useDialogRef(open);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; info: FailureInfo } | null>(null);
+  const [typed, setTyped] = useState("");
+  const matches = !confirmText || typed === confirmText;
 
   useEffect(() => {
     if (open) {
       setError(null);
       setBusy(false);
+      setTyped("");
     }
   }, [open]);
 
   async function confirm() {
+    if (!matches) return;
     setError(null);
     const result = onConfirm();
     if (!result || typeof (result as Promise<unknown>).then !== "function") return;
@@ -54,6 +62,30 @@ export default function ConfirmDialog({
       <p className="muted" style={{ fontSize: "0.88rem" }}>
         {body}
       </p>
+      {confirmText && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void confirm();
+          }}
+        >
+          <label className="confirm-type">
+            <span className="confirm-type-label">
+              To confirm, type <strong>{confirmText}</strong> below:
+            </span>
+            <input
+              type="text"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              autoFocus
+              aria-label={`Type ${confirmText} to confirm`}
+            />
+          </label>
+        </form>
+      )}
       {error && (
         <div className="alert alert-error dialog-error" role="alert">
           {error.message}
@@ -64,7 +96,7 @@ export default function ConfirmDialog({
         <button type="button" className="btn" onClick={onCancel}>
           Cancel
         </button>
-        <button type="button" className="btn btn-danger" onClick={confirm} disabled={busy}>
+        <button type="button" className="btn btn-danger" onClick={confirm} disabled={busy || !matches}>
           {busy ? "Working…" : confirmLabel}
         </button>
       </div>

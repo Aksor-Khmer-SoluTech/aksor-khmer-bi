@@ -93,6 +93,7 @@ import type {
   ReportSchema,
   ResourceBinding,
   Role,
+  EmbedForm,
   RunForm,
   Secret,
   SecretSummary,
@@ -365,10 +366,17 @@ async function renderResult(resp: Response, fallbackName: string, format: Render
 
 const embedRunsInFlight = new Map<string, Promise<RenderResult>>();
 
-/** What authorizes an embedded run: an API client's id + secret (an admin granted it this report). */
+/** What authorizes an embedded run: a `ticket` the host's server obtained (the browser never holds a secret),
+ * or an API client's id + secret (an admin granted it this report). */
 export interface EmbedAuth {
+  ticket?: string;
   clientId?: string;
   clientSecret?: string;
+}
+
+function embedAuthBody(auth: EmbedAuth): Record<string, string> {
+  if (auth.ticket) return { ticket: auth.ticket };
+  return auth.clientId && auth.clientSecret ? { client_id: auth.clientId, client_secret: auth.clientSecret } : {};
 }
 
 async function requestEmbedRun(
@@ -384,7 +392,7 @@ async function requestEmbedRun(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       parameters,
-      ...(auth.clientId && auth.clientSecret ? { client_id: auth.clientId, client_secret: auth.clientSecret } : {}),
+      ...embedAuthBody(auth),
       format,
       ...(part ? { part } : {}),
     }),
@@ -658,6 +666,20 @@ export const api = {
       throw failure(resp, errorDetail(resp.status, body, "Run failed"), body.render_error);
     }
     return renderResult(resp, fallbackName, format);
+  },
+
+  /** The filter form an embed frame shows (anonymous like the run: a ticket or client credentials, no console login). */
+  async embedForm(ref: string, auth: EmbedAuth): Promise<EmbedForm> {
+    const resp = await fetch(`${API}/reports/${ref}/embed-form`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(embedAuthBody(auth)),
+    });
+    if (!resp.ok) {
+      const body: ApiErrorBody = await resp.json().catch(() => ({}));
+      throw failure(resp, errorDetail(resp.status, body, "Couldn't open this report"));
+    }
+    return resp.json();
   },
 
   /** Run a report for an embedded viewer: just the parameter values, plus what
